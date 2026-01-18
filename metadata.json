@@ -1,0 +1,5 @@
+{
+  "name": "SmokeSignal Analytics",
+  "description": "A Notion-style CRM dashboard for e-commerce, visualizing customer sentiment, full chat history, and customer value metrics.",
+  "requestFramePermissions": []
+}

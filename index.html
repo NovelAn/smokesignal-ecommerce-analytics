@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmokeSignal Analytics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              notion: {
+                bg: '#FFFFFF',
+                sidebar: '#F7F7F5',
+                border: '#E9E9E7',
+                text: '#37352F',
+                muted: '#9B9A97',
+                hover: '#F0F0EF',
+                // Pastel tags
+                gray_bg: '#F1F1EF',
+                brown_bg: '#F4EEEE',
+                orange_bg: '#FAEBDD',
+                yellow_bg: '#FBF3DB',
+                green_bg: '#EDF3EC',
+                blue_bg: '#E7F3F8',
+                purple_bg: '#F6F3F9',
+                pink_bg: '#FAF1F5',
+                red_bg: '#FDEBEC',
+              }
+            },
+            fontFamily: {
+              sans: ['"Segoe UI"', 'Helvetica', 'Arial', 'sans-serif'],
+              serif: ['"Lyon-Text"', 'Georgia', 'serif'],
+              mono: ['"SF Mono"', 'Monaco', 'Consolas', 'monospace'],
+            },
+            boxShadow: {
+              'card': '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+            }
+          },
+        },
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "recharts": "https://esm.sh/recharts@^3.6.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-notion-bg text-notion-text antialiased overflow-hidden">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
