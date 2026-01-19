@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from backend.analytics import BuyerAnalyzer
 from backend.ai import ZhipuClient
 from backend.database import BuyerQueries
+from backend.utils import parse_datetime, format_last_active
 
 router = APIRouter()
 analyzer = BuyerAnalyzer()
@@ -84,10 +85,8 @@ async def get_buyer_orders(user_nick: str, limit: int = 50) -> List[Dict[str, An
 async def get_buyer_chats(user_nick: str, limit: int = 100) -> List[Dict[str, Any]]:
     """Get buyer chat messages"""
     try:
-        chats = analyzer.db.execute_query(
-            BuyerQueries.get_chat_messages(user_nick, limit),
-            (user_nick,)
-        )
+        query, params = BuyerQueries.get_chat_messages(user_nick, limit)
+        chats = analyzer.db.execute_query(query, params)
         return chats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -107,7 +106,8 @@ async def get_dashboard_metrics() -> Dict[str, Any]:
 async def get_daily_stats(days: int = 30) -> List[Dict[str, Any]]:
     """Get daily statistics for dashboard"""
     try:
-        stats = analyzer.db.execute_query(BuyerQueries.get_daily_stats(days))
+        query, params = BuyerQueries.get_daily_stats(days)
+        stats = analyzer.db.execute_query(query, params)
         return stats
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -140,7 +140,7 @@ async def get_actionable_customers() -> List[Dict[str, Any]]:
                     "id": str(len(actionable_list) + 1),
                     "user_nick": user_nick,
                     "issue_type": issue_type,
-                    "last_active": _format_last_active(last_purchase, last_chat),
+                    "last_active": format_last_active(last_purchase, last_chat),
                     "priority": priority,
                     "status": "Pending",
                     "action_suggestion": action
@@ -187,11 +187,11 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
 
     # Get actual chat messages
     try:
-        chat_messages = analyzer.db.execute_query(
-            BuyerQueries.get_chat_messages(user_nick, 20),
-            (user_nick,)
-        )
-    except:
+        query, params = BuyerQueries.get_chat_messages(user_nick, 20)
+        chat_messages = analyzer.db.execute_query(query, params)
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to fetch chat messages: {e}")
         chat_messages = []
 
     # Call AI
@@ -246,6 +246,13 @@ def _determine_actionable_type(
     Returns: (issue_type, priority, action_suggestion)
     """
     from datetime import datetime
+    from dataclasses import dataclass
+
+    @dataclass
+    class ActionType:
+        issue_type: str | None
+        priority: str | None
+        action: str | None
 
     # Ensure total_ltv is a number
     if total_ltv is None:
@@ -253,68 +260,23 @@ def _determine_actionable_type(
 
     now = datetime.now()
 
-    # Convert string to datetime if needed
-    if isinstance(last_purchase, str):
-        try:
-            last_purchase = datetime.fromisoformat(last_purchase.replace('T', ' ').replace('Z', ''))
-        except:
-            last_purchase = None
+    # Use utility function for parsing
+    last_purchase_parsed = parse_datetime(last_purchase)
+    last_chat_parsed = parse_datetime(last_chat)
 
-    if isinstance(last_chat, str):
-        try:
-            last_chat = datetime.fromisoformat(last_chat.replace('T', ' ').replace('Z', ''))
-        except:
-            last_chat = None
-
-    days_since_purchase = (now - last_purchase).days if last_purchase else 9999
-    days_since_chat = (now - last_chat).days if last_chat else 9999
+    days_since_purchase = (now - last_purchase_parsed).days if last_purchase_parsed else 9999
+    days_since_chat = (now - last_chat_parsed).days if last_chat_parsed else 9999
 
     # Churn risk
     if days_since_purchase > 730 and days_since_chat > 180:
-        return ("Churn Risk", "High", "发送复购优惠重新激活")
+        return ActionType("Churn Risk", "High", "发送复购优惠重新激活")
 
     # High value but inactive
     if total_ltv >= 50000 and days_since_chat > 30:
-        return ("High Value", "Medium", "VIP专属服务跟进")
+        return ActionType("High Value", "Medium", "VIP专属服务跟进")
 
     # Recent activity but no purchase
     if days_since_chat <= 7 and days_since_purchase > 90:
-        return ("Gift Inquiry", "Low", "推荐合适产品")
+        return ActionType("Gift Inquiry", "Low", "推荐合适产品")
 
-    return None, None, None
-
-
-def _format_last_active(last_purchase: Any, last_chat: Any) -> str:
-    """Format last active time for display"""
-    from datetime import datetime
-
-    now = datetime.now()
-
-    # Convert string to datetime if needed
-    if isinstance(last_chat, str):
-        try:
-            last_chat = datetime.fromisoformat(last_chat.replace('T', ' ').replace('Z', ''))
-        except:
-            last_chat = None
-
-    if isinstance(last_purchase, str):
-        try:
-            last_purchase = datetime.fromisoformat(last_purchase.replace('T', ' ').replace('Z', ''))
-        except:
-            last_purchase = None
-
-    if last_chat:
-        days = (now - last_chat).days
-        if days == 0:
-            return "Today"
-        elif days == 1:
-            return "Yesterday"
-        elif days < 30:
-            return f"{days} Days ago"
-        else:
-            return last_chat.strftime("%Y-%m-%d")
-
-    if last_purchase:
-        return last_purchase.strftime("%Y-%m-%d")
-
-    return "Unknown"
+    return ActionType(None, None, None)

@@ -52,14 +52,14 @@ class BuyerAnalyzer:
                 return cached
 
         # Query database
-        query = BuyerQueries.get_all_buyers(start_date, end_date, search, limit, offset)
-        results = self.db.execute_query(query)
+        query, params = BuyerQueries.get_all_buyers(start_date, end_date, search, limit, offset)
+        results = self.db.execute_query(query, params)
 
         # Get total count for pagination (only for first page)
         total = None
         if offset == 0:
-            count_query = BuyerQueries.get_buyers_count(start_date, end_date, search)
-            count_result = self.db.execute_query(count_query)
+            count_query, count_params = BuyerQueries.get_buyers_count(start_date, end_date, search)
+            count_result = self.db.execute_query(count_query, count_params)
             total = count_result[0]["total"] if count_result else 0
 
         result = {
@@ -128,8 +128,10 @@ class BuyerAnalyzer:
 
     def _fetch_rolling_metrics(self, user_nick: str) -> Optional[Dict[str, Any]]:
         """Fetch 24-month rolling metrics"""
-        query = BuyerQueries.get_buyer_rolling_metrics(24) + " HAVING user_nick = %s"
-        results = self.db.execute_query(query, (user_nick,))
+        query, params = BuyerQueries.get_buyer_rolling_metrics(24)
+        query += " HAVING user_nick = %s"
+        params += (user_nick,)
+        results = self.db.execute_query(query, params)
         return results[0] if results else None
 
     def _fetch_l6m_metrics(self, user_nick: str) -> Optional[Dict[str, Any]]:
@@ -157,10 +159,8 @@ class BuyerAnalyzer:
 
     def _fetch_order_history(self, user_nick: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Fetch order history"""
-        return self.db.execute_query(
-            BuyerQueries.get_buyer_order_history(user_nick, limit),
-            (user_nick,)
-        )
+        query, params = BuyerQueries.get_buyer_order_history(user_nick, limit)
+        return self.db.execute_query(query, params)
 
     def _calculate_all_tags(
         self,
