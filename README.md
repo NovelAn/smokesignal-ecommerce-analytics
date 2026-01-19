@@ -31,6 +31,25 @@ A Notion-style CRM dashboard for e-commerce customer service analytics. Visualiz
 - **Zhipu AI** for customer analysis
 - **Playwright** integration for data crawling
 
+## 📚 Documentation
+
+**📖 完整文档中心**: [`docs/README.md`](./docs/README.md)
+
+### 核心文档
+- [目标买家功能总结](./docs/用户文档/目标买家功能总结.md) - ⭐ 最新功能：40-120x性能提升
+- [数据模型设计](./docs/架构设计/数据模型设计.md) - 买家标签体系和CRM模型
+- [部署指南](./docs/部署运维/目标买家部署指南.md) - MySQL表创建和自动化更新
+- [API集成状态](./docs/项目记录/API集成状态.md) - 当前开发进度和状态
+
+### 快速链接
+| 文档 | 描述 |
+|------|------|
+| [项目结构](./docs/架构设计/项目结构说明.md) | 代码组织和模块划分 |
+| [性能优化](./docs/部署运维/性能优化指南.md) | 数据库查询优化策略 |
+| [字段参考](./docs/field-reference/客户月度标签字段.md) | client_monthly_tag字段说明 |
+
+---
+
 ## Quick Start
 
 ### Prerequisites

@@ -1,3 +1,12 @@
+---
+category: 工具说明
+title: Claude使用指南
+tags: ['Claude', 'AI', '工具']
+description: 如何在SmokeSignal项目中有效使用Claude AI助手
+priority: low
+last_updated: 2026-01-19
+---
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.

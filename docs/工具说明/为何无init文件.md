@@ -1,3 +1,12 @@
+---
+category: 工具说明
+title: 为何无init文件
+tags: ['技术决策', 'Python', '模块']
+description: 解释为何项目不使用__init__.py文件的技术决策
+priority: low
+last_updated: 2026-01-19
+---
+
 # 为什么测试目录不需要 `__init__.py` 文件？
 
 ## 简短回答

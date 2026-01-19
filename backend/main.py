@@ -12,8 +12,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
-from backend.api import router
-from backend.api.target_routes import router as target_router
+from backend.api import target_router
 
 # Create FastAPI app
 app = FastAPI(
@@ -32,8 +31,7 @@ app.add_middleware(
 )
 
 # Include API routes
-app.include_router(router, prefix="/api")
-app.include_router(target_router)  # v2 routes with /api/v2 prefix
+app.include_router(target_router)  # v2.0 routes with /api/v2 prefix
 
 
 @app.get("/")
