@@ -337,18 +337,88 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
     注意: 这个操作会比较慢(3-10秒),因为需要调用智谱AI
     """
     try:
-        # TODO: 实现AI分析逻辑
-        # 目前返回空的分析结果
-        profile["ai_analysis"] = {
-            "summary": "AI分析功能待实现",
-            "key_interests": [],
-            "pain_points": [],
-            "recommended_action": ""
-        }
+        user_nick = profile.get("user_nick")
+
+        # 1. 获取聊天记录(最近20条)
+        from backend.database import Database
+        from backend.config import settings
+        from backend.database import BuyerQueries
+
+        db_name = settings.db_name_to_use if settings.db_name_to_use else None
+        db = Database(db_name=db_name)
+
+        # 获取聊天记录
+        query, params = BuyerQueries.get_chat_messages(user_nick, limit=20)
+        chats = db.execute_query(query, params)
+
+        # 2. 准备订单摘要（提供深度分析所需的完整上下文）
+        historical_ltv = float(profile.get('historical_net_sales', profile.get('historical_ltv', 0)))
+        l6m_spend = float(profile.get('l6m_spend', 0))
+        total_orders = int(profile.get('total_orders', 0))
+        l6m_orders = int(profile.get('l6m_orders', 0))
+        avg_order_value = historical_ltv / total_orders if total_orders > 0 else 0
+        refund_rate = float(profile.get('refund_rate', 0)) * 100
+
+        # 客户类型判断
+        is_new_customer = profile.get('client_monthly_tag') == 'new'
+
+        # 消费行为分析
+        l6m_ratio = (l6m_spend / historical_ltv * 100) if historical_ltv > 0 else 0
+
+        order_summary = f"""
+【基本信息】
+客户昵称：{user_nick}
+城市：{profile.get('city', 'Unknown')}
+客户类型：{'新客户' if is_new_customer else '老客户'}
+VIP等级：{profile.get('vip_level', 'N/A')}
+
+【消费行为深度分析】
+历史总消费：¥{historical_ltv:.2f}元
+历史订单数：{total_orders}单
+平均客单价：¥{avg_order_value:.2f}元
+
+近6个月消费：¥{l6m_spend:.2f}元（占历史总消费{l6m_ratio:.1f}%）
+近6个月订单：{l6m_orders}单
+
+首购日期：{profile.get('first_purchase_date', 'N/A')}
+末购日期：{profile.get('last_purchase_date', 'N/A')}
+
+【品质与风险指标】
+平均退款率：{refund_rate:.1f}%
+折扣敏感度：{profile.get('discount_sensitivity', 'N/A')}
+流失风险等级：{profile.get('churn_risk', 'N/A')}
+
+【产品偏好】
+Top1类别：{profile.get('top_category', 'N/A')}
+Top2类别：{profile.get('second_category', 'N/A')}
+Top3类别：{profile.get('third_category', 'N/A')}
+
+【互动行为】
+聊天频率：每{profile.get('chat_frequency_days', 0)}天一次
+最近聊天：{profile.get('last_chat_date', 'N/A')}
+"""
+
+        # 3. 调用Zhipu AI分析
+        ai_analysis = ai_client.analyze_buyer_persona(
+            user_nick=user_nick,
+            profile_data=profile,
+            recent_chats=chats,
+            order_summary=order_summary
+        )
+
+        # 4. 添加AI分析结果到profile
+        profile["ai_analysis"] = ai_analysis
         return profile
+
     except Exception as e:
+        import logging
+        logging.error(f"AI分析失败 for user {user_nick}: {e}", exc_info=True)
         # AI分析失败不影响基本信息返回
         profile["ai_analysis"] = {
+            "summary": f"AI分析暂时不可用: {str(e)[:100]}",
+            "key_interests": [],
+            "pain_points": [],
+            "recommended_action": "建议根据买家历史购买情况制定个性化跟进方案",
             "error": str(e)
         }
         return profile
