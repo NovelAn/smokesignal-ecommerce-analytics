@@ -2,7 +2,7 @@
 SQL queries for buyer analytics
 """
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import Tuple,  List, Dict, Any, Optional
 
 
 class BuyerQueries:
@@ -34,11 +34,13 @@ class BuyerQueries:
         """
 
     @staticmethod
-    def get_buyer_rolling_metrics(months: int = 24) -> str:
+    def get_buyer_rolling_metrics(months: int = 24) -> Tuple[str, tuple]:
         """
         Get rolling window metrics (default: 24 months for VIP calculation)
+
+        Returns: (query, params) tuple for safe parameterized execution
         """
-        return f"""
+        query = """
         SELECT
             买家昵称 as user_nick,
             COUNT(DISTINCT 订单号) as rolling_orders,
@@ -46,9 +48,10 @@ class BuyerQueries:
             MIN(最后付款时间) as rolling_first_purchase,
             MAX(最后付款时间) as rolling_last_purchase
         FROM dunhill_t01_trade_line
-        WHERE 最后付款时间 >= DATE_SUB(NOW(), INTERVAL {months} MONTH)
+        WHERE 最后付款时间 >= DATE_SUB(NOW(), INTERVAL %s MONTH)
         GROUP BY 买家昵称
         """
+        return query, (months,)
 
     @staticmethod
     def get_buyer_l6m_metrics() -> str:
@@ -85,11 +88,13 @@ class BuyerQueries:
         """
 
     @staticmethod
-    def get_buyer_order_history(user_nick: str, limit: int = 50) -> str:
+    def get_buyer_order_history(user_nick: str, limit: int = 50) -> Tuple[str, tuple]:
         """
         Get detailed order history for a specific buyer
+
+        Returns: (query, params) tuple for safe parameterized execution
         """
-        return f"""
+        query = """
         SELECT
             订单号 as order_id,
             子订单号 as sub_order_id,
@@ -105,8 +110,9 @@ class BuyerQueries:
         FROM dunhill_t01_trade_line
         WHERE 买家昵称 = %s
         ORDER BY 最后付款时间 DESC
-        LIMIT {limit}
+        LIMIT %s
         """
+        return query, (user_nick, limit)
 
     @staticmethod
     def get_chat_summary_metrics() -> str:
@@ -142,11 +148,13 @@ class BuyerQueries:
         """
 
     @staticmethod
-    def get_chat_messages(user_nick: str, limit: int = 100) -> str:
+    def get_chat_messages(user_nick: str, limit: int = 100) -> Tuple[str, tuple]:
         """
         Get chat messages for a specific buyer
+
+        Returns: (query, params) tuple for safe parameterized execution
         """
-        return f"""
+        query = """
         SELECT
             id,
             user_nick,
@@ -157,8 +165,9 @@ class BuyerQueries:
         FROM chat_history
         WHERE user_nick = %s
         ORDER BY msg_time DESC
-        LIMIT {limit}
+        LIMIT %s
         """
+        return query, (user_nick, limit)
 
     @staticmethod
     def get_all_buyers(
@@ -167,7 +176,7 @@ class BuyerQueries:
         search: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
-    ) -> str:
+    ) -> Tuple[str, tuple]:
         """
         Get list of unique buyers from summary table (optimized)
         Uses buyer_summary table instead of complex view for better performance
@@ -178,75 +187,97 @@ class BuyerQueries:
             search: Search by nickname (partial match)
             limit: Max results
             offset: Pagination offset
+
+        Returns: (query, params) tuple for safe parameterized execution
         """
         where_clauses = []
+        params = []
 
         if start_date:
-            where_clauses.append(f"last_order_date >= '{start_date}'")
+            where_clauses.append("last_order_date >= %s")
+            params.append(start_date)
 
         if end_date:
-            where_clauses.append(f"last_order_date <= '{end_date}'")
+            where_clauses.append("last_order_date <= %s")
+            params.append(end_date)
 
         if search:
-            where_clauses.append(f"buyer_nick LIKE '%{search}%'")
+            where_clauses.append("buyer_nick LIKE %s")
+            params.append(f"%{search}%")
+
+        # Add pagination params at the end
+        params.extend([limit, offset])
 
         where_sql = ""
         if where_clauses:
             where_sql = "WHERE " + " AND ".join(where_clauses)
 
-        return f"""
+        query = f"""
         SELECT buyer_nick as user_nick
         FROM buyer_summary
         {where_sql}
         ORDER BY last_order_date DESC
-        LIMIT {limit}
-        OFFSET {offset}
+        LIMIT %s
+        OFFSET %s
         """
+        return query, tuple(params)
 
     @staticmethod
     def get_buyers_count(
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         search: Optional[str] = None
-    ) -> str:
-        """Get total count of unique buyers from summary table (ultra fast)"""
+    ) -> Tuple[str, tuple]:
+        """
+        Get total count of unique buyers from summary table (ultra fast)
+
+        Returns: (query, params) tuple for safe parameterized execution
+        """
         where_clauses = []
+        params = []
 
         if start_date:
-            where_clauses.append(f"last_order_date >= '{start_date}'")
+            where_clauses.append("last_order_date >= %s")
+            params.append(start_date)
 
         if end_date:
-            where_clauses.append(f"last_order_date <= '{end_date}'")
+            where_clauses.append("last_order_date <= %s")
+            params.append(end_date)
 
         if search:
-            where_clauses.append(f"buyer_nick LIKE '%{search}%'")
+            where_clauses.append("buyer_nick LIKE %s")
+            params.append(f"%{search}%")
 
         where_sql = ""
         if where_clauses:
             where_sql = "WHERE " + " AND ".join(where_clauses)
 
-        return f"""
+        query = f"""
         SELECT COUNT(*) as total
         FROM buyer_summary
         {where_sql}
         """
+        return query, tuple(params)
 
     @staticmethod
-    def get_daily_stats(days: int = 30) -> str:
+    def get_daily_stats(days: int = 30) -> Tuple[str, tuple]:
         """
         Get daily statistics for dashboard
+
+        Returns: (query, params) tuple for safe parameterized execution
         """
-        return f"""
+        query = """
         SELECT
             DATE(msg_time) as date,
             COUNT(DISTINCT user_nick) as unique_buyers,
             COUNT(*) as total_chats,
             COUNT(DISTINCT CASE WHEN sender_nick != user_nick THEN user_nick END) as conversations
         FROM chat_history
-        WHERE msg_time >= DATE_SUB(NOW(), INTERVAL {days} DAY)
+        WHERE msg_time >= DATE_SUB(NOW(), INTERVAL %s DAY)
         GROUP BY DATE(msg_time)
         ORDER BY date DESC
         """
+        return query, (days,)
 
     @staticmethod
     def get_actionable_customers() -> str:

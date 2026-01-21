@@ -72,36 +72,42 @@ class ZhipuClient:
         order_summary: str
     ) -> str:
         """Build prompt for buyer persona analysis"""
+        # 构建深度分析指令
         prompt = f"""
-请根据以下买家的数据，生成买家画像分析报告：
+你是一位资深电商客户洞察专家。请基于以下数据进行深度买家画像分析，**不要简单重复数据**，而是要挖掘背后的行为模式、心理动机和潜在需求。
 
-【基本信息】
-昵称：{user_nick}
-城市：{profile.get('city', 'Unknown')}
-客户类型：{'新客户' if profile.get('is_new_customer') else '老客户'}
-VIP等级：{profile.get('vip_level', 'Non-VIP')}
-
-【消费数据】
-历史消费总额：{profile.get('historical_ltv', 0):.2f}元
-订单总数：{profile.get('total_orders', 0)}单
-近6个月消费：{profile.get('l6m_spend', 0):.2f}元
-折扣敏感度：{profile.get('discount_ratio', 0):.1f}%
-
-【订单摘要】
+【买家数据】
 {order_summary}
 
-【标签】
-{', '.join(profile.get('tags', []))}
-
-【近期沟通记录】（最近20条）
+【聊天记录】（最近{len(chats)}条）
 {self._format_chats(chats[:20])}
 
-请生成以下分析（必须以JSON格式返回，不要包含其他文字）：
+**分析要求：**
+
+1. **summary** - 深度画像总结（2-3句话）
+   - ❌ 不要说："来自XX的客户，消费了XX元"
+   - ✅ 要分析：购买决策模式、价值取向、消费心理特征
+   - 例如："这是一位注重品质胜过价格的务实型买家，首次购买即选择高价位PIPES产品，显示出明确的目标性和较强的支付意愿。"
+
+2. **key_interests** - 隐性兴趣点（3-5个）
+   - ❌ 不要："来自北京"、"喜欢PIPES"
+   - ✅ 要推断：生活方式、价值观、潜在需求
+   - 例如：["专业烟斗玩家追求品质体验", "重视产品专业性和设计感", "愿意为品质支付溢价"]
+
+3. **pain_points** - 潜在痛点（2-4个）
+   - 基于消费行为和聊天内容推断未被满足的需求或担忧
+   - 例如：["可能需要专业的产品使用指导", "对产品真伪和品质有疑虑", "缺乏同类产品对比信息"]
+
+4. **recommended_action** - 个性化跟进策略（1-2句话）
+   - 具体的、可执行的、针对该买家的独特建议
+   - 例如："主动提供PIPES产品的专业使用指南和保养建议，建立专业顾问形象，增强信任感"
+
+**输出格式（纯JSON，不要其他文字）：**
 {{
-  "summary": "买家画像总结（2-3句话，突出该买家的核心特点、购买动机和偏好）",
-  "key_interests": ["兴趣点1", "兴趣点2", "兴趣点3"],
-  "pain_points": ["痛点1", "痛点2"],
-  "recommended_action": "具体的销售建议（针对该买家的个性化推荐或跟进策略，1-2句话）"
+  "summary": "深度画像总结...",
+  "key_interests": ["推断的兴趣点1", "兴趣点2", "兴趣点3"],
+  "pain_points": ["推断的痛点1", "痛点2"],
+  "recommended_action": "个性化建议..."
 }}
 """
         return prompt

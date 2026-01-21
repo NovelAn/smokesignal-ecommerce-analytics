@@ -8,6 +8,13 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: {
+          '/api': {
+            target: 'http://localhost:8000',
+            changeOrigin: true,
+            secure: false,
+          }
+        }
       },
       plugins: [react()],
       define: {
@@ -16,7 +23,12 @@ export default defineConfig(({ mode }) => {
       },
       resolve: {
         alias: {
-          '@': path.resolve(__dirname, '.'),
+          '@': path.resolve(__dirname, './src'),
+          '@components': path.resolve(__dirname, './src/components'),
+          '@utils': path.resolve(__dirname, './src/utils'),
+          '@types': path.resolve(__dirname, './src/types'),
+          '@constants': path.resolve(__dirname, './src/constants'),
+          '@hooks': path.resolve(__dirname, './src/hooks'),
         }
       }
     };

@@ -4,158 +4,246 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SmokeSignal Analytics is a single-page React application for e-commerce customer service analytics. It provides a Notion-style dashboard for analyzing customer chat history, sentiment patterns, purchase behavior, and AI-powered customer insights. The application targets e-commerce customer service teams and sales analysts working with platforms like Taobao/Tmall (千牛工作台 - Qianniu Workbench).
+SmokeSignal Analytics is a Notion-style CRM dashboard for e-commerce customer service analytics. It visualizes customer sentiment, chat history, purchase behavior, and AI-powered customer insights for e-commerce operations (specifically Taobao/Tmall).
 
-**Origin:** Built with Google AI Studio (https://ai.studio/apps/drive/14aS21FRXtWxJc9UKqX5inwFDswfXQW6t)
+**Tech Stack:**
+- **Frontend**: React 19.2.3 + TypeScript + Vite 6.2.0 + Recharts 3.6.0
+- **Backend**: FastAPI (Python) + MySQL/PostgreSQL
+- **AI**: Zhipu AI (GLM-4) for customer persona analysis
+- **Data Source**: Playwright-based crawler from Qianniu Workbench (Taobao/Tmall)
 
-## Development Commands
+## Common Development Commands
 
+### Frontend Development
 ```bash
 # Install dependencies
 npm install
 
-# Development server (runs on http://localhost:3000, host: 0.0.0.0)
+# Start dev server (runs on http://localhost:3000)
 npm run dev
 
-# Production build
+# Build for production
 npm run build
 
 # Preview production build
 npm run preview
 ```
 
-**Environment Setup:** Create `.env.local` with `GEMINI_API_KEY` (currently configured but not actively used in the codebase).
+### Backend Development
+```bash
+# Start backend server (runs on http://localhost:8000)
+./scripts/start-backend.sh  # Linux/Mac
+scripts\start-backend.bat   # Windows
+
+# Or directly with Python
+python -m backend.main
+
+# Run backend with uvicorn (from backend directory)
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Testing
+```bash
+# Run all tests
+python tests/run_all_tests.py
+
+# Run specific test categories
+python tests/api/test_api_endpoints.py
+python tests/database/test_db_connection.py
+python tests/integration/test_api_integration.py
+```
+
+### Database Operations
+```bash
+# Deploy target buyers precomputed table (creates table, stored procedure, and daily update event)
+./scripts/deploy_mysql.sh  # Linux/Mac
+# Note: Update database credentials in the script first
+
+# Manual refresh of precomputed data
+mysql -u username -p database_name -e "CALL refresh_target_buyers_precomputed();"
+```
 
 ## Architecture
 
-### File Structure
-This is a flat structure with all source files at the root level:
-- `App.tsx` - Main application component (~58KB, contains all views and components)
-- `types.ts` - TypeScript interfaces and enums (data models)
-- `constants.ts` - Mock data for development
-- `index.tsx` - React entry point
-- `vite.config.ts` - Build configuration with path aliases (`@/*` → root)
-
-**Important:** The entire UI is currently in a single `App.tsx` file. This is a monolithic structure that needs refactoring.
-
-### Component Structure
-
-The app has three main views (state-based, not URL routing):
-
-1. **DashboardOverview** (`view === 'dashboard'`)
-   - Top metrics cards (total conversations, sentiment score, urgent issues)
-   - KeywordAnalysisPanel with donut chart (category distribution) and bar chart (top keywords)
-   - Time range filtering (7d, 15d, 30d, 90d, 1y)
-   - Priority Attention Board table (actionable customers)
-   - Sentiment Trend line chart (7-day tracking)
-   - Intent Distribution radar chart
-   - Peak Hours bar chart
-
-2. **ChatAnalysis** (`view === 'chat'`)
-   - User search sidebar (filter by nickname)
-   - 360° Customer Profile view with:
-     - AI Persona Analysis (summary, interests, pain points)
-     - Recommended Actions (AI sales suggestions)
-     - Financial metrics (LTV, AOV, discount sensitivity)
-     - Intent Distribution radar chart
-   - Purchase History table (latest order + full history)
-   - Communication view (chat grouped by date, collapsible sections)
-
-3. **SettingsView** (`view === 'settings'`)
-   - Pipeline configuration (references Playwright crawler)
-   - Database connection (PostgreSQL mentioned)
-   - Dictionary management for keyword tagging
-
-### Reusable UI Components
-- **NotionCard** - Card container with Notion-style styling
-- **NotionTag** - Colored tags with 9 pastel colors (gray, brown, orange, yellow, green, blue, purple, pink, red)
-
-### Design System
-Notion-inspired aesthetic:
-- Colors: `#F7F7F5` (sidebar), `#E9E9E7` (borders), `#37352F` (text)
-- Custom Tailwind config in `index.html` via CDN
-- Typography: Serif headers, sans-serif body, SF Mono for data
-- Minimal shadows (0 1px 2px), thin borders
-
-## Data Models
-
-Key types from `types.ts`:
-
-- **ChatMessage** - Customer service messages (buyer/seller, timestamps, content)
-- **CustomerProfile** - 360° customer data with:
-  - Demographics (city, new/existing status)
-  - Lifetime metrics (LTV, total orders)
-  - Discount analysis (discount_ratio identifies "discount seekers")
-  - Recent activity (L6M - last 6 months)
-  - Intent scores for radar chart
-  - Order history with status
-  - AI-powered analysis (summary, interests, pain points, recommended actions)
-- **BuyerSession** - Combines profile + messages + sentiment
-- **KeywordMetric** - Text frequency with category classification
-- **ActionableCustomer** - Priority issues (Churn Risk, Negative Review, Stockout Request, Gift Inquiry, High Value)
-- **IntentType enum** - Pre-sale, Post-sale, Logistics, Usage Guide, Complaint
-- **SentimentType enum** - Positive, Neutral, Negative
-
-## Technology Stack
-
-- **React 19.2.3** with TypeScript 5.8.2
-- **Vite 6.2.0** as build tool
-- **Recharts 3.6.0** for data visualization (Line, Bar, Pie, Radar charts)
-- **Lucide React 0.562.0** for icons
-- **Tailwind CSS** via CDN (not npm)
-
-## Related Projects
-
-**chat-history-crawler** (`d:\Work\ai\projects\chat-history-crawler`) is a Python Playwright-based scraper that:
-- Crawls chat history from Qianniu Workbench (Taobao/Tmall customer service platform)
-- Intercepts network responses to extract chat data
-- Stores data in PostgreSQL database
-- This dashboard is designed to visualize data from that crawler
-
-The crawler uses:
-- Playwright for browser automation
-- PostgreSQL for data storage
-- Network response interception for data extraction
-
-## Current State
-
-**Working:**
-- Full UI with mock data
-- All charts and visualizations
-- Customer 360° profile view
-- Chat history display with date grouping
-- Time range filtering (UI only)
-
-**Not Yet Implemented:**
-- Real API integration (Gemini API key configured but unused)
-- Backend connectivity (PostgreSQL)
-- Real data fetching from crawler database
-- URL routing (uses state-based view switching)
-- Authentication
-- Export functionality (CSV mentioned in UI)
-
-**Known Issues:**
-- Monolithic `App.tsx` file needs to be split into separate components
-- No testing framework
-- No error boundaries
-- No loading states for async operations
-
-## Key Integration Points
-
-When implementing real data connectivity:
-1. **Gemini API** - For AI-powered customer analysis (customer summaries, recommended actions)
-2. **PostgreSQL** - For storing and fetching chat data, customer profiles
-3. **Playwright Crawler** - The `chat-history-crawler` project populates the database
-
-The data flow should be:
+### Data Flow
 ```
-Qianniu Workbench → Playwright Crawler → PostgreSQL → This Dashboard
+Qianniu Workbench (Taobao/Tmall)
+    ↓
+Playwright Crawler (chat-history-crawler project)
+    ↓
+MySQL Database (dunhill_t01_trade_line VIEW, chat_history table)
+    ↓
+FastAPI Backend (Buyer Analysis + Target Buyer Optimization)
+    ↓
+React Frontend (Dashboard)
 ```
 
-## Build Configuration
+### Backend Architecture
 
-- Port: 3000, Host: 0.0.0.0 (network accessible)
-- Path alias: `@/*` maps to root directory
-- Environment variables injected via `define:` in vite.config.ts
-- TypeScript strict mode enabled
-- JSX: react-jsx (automatic runtime)
+**Two-Tier API System:**
+
+1. **v1 API (`/api/v1/*`)** - Real-time queries from VIEW
+   - Direct queries to `dunhill_t01_trade_line` VIEW
+   - Slow performance (10-30 seconds per query)
+   - Used for: Legacy functionality, real-time data needs
+
+2. **v2 API (`/api/v2/*`)** - Precomputed table (OPTIMIZED) ⭐
+   - Uses `target_buyers_precomputed` table
+   - **10-50x faster** performance (< 0.5 seconds)
+   - Auto-updates daily at 11:00 AM via MySQL event
+   - Filters for high-value customers: Smoker (Pipes/Lighters) + VIC (Rolling 24M >= 30K)
+   - **Preferred for all new development**
+
+**Key Backend Components:**
+- `backend/analytics/target_buyer_analyzer.py` - Optimized analyzer using precomputed table
+- `backend/analytics/buyer_analyzer.py` - Legacy analyzer (slow)
+- `backend/database/target_buyer_queries.py` - SQL query loader (loads from .sql files)
+- `backend/database/queries.py` - Legacy query builder
+- `backend/api/target_routes.py` - v2 API routes (prefix: `/api/v2`)
+- `backend/ai/zhipu_client.py` - Zhipu AI integration for customer persona analysis
+
+### SQL File Organization
+
+**SQL queries are stored as separate files** (not embedded in Python code):
+- `backend/database/sql/target_buyers/*.sql` - 10 optimized query files for v2 API
+- `backend/database/sql/create_target_buyers_precomputed.sql` - Table creation + stored procedure + auto-update event
+- `backend/database/sql/*.sql` - Various database scripts and fixes
+
+**Pattern**: SQL files use `[[CONDITION]]` syntax for optional WHERE clauses, dynamically removed by `TargetBuyerQueries` class.
+
+### Frontend Architecture
+
+**Single-Page Application Structure:**
+- `src/App.tsx` - Main app with 3 views: Dashboard Overview, Chat & CRM, Configuration
+- `src/components/common/NotionCard.tsx` - Reusable card component
+- `src/components/common/NotionTag.tsx` - Tag component with color variants
+- Uses Recharts for all visualizations (Line, Bar, Pie, Radar charts)
+
+**State Management**: Local component state with React hooks (useState, useMemo)
+
+**Styling**: Tailwind CSS with Notion-inspired design tokens (defined inline in App.tsx)
+
+## Target Buyers Optimization (Key Feature)
+
+### What It Does
+
+The v2 API focuses on **high-value customers only**, dramatically improving performance:
+
+- **Smoker Buyers**: Purchased Pipes or Lighters categories
+- **VIC Buyers**: Rolling 24-month net sales >= 30,000
+- **BOTH**: Customers who are both Smoker and VIC (core high-value segment)
+
+### Precomputed Data
+
+The `target_buyers_precomputed` table contains:
+- Historical metrics: GMV, refunds, net sales, orders, refund rate
+- Time-based metrics: Rolling 24M (VIP calculation), L6M, L1Y
+- Chat metrics: Communication frequency, last contact date
+- Smart tags: VIP level (V3/V2/V1/V0), discount sensitivity, churn risk, category preferences
+- Auto-updates: Daily at 11:00 AM via MySQL event scheduler
+
+### VIP Level Calculation
+
+Based on **Rolling 24-Month Net Sales**:
+- V3: >= 450,000
+- V2: 150,000 - 449,999
+- V1: 50,000 - 149,999
+- V0: 30,000 - 49,999
+- Non-VIP: < 30,000
+
+### Performance Gains
+
+| Operation | v1 (VIEW) | v2 (Precomputed) | Improvement |
+|-----------|-----------|------------------|-------------|
+| Buyer list | 10-30s | < 0.5s | **20-60x** |
+| Dashboard metrics | 5-15s | < 0.1s | **50-150x** |
+| Buyer details | 2-5s | < 0.1s | **20-50x** |
+
+## Database Configuration
+
+- Database credentials are loaded from `~/database_config.json` via `DBConfigManager`
+- Shared configuration with `chat-history-crawler` project
+- Set `DB_NAME_TO_USE` environment variable to specify which database to use
+- Default database: `aliyunDB`
+
+## Key Data Models
+
+### Customer Tags & Labels
+- **VIP Level**: V3/V2/V1/V0/Non-VIP (based on Rolling 24M net sales)
+- **Customer Type**: New/Old (from `client_monthly_tag` field)
+- **Discount Sensitivity**: High/Medium/Low (based on discount order ratio)
+- **Churn Risk**: High/Medium/Low (based on purchase and chat recency)
+- **Category Preference**: Top 3 product categories by order count
+
+See `docs/架构设计/数据模型设计.md` for complete tag system design.
+
+### AI Persona Analysis
+
+Zhipu AI analyzes customer data to generate:
+- **summary**: 2-3 sentence customer persona
+- **key_interests**: Array of interest points
+- **pain_points**: Array of pain points
+- **recommended_action**: Specific sales recommendation
+
+## Important Conventions
+
+### SQL Query Files
+
+When adding new queries:
+1. Create `.sql` file in `backend/database/sql/target_buyers/`
+2. Use `[[OPTIONAL_CONDITION]]` syntax for dynamic WHERE clauses
+3. Load via `TargetBuyerQueries` class in Python
+4. Never embed complex SQL in Python code
+
+### API Versioning
+
+- **New features**: Use `/api/v2/*` routes (precomputed table)
+- **Legacy**: `/api/v1/*` routes (slow, will be deprecated)
+- **Frontend**: Default to v2 APIs, only use v1 if v2 doesn't support the feature
+
+### Database Updates
+
+- **Schema changes**: Create SQL script in `backend/database/sql/`
+- **Data updates**: Use stored procedures or Python scripts in `scripts/`
+- **Testing**: Always test on non-production database first
+
+### Code Organization
+
+- **Backend**: Feature-based modules (`analytics/`, `database/`, `api/`, `ai/`)
+- **Frontend**: Currently single-file (App.tsx), plan to refactor
+- **SQL**: Separated by feature (`target_buyers/` for optimized queries)
+
+## Development Workflow
+
+1. **New Feature Development**:
+   - Create SQL query file in `backend/database/sql/target_buyers/`
+   - Add query method to `TargetBuyerQueries` class
+   - Add business logic method to `TargetBuyerAnalyzer` class
+   - Add API endpoint to `backend/api/target_routes.py` (v2 prefix)
+   - Update frontend to call new v2 endpoint
+
+2. **Performance Optimization**:
+   - Always use precomputed table approach for new features
+   - Monitor query execution times with `EXPLAIN`
+   - Add indexes to `target_buyers_precomputed` table if needed
+
+3. **Database Schema Changes**:
+   - Write migration SQL script
+   - Update `create_target_buyers_precomputed.sql` if changing precomputed table
+   - Test stored procedure `refresh_target_buyers_precomputed()`
+   - Verify auto-update event is working
+
+## Security Considerations
+
+- All SQL queries use parameterized statements (SQL injection protection)
+- Error handling with specific exception types
+- Environment variables for sensitive data (API keys, database credentials)
+- Type safety: TypeScript on frontend, type hints on backend
+
+## Documentation
+
+- **Complete docs**: `docs/README.md`
+- **Target buyers feature**: `docs/用户文档/目标买家功能总结.md`
+- **Deployment guide**: `docs/部署运维/目标买家部署指南.md`
+- **Data model**: `docs/架构设计/数据模型设计.md`
+- **Field reference**: `docs/field_reference/客户月度标签字段.md`

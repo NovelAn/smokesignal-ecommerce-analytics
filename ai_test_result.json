@@ -1,0 +1,47 @@
+{
+    "buyer_nick": "mylifemyrule",
+    "channel": "PFS",
+    "buyer_type": "SMOKER",
+    "is_smoker": 1,
+    "is_vic": 0,
+    "vip_level": "Non-VIP",
+    "client_monthly_tag": "new",
+    "historical_gmv": "6500.00",
+    "historical_refund": "0.00",
+    "historical_net_sales": "6500.00",
+    "total_orders": 1,
+    "total_net_orders": 1,
+    "refund_rate": "0.0000",
+    "first_purchase_date": "2026-01-19T18:56:04",
+    "last_purchase_date": "2026-01-19T18:56:04",
+    "rolling_24m_netsales": "6500.00",
+    "rolling_24m_orders": 1,
+    "l6m_spend": "6500.00",
+    "l6m_orders": 1,
+    "l1y_spend": "6500.00",
+    "l1y_orders": 1,
+    "discount_ratio": "0.00",
+    "discount_sensitivity": "\u6d63\u5ea1\u5bb3\u93c1\u5fd4\u5285",
+    "chat_frequency_days": 3,
+    "last_chat_date": "2026-01-20T09:20:19",
+    "l3m_chat_frequency_days": 3,
+    "churn_risk": "\u6d63\udc8e",
+    "city": "\u9356\u693e\u542b",
+    "top_category": "PIPES",
+    "second_category": null,
+    "third_category": null,
+    "updated_at": "2026-01-20T16:50:41",
+    "ai_analysis": {
+        "summary": "\u6769\u6b10\u69f8\u6d93\udc80\u6d63\u5d86\u6f75\u9477\udcaa\u9356\u693e\u542b\u9428\u52ee\udc80\u4f78\udcae\u3221\u57db\u951b\u5c83\u6ae7\u9412\u8dfa\u5dfb\u9359\u53c9\u79f7\u7490\u89c4\udc80\u5a5a\udca2\u6fc5\u8d1f0\u951b\u5c7c\u7d7e\u6769\udc916\u6d93\udcaa\u93c8\u581f\u6e416500\u934f\u51aa\u6b91\u5a11\u5823\u5782\u7481\u677f\u7d8d\u951b\u5c7e\u6a09\u7ec0\u54c4\u53fe\u6769\u621e\u6e61\u7490\udcad\u6d94\u677f\u59cf\u5bee\u8f70\u7b16\u7035\u901b\u73af\u93cd\u95f4\u7b09\u93c1\u5fd4\u5285\u951b\u5c7c\u5bcc\u7455\u4f78\u53e7\u5a09\u2252IPES\u7eeb\u8bb3\u9a87\u935d\u4f75\udc80\udc82",
+        "key_interests": [
+            "PIPES\u7eeb\u8bb3\u9a87\u935d\udc81",
+            "\u6942\u6a3a\u6427\u7490\u3125\u6662\u935d\udc81",
+            "\u6d93\u64b2\u7b1f\u7481\u60e7\udca4\udc87"
+        ],
+        "pain_points": [
+            "\u7f02\u8f70\u7baf\u9358\u55d7\u5f76\u7490\udcad\u6d94\u7248\u669f\u93b9\udcae\u95c5\u53e5\u4e92\u934f\u3129\u6f70\u9352\u55d8\u703d",
+            "\u93c3\u72b3\u77e1\u95ab\u6c33\udcae\u677f\u7d8d\u93c3\u72b3\u7876\u6d5c\u55da\u0412\u934f\u8702\u7d8b\u95c7\udc80\u59f9\udc82"
+        ],
+        "recommended_action": "\u95bd\u581d\udcaf\u7470\u53fePIPES\u7eeb\u8bb3\u9a87\u935d\u4f78\u4eb8\u6fc2\u65a4\u7d1d\u93ba\u3128\u5d18\u9429\u7a3f\u53e7\u93c2\u677f\u6427\u93b4\u682d\u73ee\u7ed4\udcaf\u7eef\u8bf2\u57aa\u951b\u5c7d\u82df\u93bb\u612a\u7df5\u6d93\u64b2\u7b1f\u935c\u3128\udcaf\u3221\u6e47\u9354\u2032\u4e92\u6fa7\u70b2\u5df1\u7039\u3221\u57db\u7eee\u6a3b\udc80\u0441\udc80\udc82"
+    }
+}
