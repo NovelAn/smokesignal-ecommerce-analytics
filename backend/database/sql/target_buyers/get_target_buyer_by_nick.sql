@@ -42,8 +42,11 @@ SELECT
 
     -- 聊天指标
     chat_frequency_days,
+    first_chat_date,
     last_chat_date,
+    l30d_chat_frequency_days,
     l3m_chat_frequency_days,
+    avg_chat_interval_days,
 
     -- 流失风险
     churn_risk,

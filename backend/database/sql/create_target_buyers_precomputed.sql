@@ -55,7 +55,10 @@ CREATE TABLE target_buyers_precomputed (
     -- === 聊天指标 ===
     chat_frequency_days INT COMMENT '历史沟通频次(去重日期天数)',
     last_chat_date DATETIME COMMENT '最后聊天时间',
+    first_chat_date DATETIME COMMENT '首次聊天时间',
+    l30d_chat_frequency_days INT COMMENT '近30天沟通频次(去重日期天数)',
     l3m_chat_frequency_days INT COMMENT '近3个月沟通频次(去重日期天数)',
+    avg_chat_interval_days DECIMAL(10, 2) COMMENT '平均沟通间隔天数',
 
     -- === 流失风险标签 ===
     churn_risk VARCHAR(20) COMMENT '流失风险: 高/中/低',
@@ -247,16 +250,39 @@ SET
         FROM chat_history
         WHERE user_nick = tb.buyer_nick
     ),
+    first_chat_date = (
+        SELECT MIN(msg_time)
+        FROM chat_history
+        WHERE user_nick = tb.buyer_nick
+    ),
     last_chat_date = (
         SELECT MAX(msg_time)
         FROM chat_history
         WHERE user_nick = tb.buyer_nick
+    ),
+    l30d_chat_frequency_days = (
+        SELECT COUNT(DISTINCT DATE(msg_time))
+        FROM chat_history
+        WHERE user_nick = tb.buyer_nick
+          AND msg_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)
     ),
     l3m_chat_frequency_days = (
         SELECT COUNT(DISTINCT DATE(msg_time))
         FROM chat_history
         WHERE user_nick = tb.buyer_nick
           AND msg_time >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
+    ),
+    avg_chat_interval_days = (
+        SELECT
+            CASE
+                WHEN COUNT(DISTINCT DATE(msg_time)) <= 1 THEN 0
+                ELSE DATEDIFF(
+                    MAX(DATE(msg_time)),
+                    MIN(DATE(msg_time))
+                ) / (COUNT(DISTINCT DATE(msg_time)) - 1)
+            END
+        FROM chat_history
+        WHERE user_nick = tb.buyer_nick
     );
 
 -- 3.6 计算流失风险
@@ -522,16 +548,39 @@ BEGIN
             FROM chat_history
             WHERE user_nick = tb.buyer_nick
         ),
+        first_chat_date = (
+            SELECT MIN(msg_time)
+            FROM chat_history
+            WHERE user_nick = tb.buyer_nick
+        ),
         last_chat_date = (
             SELECT MAX(msg_time)
             FROM chat_history
             WHERE user_nick = tb.buyer_nick
+        ),
+        l30d_chat_frequency_days = (
+            SELECT COUNT(DISTINCT DATE(msg_time))
+            FROM chat_history
+            WHERE user_nick = tb.buyer_nick
+              AND msg_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         ),
         l3m_chat_frequency_days = (
             SELECT COUNT(DISTINCT DATE(msg_time))
             FROM chat_history
             WHERE user_nick = tb.buyer_nick
               AND msg_time >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
+        ),
+        avg_chat_interval_days = (
+            SELECT
+                CASE
+                    WHEN COUNT(DISTINCT DATE(msg_time)) <= 1 THEN 0
+                    ELSE DATEDIFF(
+                        MAX(DATE(msg_time)),
+                        MIN(DATE(msg_time))
+                    ) / (COUNT(DISTINCT DATE(msg_time)) - 1)
+                END
+            FROM chat_history
+            WHERE user_nick = tb.buyer_nick
         );
 
     -- 流失风险

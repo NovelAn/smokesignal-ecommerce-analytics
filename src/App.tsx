@@ -112,8 +112,7 @@ const NotionTag: React.FC<{ text: string; color?: 'gray' | 'brown' | 'orange' | 
 
 // --- New Keyword Analysis Component ---
 
-const KeywordAnalysisPanel: React.FC = () => {
-  const [timeRange, setTimeRange] = useState<'7d' | '15d' | '30d' | '90d' | '1y'>('1y');
+const KeywordAnalysisPanel: React.FC<{ timeRange: '7d' | '15d' | '30d' | '90d' | '1y' }> = ({ timeRange }) => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   // Cool Tone Palette (Blue, Cyan, Indigo, Slate) - Professional, Clean, Distinct
@@ -161,37 +160,14 @@ const KeywordAnalysisPanel: React.FC = () => {
         icon={Database}
         className="h-[500px] flex flex-col"
         action={
-            <div className="flex gap-2 items-center">
-                {selectedCategory && (
-                    <button
-                        onClick={() => setSelectedCategory(null)}
-                        className="px-2 py-1 text-xs text-notion-muted hover:text-blue-600 border border-transparent hover:border-blue-200 rounded transition-colors flex items-center gap-1"
-                    >
-                        <XCircle size={12}/> Clear Filter: {selectedCategory}
-                    </button>
-                )}
-                <div className="flex bg-notion-gray_bg p-0.5 rounded-md border border-notion-border">
-                    {[
-                        { id: '7d', label: '7 Days' },
-                        { id: '15d', label: '15 Days' },
-                        { id: '30d', label: '1 Mo' },
-                        { id: '90d', label: '1 Qtr' },
-                        { id: '1y', label: '1 Yr' }
-                    ].map((range) => (
-                        <button
-                            key={range.id}
-                            onClick={() => setTimeRange(range.id as any)}
-                            className={`px-3 py-1 text-xs font-medium rounded-sm transition-all ${
-                                timeRange === range.id
-                                ? 'bg-white text-blue-700 shadow-sm border border-blue-100'
-                                : 'text-notion-muted hover:text-notion-text'
-                            }`}
-                        >
-                            {range.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
+            selectedCategory && (
+                <button
+                    onClick={() => setSelectedCategory(null)}
+                    className="px-2 py-1 text-xs text-notion-muted hover:text-blue-600 border border-transparent hover:border-blue-200 rounded transition-colors flex items-center gap-1"
+                >
+                    <XCircle size={12}/> Clear Filter: {selectedCategory}
+                </button>
+            )
         }
     >
         <div className="flex flex-col lg:flex-row h-full gap-8">
@@ -306,6 +282,9 @@ const KeywordAnalysisPanel: React.FC = () => {
 // --- Dashboard Sub-Components ---
 
 const DashboardOverview: React.FC = () => {
+  // 全局日期筛选器状态
+  const [timeRange, setTimeRange] = useState<'7d' | '15d' | '30d' | '90d' | '1y'>('1y');
+
   // 获取Dashboard指标数据
   const { data: metrics, isLoading: metricsLoading, error: metricsError } = useDataFetchingWithRetry<DashboardMetrics>(
     () => apiClient.getDashboardMetrics(),
@@ -335,6 +314,30 @@ const DashboardOverview: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Global Time Range Filter */}
+      <div className="flex justify-end">
+        <div className="flex bg-notion-gray_bg p-0.5 rounded-md border border-notion-border shadow-sm">
+          {[
+            { id: '7d' as const, label: '7 Days' },
+            { id: '15d' as const, label: '15 Days' },
+            { id: '30d' as const, label: '1 Mo' },
+            { id: '90d' as const, label: '1 Qtr' },
+            { id: '1y' as const, label: '1 Yr' }
+          ].map((range) => (
+            <button
+              key={range.id}
+              onClick={() => setTimeRange(range.id)}
+              className={`px-4 py-2 text-sm font-medium rounded-sm transition-all ${
+                timeRange === range.id
+                ? 'bg-white text-blue-700 shadow-sm border border-blue-100'
+                : 'text-notion-muted hover:text-notion-text'
+              }`}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
+      </div>
       {/* Top Metrics - Minimalist */}
       {metricsLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -389,7 +392,7 @@ const DashboardOverview: React.FC = () => {
       ) : null}
 
       {/* Row 2: Keyword Analysis (New Module) */}
-      <KeywordAnalysisPanel />
+      <KeywordAnalysisPanel timeRange={timeRange} />
 
       {/* Row 3: Actionable Customers Table (New) */}
       <NotionCard
@@ -407,78 +410,81 @@ const DashboardOverview: React.FC = () => {
         ) : actionableError ? (
           <ErrorAlert message="无法加载可操作客户列表" />
         ) : actionableCustomers ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-notion-border text-notion-muted text-xs uppercase bg-notion-gray_bg/30">
-                  <th className="py-2.5 px-4 font-semibold">User</th>
-                  <th className="py-2.5 px-4 font-semibold">VIP Level</th>
-                  <th className="py-2.5 px-4 font-semibold">L6M Spend</th>
-                  <th className="py-2.5 px-4 font-semibold">Churn Risk</th>
-                  <th className="py-2.5 px-4 font-semibold">Last Purchase</th>
-                  <th className="py-2.5 px-4 font-semibold text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-notion-border">
-                {/* 高流失风险 */}
-                {actionableCustomers.high_churn_risk.map((buyer: any, idx) => (
-                  <tr key={`high-${idx}`} className="hover:bg-notion-hover transition-colors">
-                    <td className="py-3 px-4 font-medium text-notion-text">{buyer.buyer_nick || buyer.user_nick || 'Unknown'}</td>
-                    <td className="py-3 px-4">
-                      <NotionTag text={buyer.vip_level} color="red" />
-                    </td>
-                    <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_spend)}</td>
-                    <td className="py-3 px-4">
-                      <span className="text-xs font-bold text-red-600">{buyer.churn_risk}</span>
-                    </td>
-                    <td className="py-3 px-4 text-notion-muted text-xs">{buyer.last_purchase_date}</td>
-                    <td className="py-3 px-4 text-right">
-                      <button className="text-blue-600 hover:text-blue-800 text-xs font-semibold underline">
-                        Handle
-                      </button>
-                    </td>
+          <div className="flex flex-col h-[500px]">
+            {/* Scrollable Table */}
+            <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent border border-notion-border rounded-sm">
+              <table className="w-full text-left text-sm sticky">
+                <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                  <tr className="border-b border-notion-border text-notion-muted text-xs uppercase bg-notion-gray_bg/30">
+                    <th className="py-2.5 px-4 font-semibold">User</th>
+                    <th className="py-2.5 px-4 font-semibold">VIP Level</th>
+                    <th className="py-2.5 px-4 font-semibold">L6M Spend</th>
+                    <th className="py-2.5 px-4 font-semibold">Churn Risk</th>
+                    <th className="py-2.5 px-4 font-semibold">Last Purchase</th>
+                    <th className="py-2.5 px-4 font-semibold text-right">Action</th>
                   </tr>
-                ))}
-                {/* 高价值客户 */}
-                {actionableCustomers.high_value.map((buyer: any, idx) => (
-                  <tr key={`value-${idx}`} className="hover:bg-notion-hover transition-colors">
-                    <td className="py-3 px-4 font-medium text-notion-text">{buyer.buyer_nick || buyer.user_nick || 'Unknown'}</td>
-                    <td className="py-3 px-4">
-                      <NotionTag text={buyer.vip_level} color="orange" />
-                    </td>
-                    <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_spend)}</td>
-                    <td className="py-3 px-4">
-                      <span className="text-xs font-bold text-green-600">{buyer.churn_risk}</span>
-                    </td>
-                    <td className="py-3 px-4 text-notion-muted text-xs">{buyer.last_purchase_date}</td>
-                    <td className="py-3 px-4 text-right">
-                      <button className="text-blue-600 hover:text-blue-800 text-xs font-semibold underline">
-                        Follow Up
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {/* 中流失风险 */}
-                {actionableCustomers.medium_churn_risk.map((buyer: any, idx) => (
-                  <tr key={`medium-${idx}`} className="hover:bg-notion-hover transition-colors">
-                    <td className="py-3 px-4 font-medium text-notion-text">{buyer.buyer_nick || buyer.user_nick || 'Unknown'}</td>
-                    <td className="py-3 px-4">
-                      <NotionTag text={buyer.vip_level} color="yellow" />
-                    </td>
-                    <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_spend)}</td>
-                    <td className="py-3 px-4">
-                      <span className="text-xs font-bold text-yellow-600">{buyer.churn_risk}</span>
-                    </td>
-                    <td className="py-3 px-4 text-notion-muted text-xs">{buyer.last_purchase_date}</td>
-                    <td className="py-3 px-4 text-right">
-                      <button className="text-blue-600 hover:text-blue-800 text-xs font-semibold underline">
-                        Monitor
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-notion-border">
+                  {/* 高流失风险 */}
+                  {actionableCustomers.high_churn_risk.map((buyer: any, idx) => (
+                    <tr key={`high-${idx}`} className="hover:bg-notion-hover transition-colors">
+                      <td className="py-3 px-4 font-medium text-notion-text">{buyer.buyer_nick || buyer.user_nick || 'Unknown'}</td>
+                      <td className="py-3 px-4">
+                        <NotionTag text={buyer.vip_level} color="red" />
+                      </td>
+                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_spend)}</td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs font-bold text-red-600">{buyer.churn_risk}</span>
+                      </td>
+                      <td className="py-3 px-4 text-notion-muted text-xs">{buyer.last_purchase_date}</td>
+                      <td className="py-3 px-4 text-right">
+                        <button className="text-blue-600 hover:text-blue-800 text-xs font-semibold underline">
+                          Handle
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {/* 高价值客户 */}
+                  {actionableCustomers.high_value.map((buyer: any, idx) => (
+                    <tr key={`value-${idx}`} className="hover:bg-notion-hover transition-colors">
+                      <td className="py-3 px-4 font-medium text-notion-text">{buyer.buyer_nick || buyer.user_nick || 'Unknown'}</td>
+                      <td className="py-3 px-4">
+                        <NotionTag text={buyer.vip_level} color="orange" />
+                      </td>
+                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_spend)}</td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs font-bold text-green-600">{buyer.churn_risk}</span>
+                      </td>
+                      <td className="py-3 px-4 text-notion-muted text-xs">{buyer.last_purchase_date}</td>
+                      <td className="py-3 px-4 text-right">
+                        <button className="text-blue-600 hover:text-blue-800 text-xs font-semibold underline">
+                          Follow Up
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {/* 中流失风险 */}
+                  {actionableCustomers.medium_churn_risk.map((buyer: any, idx) => (
+                    <tr key={`medium-${idx}`} className="hover:bg-notion-hover transition-colors">
+                      <td className="py-3 px-4 font-medium text-notion-text">{buyer.buyer_nick || buyer.user_nick || 'Unknown'}</td>
+                      <td className="py-3 px-4">
+                        <NotionTag text={buyer.vip_level} color="yellow" />
+                      </td>
+                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_spend)}</td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs font-bold text-yellow-600">{buyer.churn_risk}</span>
+                      </td>
+                      <td className="py-3 px-4 text-notion-muted text-xs">{buyer.last_purchase_date}</td>
+                      <td className="py-3 px-4 text-right">
+                        <button className="text-blue-600 hover:text-blue-800 text-xs font-semibold underline">
+                          Monitor
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           <EmptyState
@@ -680,6 +686,17 @@ const ChatAnalysis: React.FC = () => {
       l6m_frequency: buyerProfile.l6m_orders ?? currentSession.profile.l6m_frequency,
       vip_level: buyerProfile.vip_level ?? 'Unknown',
       city: buyerProfile.city ?? currentSession.profile.city,
+      // 聊天指标
+      first_chat_date: buyerProfile.first_chat_date,
+      last_chat_date: buyerProfile.last_chat_date,
+      l30d_chat_frequency_days: buyerProfile.l30d_chat_frequency_days,
+      l3m_chat_frequency_days: buyerProfile.l3m_chat_frequency_days,
+      avg_chat_interval_days: buyerProfile.avg_chat_interval_days,
+      // 其他字段
+      top_category: buyerProfile.top_category,
+      second_category: buyerProfile.second_category,
+      third_category: buyerProfile.third_category,
+      discount_ratio: buyerProfile.discount_ratio,
       // 包含订单历史和聊天记录
       order_history: (buyerProfile as any).order_history || currentSession.profile.order_history || [],
       chat_history: (buyerProfile as any).chat_history || currentSession.profile.chat_history || [],
@@ -695,7 +712,7 @@ const ChatAnalysis: React.FC = () => {
     ? currentSession.profile.l6m_spend / currentSession.profile.l6m_frequency
     : 0;
 
-  // Group messages by date
+  // Group messages by date and sort by date ascending (oldest first)
   const groupedMessages = useMemo<Record<string, ChatMessage[]>>(() => {
      const chatHistory = enrichedProfile?.chat_history || currentSession?.messages || [];
      if (!chatHistory || chatHistory.length === 0) return {};
@@ -706,8 +723,19 @@ const ChatAnalysis: React.FC = () => {
          if (!groups[date]) groups[date] = [];
          groups[date].push(msg);
      });
+
+     // Sort messages within each date by time
+     Object.keys(groups).forEach(date => {
+         groups[date].sort((a, b) => a.msg_time.localeCompare(b.msg_time));
+     });
+
      return groups;
   }, [enrichedProfile, currentSession]);
+
+  // Get sorted dates for display (oldest first)
+  const sortedDates = useMemo(() => {
+     return Object.keys(groupedMessages).sort((a, b) => a.localeCompare(b));
+  }, [groupedMessages]);
 
   const toggleDate = (date: string) => {
      setOpenDates(prev => ({ ...prev, [date]: !prev[date] }));
@@ -790,8 +818,22 @@ const ChatAnalysis: React.FC = () => {
                              </h2>
                              <div className="flex items-center gap-3 text-xs text-notion-muted mt-0.5">
                                 <span className="flex items-center gap-1"><MapPin size={12} /> {currentSession.profile.city || 'Unknown'}</span>
+                             </div>
+                             {/* Lifetime Metrics */}
+                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs">
+                                <span className="text-notion-muted">LTV: <span className="font-semibold text-notion-text">¥{(enrichedProfile?.historical_ltv || 0).toLocaleString()}</span></span>
                                 <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
-                                <span className="flex items-center gap-1"><Activity size={12} /> LTV: ¥{(enrichedProfile?.historical_ltv || 0).toLocaleString()}</span>
+                                <span className="text-notion-muted">Orders: <span className="font-semibold text-notion-text">{(enrichedProfile?.total_orders || 0).toLocaleString()}</span></span>
+                                <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                                <span className="text-notion-muted">AOV: <span className="font-semibold text-notion-text">¥{historicalAov.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span></span>
+                                <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                                <span className="text-notion-muted">NetSales: <span className="font-semibold text-notion-text">¥{(enrichedProfile?.historical_ltv || 0).toLocaleString()}</span></span>
+                                <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                                <span className="text-notion-muted">RRC: <span className="font-semibold text-notion-text">{((1 - (enrichedProfile?.historical_ltv || 0) / Math.max((enrichedProfile as any)?.historical_gmv || enrichedProfile?.historical_ltv || 1, 1)) * 100).toFixed(1)}%</span></span>
+                                <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                                <span className="text-notion-muted">Discount: <span className="font-semibold text-notion-text">{(Number((enrichedProfile as any)?.discount_ratio || 0) * 100).toFixed(0)}%</span></span>
+                                <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                                <span className="text-notion-muted">Top 3: <span className="font-semibold text-notion-text">{(enrichedProfile as any)?.top_category || 'N/A'} / {(enrichedProfile as any)?.second_category || 'N/A'} / {(enrichedProfile as any)?.third_category || 'N/A'}</span></span>
                              </div>
                          </div>
                      </div>
@@ -925,58 +967,75 @@ const ChatAnalysis: React.FC = () => {
 
                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                              {/* Financial Metrics */}
-                             <NotionCard icon={Activity} title="Financial Performance">
+                             <NotionCard icon={TrendingUp} title="Recent Financial Performance">
                                  <div className="space-y-6">
-                                     {/* LTV & Orders */}
-                                     <div className="grid grid-cols-3 gap-4">
-                                         <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
-                                             <div className="text-[10px] text-notion-muted uppercase">Lifetime Value</div>
-                                             <div className="text-lg font-mono font-semibold">¥{currentSession.profile.historical_ltv.toLocaleString()}</div>
-                                         </div>
-                                         <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
-                                             <div className="text-[10px] text-notion-muted uppercase">Total Orders</div>
-                                             <div className="text-lg font-mono font-semibold">{currentSession.profile.total_orders}</div>
-                                         </div>
-                                         <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
-                                             <div className="text-[10px] text-notion-muted uppercase">Avg Order Value</div>
-                                             <div className="text-lg font-mono font-semibold">¥{Math.round(historicalAov).toLocaleString()}</div>
-                                         </div>
-                                     </div>
-                                     
-                                     {/* L6M */}
+                                     {/* Recent L6M Metrics */}
                                      <div>
                                          <h4 className="text-xs font-bold text-notion-muted uppercase mb-3 border-b border-notion-border pb-1">Last 6 Months Activity</h4>
-                                         <div className="flex justify-between items-center text-sm mb-1">
-                                             <span className="text-notion-text">Spend:</span>
-                                             <span className="font-mono">¥{currentSession.profile.l6m_spend.toLocaleString()}</span>
-                                         </div>
-                                         <div className="flex justify-between items-center text-sm">
-                                             <span className="text-notion-text">Frequency:</span>
-                                             <span className="font-mono">{currentSession.profile.l6m_frequency} orders</span>
+                                         <div className="grid grid-cols-2 gap-3">
+                                             <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
+                                                 <div className="text-[10px] text-notion-muted uppercase">L6M Spend</div>
+                                                 <div className="text-lg font-mono font-semibold">¥{(enrichedProfile?.l6m_spend || 0).toLocaleString()}</div>
+                                             </div>
+                                             <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
+                                                 <div className="text-[10px] text-notion-muted uppercase">L6M Orders</div>
+                                                 <div className="text-lg font-mono font-semibold">{(enrichedProfile?.l6m_frequency || 0).toLocaleString()}</div>
+                                             </div>
+                                             <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
+                                                 <div className="text-[10px] text-notion-muted uppercase">L6M AOV</div>
+                                                 <div className="text-lg font-mono font-semibold">¥{l6mAov.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+                                             </div>
+                                             <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
+                                                 <div className="text-[10px] text-notion-muted uppercase">L6M NetSales</div>
+                                                 <div className="text-lg font-mono font-semibold">¥{(enrichedProfile?.l6m_spend || 0).toLocaleString()}</div>
+                                             </div>
                                          </div>
                                      </div>
 
-                                     {/* Discount Sensitivity */}
+                                     {/* Latest Purchase */}
+                                     {(enrichedProfile as any)?.order_history && (enrichedProfile as any).order_history.length > 0 && (
+                                        <div>
+                                            <h4 className="text-xs font-bold text-notion-muted uppercase mb-3 border-b border-notion-border pb-1">Latest Purchase</h4>
+                                            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-100 p-4 rounded-sm">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <div>
+                                                        <div className="text-2xl font-serif text-green-900 font-bold">
+                                                            ¥{(enrichedProfile as any).order_history[0].amount.toLocaleString()}
+                                                        </div>
+                                                        <div className="text-xs text-green-800 flex items-center gap-2 mt-1">
+                                                            <Calendar size={12} /> {(enrichedProfile as any).order_history[0].date}
+                                                        </div>
+                                                    </div>
+                                                    <div className="p-2 bg-white rounded-full text-green-600 shadow-sm border border-green-100">
+                                                        <CheckCircle size={24} />
+                                                    </div>
+                                                </div>
+                                                <div className="text-xs text-green-800">
+                                                    Items: {(enrichedProfile as any).order_history[0].items.join(', ')}
+                                                </div>
+                                            </div>
+                                        </div>
+                                     )}
+
+                                     {/* Category Preferences */}
                                      <div>
-                                        <div className="flex justify-between items-end mb-1">
-                                            <span className="text-[10px] font-bold text-notion-muted uppercase tracking-wider flex items-center gap-1">
-                                                <Percent size={10}/> Discount Sensitivity
-                                            </span>
-                                            <span className={`font-mono font-bold text-xs ${currentSession.profile.discount_ratio > 50 ? 'text-red-600' : 'text-green-600'}`}>
-                                                {currentSession.profile.discount_ratio}%
-                                            </span>
-                                        </div>
-                                        <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden border border-notion-border">
-                                            <div 
-                                                className={`h-full rounded-full transition-all duration-500 ${currentSession.profile.discount_ratio > 50 ? 'bg-red-400' : 'bg-green-400'}`} 
-                                                style={{ width: `${currentSession.profile.discount_ratio}%` }}
-                                            ></div>
-                                        </div>
-                                        <p className="text-[10px] text-notion-muted mt-1.5 leading-tight">
-                                            {currentSession.profile.discount_ratio > 50 
-                                            ? "High sensitivity. Responds well to coupons and sales events." 
-                                            : "Low sensitivity. Prioritizes quality/speed over price."}
-                                        </p>
+                                         <h4 className="text-xs font-bold text-notion-muted uppercase mb-3 border-b border-notion-border pb-1">Category Preferences (Top 3)</h4>
+                                         <div className="space-y-2">
+                                             {[
+                                                 { rank: 1, name: (enrichedProfile as any)?.top_category || 'N/A', color: 'bg-orange-100 text-orange-800 border-orange-200' },
+                                                 { rank: 2, name: (enrichedProfile as any)?.second_category || 'N/A', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+                                                 { rank: 3, name: (enrichedProfile as any)?.third_category || 'N/A', color: 'bg-green-100 text-green-800 border-green-200' }
+                                             ].map((cat) => (
+                                                 <div key={cat.rank} className="flex items-center gap-3">
+                                                     <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${cat.color}`}>
+                                                         {cat.rank}
+                                                     </div>
+                                                     <div className="flex-1">
+                                                         <div className="text-sm font-medium text-notion-text">{cat.name}</div>
+                                                     </div>
+                                                 </div>
+                                             ))}
+                                         </div>
                                      </div>
                                  </div>
                              </NotionCard>
@@ -1090,25 +1149,38 @@ const ChatAnalysis: React.FC = () => {
                  {activeSubTab === 'chat' && (
                      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300 h-full flex flex-col">
                          {/* Communication Metrics Strip */}
-                         <div className="grid grid-cols-3 gap-4 bg-white border border-notion-border p-3 rounded-sm shadow-sm flex-none">
+                         <div className="grid grid-cols-4 gap-3 bg-white border border-notion-border p-3 rounded-sm shadow-sm flex-none">
                              <div className="flex flex-col items-center justify-center border-r border-notion-border">
                                  <div className="text-[10px] text-notion-muted uppercase font-bold tracking-wider mb-1">Recent Freq (30d)</div>
-                                 <div className="text-lg font-mono text-notion-text">{currentSession.profile.recent_chat_frequency} msgs</div>
+                                 <div className="text-base font-mono text-notion-text">{enrichedProfile?.l30d_chat_frequency_days || 0} days</div>
+                             </div>
+                             <div className="flex flex-col items-center justify-center border-r border-notion-border">
+                                 <div className="text-[10px] text-notion-muted uppercase font-bold tracking-wider mb-1">Recent Freq (3m)</div>
+                                 <div className="text-base font-mono text-notion-text">{enrichedProfile?.l3m_chat_frequency_days || 0} days</div>
                              </div>
                              <div className="flex flex-col items-center justify-center border-r border-notion-border">
                                  <div className="text-[10px] text-notion-muted uppercase font-bold tracking-wider mb-1">Avg Interval</div>
-                                 <div className="text-lg font-mono text-notion-text">{currentSession.profile.avg_reply_interval_days} days</div>
+                                 <div className="text-base font-mono text-notion-text">{Number(enrichedProfile?.avg_chat_interval_days || 0).toFixed(1)} days</div>
                              </div>
                              <div className="flex flex-col items-center justify-center">
                                  <div className="text-[10px] text-notion-muted uppercase font-bold tracking-wider mb-1">Last Contact</div>
-                                 <div className="text-lg font-mono text-notion-text">{currentSession.profile.last_interaction_date}</div>
+                                 <div className="text-xs font-mono text-notion-text text-center px-1">
+                                     {enrichedProfile?.last_chat_date ?
+                                         new Date(enrichedProfile.last_chat_date).toLocaleDateString('zh-CN', {
+                                             year: 'numeric',
+                                             month: '2-digit',
+                                             day: '2-digit'
+                                         }) : 'N/A'}
+                                 </div>
                              </div>
                          </div>
 
                          {/* Chat Log */}
                          <div className="flex-1 bg-notion-sidebar border border-notion-border rounded-sm flex flex-col overflow-hidden shadow-inner relative">
                             <div className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent space-y-6 bg-white">
-                                {Object.entries(groupedMessages).map(([date, msgs]: [string, ChatMessage[]], grpIdx) => (
+                                {sortedDates.map((date) => {
+                                    const msgs = groupedMessages[date];
+                                    return (
                                     <div key={date} className="relative">
                                         {/* Date Header / Collapsible Trigger */}
                                         <div className="sticky top-0 z-10 flex justify-center mb-4">
@@ -1149,7 +1221,8 @@ const ChatAnalysis: React.FC = () => {
                                             </div>
                                         )}
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                      </div>
