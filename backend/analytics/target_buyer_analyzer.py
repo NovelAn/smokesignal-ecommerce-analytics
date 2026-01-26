@@ -49,7 +49,7 @@ class TargetBuyerAnalyzer:
             buyer_type: 买家类型筛选 (SMOKER/VIC/BOTH)
             vip_level: VIP等级筛选 (V3/V2/V1/V0/Non-VIP)
             channel: 渠道筛选 (DTC/PFS)
-            sort_by: 排序字段 (last_purchase/l6m_spend/vip_level)
+            sort_by: 排序字段 (last_purchase/l6m_netsales/vip_level)
             limit: 返回数量
             offset: 偏移量
 
@@ -156,7 +156,7 @@ class TargetBuyerAnalyzer:
         """
         获取Smoker买家列表
 
-        性能: < 0.1秒 (使用l6m_spend索引)
+        性能: < 0.1秒 (使用l6m_netsales索引)
 
         Args:
             limit: 返回数量
@@ -190,24 +190,24 @@ class TargetBuyerAnalyzer:
 
     def get_high_value_buyers(
         self,
-        min_l6m_spend: float = 5000,
+        min_l6m_netsales: float = 5000,
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """
         获取高价值买家(L6M消费 >= 阈值)
 
-        性能: < 0.1秒 (使用l6m_spend索引)
+        性能: < 0.1秒 (使用l6m_netsales索引)
 
         Args:
-            min_l6m_spend: 最小近6个月消费金额
+            min_l6m_netsales: 最小近6个月消费金额
             limit: 返回数量
             offset: 偏移量
 
         Returns:
             高价值买家列表
         """
-        return self.queries.get_high_value_buyers(min_l6m_spend, limit, offset)
+        return self.queries.get_high_value_buyers(min_l6m_netsales, limit, offset)
 
     def get_buyers_by_vip_level(
         self,
@@ -262,7 +262,7 @@ class TargetBuyerAnalyzer:
         high_churn = self.get_churn_risk_buyers(risk_level='高', limit=limit)
 
         # 高价值客户(L6M消费 >= 10000)
-        high_value = self.get_high_value_buyers(min_l6m_spend=10000, limit=limit)
+        high_value = self.get_high_value_buyers(min_l6m_netsales=10000, limit=limit)
 
         # 中流失风险客户
         medium_churn = self.get_churn_risk_buyers(risk_level='中', limit=limit)

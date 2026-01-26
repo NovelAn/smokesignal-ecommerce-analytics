@@ -78,7 +78,7 @@ class TargetBuyerQueries:
             buyer_type: 买家类型筛选 (SMOKER/VIC/BOTH)
             vip_level: VIP等级筛选 (V3/V2/V1/V0/Non-VIP)
             channel: 渠道筛选 (DTC/PFS)
-            sort_by: 排序字段 (last_purchase/l6m_spend/vip_level)
+            sort_by: 排序字段 (last_purchase/l6m_netsales/vip_level)
             limit: 返回数量
             offset: 偏移量
 
@@ -239,7 +239,7 @@ class TargetBuyerQueries:
 
     def get_high_value_buyers(
         self,
-        min_l6m_spend: float = 5000,
+        min_l6m_netsales: float = 5000,
         limit: int = 100,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
@@ -247,7 +247,7 @@ class TargetBuyerQueries:
         获取高价值买家(L6M消费 >= 阈值)
 
         Args:
-            min_l6m_spend: 最小近6个月消费金额
+            min_l6m_netsales: 最小近6个月消费金额
             limit: 返回数量
             offset: 偏移量
 
@@ -256,7 +256,7 @@ class TargetBuyerQueries:
         """
         sql = self._load_sql('get_high_value_buyers.sql')
 
-        return self.db.execute_query(sql, (min_l6m_spend, limit, offset))
+        return self.db.execute_query(sql, (min_l6m_netsales, limit, offset))
 
     def get_buyers_by_vip_level(
         self,

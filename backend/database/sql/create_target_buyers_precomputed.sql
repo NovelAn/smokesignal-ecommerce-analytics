@@ -37,16 +37,25 @@ CREATE TABLE target_buyers_precomputed (
     last_purchase_date DATETIME COMMENT '最后购买时间',
 
     -- === Rolling 24个月指标(用于VIP计算) ===
+    rolling_24m_gmv DECIMAL(18, 2) COMMENT 'Rolling 24个月GMV(包含退款)',
     rolling_24m_netsales DECIMAL(18, 2) COMMENT 'Rolling 24个月净销售',
-    rolling_24m_orders INT COMMENT 'Rolling 24个月订单数',
+    rolling_24m_orders INT COMMENT 'Rolling 24个月订单数(包含退款)',
+    rolling_24m_net_orders INT COMMENT 'Rolling 24个月净订单数(去除退款)',
 
     -- === L6M指标(近6个月) ===
-    l6m_spend DECIMAL(18, 2) COMMENT '近6个月净消费金额',
+    l6m_netsales DECIMAL(18, 2) COMMENT '近6个月净销售金额',
+    l6m_gmv DECIMAL(18, 2) COMMENT '近6个月GMV(包含退款)',
     l6m_orders INT COMMENT '近6个月订单数',
+    l6m_refund_rate DECIMAL(5, 4) COMMENT '近6个月退款率',
 
     -- === L1Y指标(近1年) ===
-    l1y_spend DECIMAL(18, 2) COMMENT '近1年净消费金额',
+    l1y_netsales DECIMAL(18, 2) COMMENT '近1年净销售金额',
+    l1y_gmv DECIMAL(18, 2) COMMENT '近1年GMV(包含退款)',
     l1y_orders INT COMMENT '近1年订单数',
+    l1y_refund_rate DECIMAL(5, 4) COMMENT '近1年退款率',
+
+    -- === 购买频率 ===
+    avg_purchase_interval_days DECIMAL(10, 2) COMMENT '平均购买间隔天数(越小越频繁)',
 
     -- === 折扣敏感度 ===
     discount_ratio DECIMAL(5, 2) COMMENT '折扣品订单占比(0-1)',
@@ -82,8 +91,9 @@ CREATE TABLE target_buyers_precomputed (
     INDEX idx_last_purchase (last_purchase_date),
     INDEX idx_churn_risk (churn_risk),
     INDEX idx_updated (updated_at),
-    INDEX idx_l6m_spend (l6m_spend),
-    INDEX idx_l1y_spend (l1y_spend)
+    INDEX idx_l6m_netsales (l6m_netsales),
+    INDEX idx_l1y_netsales (l1y_netsales),
+    INDEX idx_rolling_24m_gmv (rolling_24m_gmv)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='目标买家预计算表 - 每天上午11点更新';
 
@@ -148,12 +158,18 @@ INSERT INTO target_buyers_precomputed (
     total_orders,
     first_purchase_date,
     last_purchase_date,
+    rolling_24m_gmv,
     rolling_24m_netsales,
     rolling_24m_orders,
-    l6m_spend,
+    rolling_24m_net_orders,
+    l6m_netsales,
+    l6m_gmv,
     l6m_orders,
-    l1y_spend,
+    l6m_refund_rate,
+    l1y_netsales,
+    l1y_gmv,
     l1y_orders,
+    l1y_refund_rate,
     city
 )
 SELECT
@@ -171,6 +187,11 @@ SELECT
     MAX(t.最后付款时间) as last_purchase_date,
     SUM(CASE
         WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH)
+        THEN t.成交总金额
+        ELSE 0
+    END) as rolling_24m_gmv,
+    SUM(CASE
+        WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH)
         THEN (t.成交总金额 - IFNULL(t.退款金额, 0))
         ELSE 0
     END) as rolling_24m_netsales,
@@ -178,30 +199,50 @@ SELECT
         WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH)
         THEN t.订单号
     END) as rolling_24m_orders,
+    COUNT(DISTINCT CASE
+        WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH)
+        THEN t.订单号
+    END) - COUNT(DISTINCT CASE
+        WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH)
+          AND t.退款金额 > 0
+        THEN t.订单号
+    END) as rolling_24m_net_orders,
     SUM(CASE
         WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
         THEN (t.成交总金额 - IFNULL(t.退款金额, 0))
         ELSE 0
-    END) as l6m_spend,
+    END) as l6m_netsales,
+    SUM(CASE
+        WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+        THEN t.成交总金额
+        ELSE 0
+    END) as l6m_gmv,
     COUNT(DISTINCT CASE
         WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
         THEN t.订单号
     END) as l6m_orders,
+    0 as l6m_refund_rate,
     SUM(CASE
         WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
         THEN (t.成交总金额 - IFNULL(t.退款金额, 0))
         ELSE 0
-    END) as l1y_spend,
+    END) as l1y_netsales,
+    SUM(CASE
+        WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+        THEN t.成交总金额
+        ELSE 0
+    END) as l1y_gmv,
     COUNT(DISTINCT CASE
         WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
         THEN t.订单号
     END) as l1y_orders,
+    0 as l1y_refund_rate,
     MAX(t.城市) as city
 FROM tmp_target_buyers tb
 JOIN dunhill_t01_trade_line t ON tb.buyer_nick = t.买家昵称
 GROUP BY tb.buyer_nick, tb.buyer_type, tb.is_smoker, tb.is_vic;
 
--- 3.2 更新有效订单数和退款率
+-- 3.2 更新有效订单数、退款率和购买频率
 UPDATE target_buyers_precomputed
 SET
     total_net_orders = total_orders - (
@@ -212,6 +253,27 @@ SET
     ),
     refund_rate = CASE
         WHEN historical_gmv > 0 THEN historical_refund / historical_gmv
+        ELSE 0
+    END,
+    l6m_refund_rate = CASE
+        WHEN l6m_gmv > 0 THEN
+            (SELECT SUM(IFNULL(退款金额, 0))
+             FROM dunhill_t01_trade_line
+             WHERE 买家昵称 = target_buyers_precomputed.buyer_nick
+               AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH)) / l6m_gmv
+        ELSE 0
+    END,
+    l1y_refund_rate = CASE
+        WHEN l1y_gmv > 0 THEN
+            (SELECT SUM(IFNULL(退款金额, 0))
+             FROM dunhill_t01_trade_line
+             WHERE 买家昵称 = target_buyers_precomputed.buyer_nick
+               AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH)) / l1y_gmv
+        ELSE 0
+    END,
+    avg_purchase_interval_days = CASE
+        WHEN total_orders > 0 AND DATEDIFF(last_purchase_date, first_purchase_date) > 0
+        THEN DATEDIFF(last_purchase_date, first_purchase_date) / total_orders
         ELSE 0
     END;
 
@@ -299,13 +361,13 @@ SET churn_risk = CASE
     ELSE '低'
 END;
 
--- 3.7 更新品类偏好(TOP3)
+-- 3.7 更新品类偏好(TOP3) - 按NetSales排序
 WITH buyer_category_stats AS (
     SELECT
         买家昵称,
         category,
         COUNT(DISTINCT 子订单号) as category_orders,
-        SUM(成交总金额 - IFNULL(退款金额, 0)) as category_spend
+        SUM(成交总金额 - IFNULL(退款金额, 0)) as category_netsales
     FROM dunhill_t01_trade_line
     WHERE category IS NOT NULL AND category != ''
       AND 买家昵称 IS NOT NULL AND 买家昵称 != ''
@@ -315,7 +377,7 @@ ranked_categories AS (
     SELECT
         买家昵称,
         category,
-        ROW_NUMBER() OVER (PARTITION BY 买家昵称 ORDER BY category_orders DESC) as rank_num
+        ROW_NUMBER() OVER (PARTITION BY 买家昵称 ORDER BY category_netsales DESC) as rank_num
     FROM buyer_category_stats
     WHERE 买家昵称 IN (SELECT buyer_nick FROM tmp_target_buyers)
 )
@@ -412,11 +474,14 @@ BEGIN
             COUNT(DISTINCT t.订单号) as total_orders,
             MIN(t.最后付款时间) as first_purchase_date,
             MAX(t.最后付款时间) as last_purchase_date,
+            SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH) THEN t.成交总金额 ELSE 0 END) as rolling_24m_gmv,
             SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH) THEN (t.成交总金额 - IFNULL(t.退款金额, 0)) ELSE 0 END) as rolling_24m_netsales,
             COUNT(DISTINCT CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH) THEN t.订单号 END) as rolling_24m_orders,
-            SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH) THEN (t.成交总金额 - IFNULL(t.退款金额, 0)) ELSE 0 END) as l6m_spend,
+            SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH) THEN (t.成交总金额 - IFNULL(t.退款金额, 0)) ELSE 0 END) as l6m_netsales,
+            SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH) THEN t.成交总金额 ELSE 0 END) as l6m_gmv,
             COUNT(DISTINCT CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH) THEN t.订单号 END) as l6m_orders,
-            SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH) THEN (t.成交总金额 - IFNULL(t.退款金额, 0)) ELSE 0 END) as l1y_spend,
+            SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH) THEN (t.成交总金额 - IFNULL(t.退款金额, 0)) ELSE 0 END) as l1y_netsales,
+            SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH) THEN t.成交总金额 ELSE 0 END) as l1y_gmv,
             COUNT(DISTINCT CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH) THEN t.订单号 END) as l1y_orders,
             MAX(t.城市) as city,
             MAX(CASE WHEN t.channel IS NOT NULL THEN t.channel END) as channel
@@ -436,11 +501,14 @@ BEGIN
         tb.total_orders = new_data.total_orders,
         tb.first_purchase_date = new_data.first_purchase_date,
         tb.last_purchase_date = new_data.last_purchase_date,
+        tb.rolling_24m_gmv = new_data.rolling_24m_gmv,
         tb.rolling_24m_netsales = new_data.rolling_24m_netsales,
         tb.rolling_24m_orders = new_data.rolling_24m_orders,
-        tb.l6m_spend = new_data.l6m_spend,
+        tb.l6m_netsales = new_data.l6m_netsales,
+        tb.l6m_gmv = new_data.l6m_gmv,
         tb.l6m_orders = new_data.l6m_orders,
-        tb.l1y_spend = new_data.l1y_spend,
+        tb.l1y_netsales = new_data.l1y_netsales,
+        tb.l1y_gmv = new_data.l1y_gmv,
         tb.l1y_orders = new_data.l1y_orders,
         tb.city = new_data.city,
         tb.updated_at = CURRENT_TIMESTAMP;
@@ -462,11 +530,14 @@ BEGIN
         total_orders,
         first_purchase_date,
         last_purchase_date,
+        rolling_24m_gmv,
         rolling_24m_netsales,
         rolling_24m_orders,
-        l6m_spend,
+        l6m_netsales,
+        l6m_gmv,
         l6m_orders,
-        l1y_spend,
+        l1y_netsales,
+        l1y_gmv,
         l1y_orders,
         city
     )
@@ -483,11 +554,14 @@ BEGIN
         COUNT(DISTINCT t.订单号),
         MIN(t.最后付款时间),
         MAX(t.最后付款时间),
+        SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH) THEN t.成交总金额 ELSE 0 END),
         SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH) THEN (t.成交总金额 - IFNULL(t.退款金额, 0)) ELSE 0 END),
         COUNT(DISTINCT CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH) THEN t.订单号 END),
         SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH) THEN (t.成交总金额 - IFNULL(t.退款金额, 0)) ELSE 0 END),
+        SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH) THEN t.成交总金额 ELSE 0 END),
         COUNT(DISTINCT CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH) THEN t.订单号 END),
         SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH) THEN (t.成交总金额 - IFNULL(t.退款金额, 0)) ELSE 0 END),
+        SUM(CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH) THEN t.成交总金额 ELSE 0 END),
         COUNT(DISTINCT CASE WHEN t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH) THEN t.订单号 END),
         MAX(t.城市)
     FROM tmp_target_buyers_new tb
@@ -499,7 +573,7 @@ BEGIN
     SELECT CONCAT('➕ 新增了 ', affected_rows, ' 个目标买家') AS message;
 
     -- 4.5 重新计算所有派生字段
-    -- 有效订单数和退款率
+    -- 有效订单数、净订单数、退款率和购买频率
     UPDATE target_buyers_precomputed
     SET
         total_net_orders = total_orders - (
@@ -508,8 +582,36 @@ BEGIN
             WHERE 买家昵称 = target_buyers_precomputed.buyer_nick
               AND 退款金额 > 0
         ),
+        rolling_24m_net_orders = rolling_24m_orders - (
+            SELECT COUNT(DISTINCT 订单号)
+            FROM dunhill_t01_trade_line
+            WHERE 买家昵称 = target_buyers_precomputed.buyer_nick
+              AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH)
+              AND 退款金额 > 0
+        ),
         refund_rate = CASE
             WHEN historical_gmv > 0 THEN historical_refund / historical_gmv
+            ELSE 0
+        END,
+        l6m_refund_rate = CASE
+            WHEN l6m_gmv > 0 THEN
+                (SELECT SUM(IFNULL(退款金额, 0))
+                 FROM dunhill_t01_trade_line
+                 WHERE 买家昵称 = target_buyers_precomputed.buyer_nick
+                   AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 6 MONTH)) / l6m_gmv
+            ELSE 0
+        END,
+        l1y_refund_rate = CASE
+            WHEN l1y_gmv > 0 THEN
+                (SELECT SUM(IFNULL(退款金额, 0))
+                 FROM dunhill_t01_trade_line
+                 WHERE 买家昵称 = target_buyers_precomputed.buyer_nick
+                   AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 12 MONTH)) / l1y_gmv
+            ELSE 0
+        END,
+        avg_purchase_interval_days = CASE
+            WHEN total_orders > 0 AND DATEDIFF(last_purchase_date, first_purchase_date) > 0
+            THEN DATEDIFF(last_purchase_date, first_purchase_date) / total_orders
             ELSE 0
         END;
 
@@ -597,13 +699,13 @@ BEGIN
         ELSE '低'
     END;
 
-    -- 品类偏好(TOP3)
+    -- 品类偏好(TOP3) - 按NetSales排序
     WITH buyer_category_stats AS (
         SELECT
             买家昵称,
             category,
             COUNT(DISTINCT 子订单号) as category_orders,
-            SUM(成交总金额 - IFNULL(退款金额, 0)) as category_spend
+            SUM(成交总金额 - IFNULL(退款金额, 0)) as category_netsales
         FROM dunhill_t01_trade_line
         WHERE category IS NOT NULL AND category != ''
           AND 买家昵称 IS NOT NULL AND 买家昵称 != ''
@@ -613,7 +715,7 @@ BEGIN
         SELECT
             买家昵称,
             category,
-            ROW_NUMBER() OVER (PARTITION BY 买家昵称 ORDER BY category_orders DESC) as rank_num
+            ROW_NUMBER() OVER (PARTITION BY 买家昵称 ORDER BY category_netsales DESC) as rank_num
         FROM buyer_category_stats
         WHERE 买家昵称 IN (SELECT buyer_nick FROM tmp_target_buyers_new)
     )
@@ -659,8 +761,8 @@ DELIMITER ;
 -- 步骤5: 创建定时事件(每天上午11点执行)
 -- ============================================
 
--- 启用事件调度器
-SET GLOBAL event_scheduler = ON;
+-- 启用事件调度器 (需要SUPER权限, 如果已启用可跳过)
+-- SET GLOBAL event_scheduler = ON;
 
 -- 删除旧事件(如果存在)
 DROP EVENT IF EXISTS event_refresh_target_buyers;

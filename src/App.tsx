@@ -360,7 +360,7 @@ const DashboardOverview: React.FC = () => {
             {
               label: '历史总净销售额',
               value: formatCurrency(metrics.total_netsales),
-              change: `近6月: ${formatCurrency(metrics.total_l6m_spend)}`,
+              change: `近6月: ${formatCurrency(metrics.total_l6m_netsales)}`,
               icon: DollarSign,
             },
             {
@@ -432,7 +432,7 @@ const DashboardOverview: React.FC = () => {
                       <td className="py-3 px-4">
                         <NotionTag text={buyer.vip_level} color="red" />
                       </td>
-                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_spend)}</td>
+                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_netsales)}</td>
                       <td className="py-3 px-4">
                         <span className="text-xs font-bold text-red-600">{buyer.churn_risk}</span>
                       </td>
@@ -451,7 +451,7 @@ const DashboardOverview: React.FC = () => {
                       <td className="py-3 px-4">
                         <NotionTag text={buyer.vip_level} color="orange" />
                       </td>
-                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_spend)}</td>
+                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_netsales)}</td>
                       <td className="py-3 px-4">
                         <span className="text-xs font-bold text-green-600">{buyer.churn_risk}</span>
                       </td>
@@ -470,7 +470,7 @@ const DashboardOverview: React.FC = () => {
                       <td className="py-3 px-4">
                         <NotionTag text={buyer.vip_level} color="yellow" />
                       </td>
-                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_spend)}</td>
+                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_netsales)}</td>
                       <td className="py-3 px-4">
                         <span className="text-xs font-bold text-yellow-600">{buyer.churn_risk}</span>
                       </td>
@@ -566,12 +566,19 @@ const ChatAnalysis: React.FC = () => {
           avatar_color: `bg-${['blue', 'green', 'orange', 'purple'][Math.floor(Math.random() * 4)]}-200 text-${['blue', 'green', 'orange', 'purple'][Math.floor(Math.random() * 4)]}-800`,
           city: buyer.city || 'Unknown',
           is_new_customer: buyer.buyer_type === 'SMOKER', // 简化判断
-          historical_ltv: Number(buyer.historical_net_sales || buyer.historical_ltv || 0),
+          historical_ltv: Number(buyer.historical_gmv || buyer.historical_net_sales || 0),
+          historical_gmv: Number(buyer.historical_gmv || 0),
+          historical_refund: Number(buyer.historical_refund || 0),
+          historical_net_sales: Number(buyer.historical_net_sales || 0),
+          refund_rate: Number(buyer.refund_rate || 0),
           total_orders: Number(buyer.total_orders || 0),
           discount_spend_amount: 0,
-          discount_ratio: 0,
-          l6m_spend: Number(buyer.l6m_spend || 0),
-          l6m_frequency: Number(buyer.l6m_orders || 0),
+          discount_ratio: Number(buyer.discount_ratio || 0),
+          l6m_netsales: Number(buyer.l6m_netsales || 0),
+          l6m_orders: Number(buyer.l6m_orders || 0),
+          l1y_netsales: Number(buyer.l1y_netsales || 0),
+          l1y_orders: Number(buyer.l1y_orders || 0),
+          l6m_refund_rate: Number(buyer.l6m_refund_rate || 0),
           recent_chat_frequency: 0,
           avg_reply_interval_days: 0,
           last_interaction_date: buyer.last_purchase_date,
@@ -619,25 +626,36 @@ const ChatAnalysis: React.FC = () => {
         ]);
 
         // 转换订单数据：将后端格式转换为前端期望的OrderRecord格式
-        // 后端每个产品一行，前端需要按order_id分组
-        const orderMap = new Map<string, any>();
-        ordersRaw.forEach((item: any) => {
-          const orderId = item.order_id;
-          if (!orderMap.has(orderId)) {
-            orderMap.set(orderId, {
-              order_id: orderId,
-              date: item.purchase_date.split('T')[0],
-              amount: 0,
-              status: 'Completed' as const,
-              items: [] as string[]
-            });
-          }
-          const order = orderMap.get(orderId);
-          order.amount += (item.net_amount || 0);
-          order.items.push(`${item.product_name || item.category || 'Unknown'} (${item.category || 'N/A'})`);
-        });
+        // 后端每个产品一行，前端保持独立，不合并
+        const orders = ordersRaw.map((item: any) => {
+          const gmv = Number(item['成交总金额']) || 0;
+          const refundAmount = Number(item['退款金额']) || 0;
+          const quantity = Number(item['件数']) || 1;
 
-        const orders = Array.from(orderMap.values());
+          // 计算退款件数（按退款金额占GMV的比例）
+          const refundedQty = gmv > 0 && refundAmount > 0
+            ? Math.round(quantity * (refundAmount / gmv))
+            : 0;
+
+          const netQty = Math.max(0, quantity - refundedQty);
+
+          return {
+            order_id: item['订单号'],
+            sub_order_id: item['子订单号'],
+            date: item['最后付款时间'].split('T')[0],
+            gmv: gmv,
+            netsales: Number(item.netsales || 0),
+            refund_amount: refundAmount,
+            refund_type: item['退款类型'] || null,
+            fp_md: item['FP_MD'] || 'FP',
+            image_url: item['图片地址'] || '',
+            items: [item['商品名称'] || 'Unknown'],
+            quantity: quantity,
+            gross_qty: quantity,
+            net_qty: netQty,
+            refunded_qty: refundedQty
+          };
+        });
 
         // 将订单历史和聊天记录添加到profile中
         return {
@@ -680,10 +698,17 @@ const ChatAnalysis: React.FC = () => {
       // 如果有AI分析结果，使用它；否则使用默认值
       analysis: buyerProfile.ai_analysis || currentSession.profile.analysis,
       // 使用真实数据更新字段
-      historical_ltv: buyerProfile.historical_ltv ?? currentSession.profile.historical_ltv,
+      historical_ltv: Number((buyerProfile as any).historical_gmv ?? currentSession.profile.historical_ltv),
+      historical_gmv: Number((buyerProfile as any).historical_gmv ?? currentSession.profile.historical_gmv),
+      historical_refund: Number((buyerProfile as any).historical_refund ?? 0),
+      historical_net_sales: Number((buyerProfile as any).historical_net_sales ?? currentSession.profile.historical_net_sales),
+      refund_rate: Number((buyerProfile as any).refund_rate ?? 0),
       total_orders: buyerProfile.total_orders ?? currentSession.profile.total_orders,
-      l6m_spend: buyerProfile.l6m_spend ?? currentSession.profile.l6m_spend,
-      l6m_frequency: buyerProfile.l6m_orders ?? currentSession.profile.l6m_frequency,
+      l6m_netsales: buyerProfile.l6m_netsales ?? currentSession.profile.l6m_netsales,
+      l6m_orders: buyerProfile.l6m_orders ?? currentSession.profile.l6m_orders,
+      l1y_netsales: (buyerProfile as any).l1y_netsales ?? currentSession.profile.l1y_netsales,
+      l1y_orders: (buyerProfile as any).l1y_orders ?? currentSession.profile.l1y_orders,
+      l6m_refund_rate: Number((buyerProfile as any).l6m_refund_rate ?? 0),
       vip_level: buyerProfile.vip_level ?? 'Unknown',
       city: buyerProfile.city ?? currentSession.profile.city,
       // 聊天指标
@@ -704,12 +729,12 @@ const ChatAnalysis: React.FC = () => {
   }, [currentSession, buyerProfile]);
 
   // Calculations for Metrics
-  const historicalAov = currentSession?.profile.total_orders > 0 
-    ? currentSession.profile.historical_ltv / currentSession.profile.total_orders 
+  const historicalAov = enrichedProfile?.total_orders > 0
+    ? (enrichedProfile.historical_ltv || 0) / enrichedProfile.total_orders
     : 0;
-  
-  const l6mAov = currentSession?.profile.l6m_frequency > 0
-    ? currentSession.profile.l6m_spend / currentSession.profile.l6m_frequency
+
+  const l6mAov = enrichedProfile?.l6m_orders > 0
+    ? (enrichedProfile.l6m_netsales || 0) / enrichedProfile.l6m_orders
     : 0;
 
   // Group messages by date and sort by date ascending (oldest first)
@@ -827,9 +852,9 @@ const ChatAnalysis: React.FC = () => {
                                 <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
                                 <span className="text-notion-muted">AOV: <span className="font-semibold text-notion-text">¥{historicalAov.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span></span>
                                 <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
-                                <span className="text-notion-muted">NetSales: <span className="font-semibold text-notion-text">¥{(enrichedProfile?.historical_ltv || 0).toLocaleString()}</span></span>
+                                <span className="text-notion-muted">NetSales: <span className="font-semibold text-notion-text">¥{((enrichedProfile as any)?.historical_net_sales || 0).toLocaleString()}</span></span>
                                 <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
-                                <span className="text-notion-muted">RRC: <span className="font-semibold text-notion-text">{((1 - (enrichedProfile?.historical_ltv || 0) / Math.max((enrichedProfile as any)?.historical_gmv || enrichedProfile?.historical_ltv || 1, 1)) * 100).toFixed(1)}%</span></span>
+                                <span className="text-notion-muted">RRC: <span className="font-semibold text-notion-text">{(((enrichedProfile as any)?.historical_refund || 0) / Math.max((enrichedProfile?.historical_ltv || 1), 1) * 100).toFixed(1)}%</span></span>
                                 <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
                                 <span className="text-notion-muted">Discount: <span className="font-semibold text-notion-text">{(Number((enrichedProfile as any)?.discount_ratio || 0) * 100).toFixed(0)}%</span></span>
                                 <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
@@ -974,20 +999,20 @@ const ChatAnalysis: React.FC = () => {
                                          <h4 className="text-xs font-bold text-notion-muted uppercase mb-3 border-b border-notion-border pb-1">Last 6 Months Activity</h4>
                                          <div className="grid grid-cols-2 gap-3">
                                              <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
-                                                 <div className="text-[10px] text-notion-muted uppercase">L6M Spend</div>
-                                                 <div className="text-lg font-mono font-semibold">¥{(enrichedProfile?.l6m_spend || 0).toLocaleString()}</div>
+                                                 <div className="text-[10px] text-notion-muted uppercase">L6M NetSales</div>
+                                                 <div className="text-lg font-mono font-semibold">¥{(enrichedProfile?.l6m_netsales || 0).toLocaleString()}</div>
                                              </div>
                                              <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
                                                  <div className="text-[10px] text-notion-muted uppercase">L6M Orders</div>
-                                                 <div className="text-lg font-mono font-semibold">{(enrichedProfile?.l6m_frequency || 0).toLocaleString()}</div>
+                                                 <div className="text-lg font-mono font-semibold">{(enrichedProfile?.l6m_orders || 0).toLocaleString()}</div>
                                              </div>
                                              <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
                                                  <div className="text-[10px] text-notion-muted uppercase">L6M AOV</div>
                                                  <div className="text-lg font-mono font-semibold">¥{l6mAov.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
                                              </div>
                                              <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
-                                                 <div className="text-[10px] text-notion-muted uppercase">L6M NetSales</div>
-                                                 <div className="text-lg font-mono font-semibold">¥{(enrichedProfile?.l6m_spend || 0).toLocaleString()}</div>
+                                                 <div className="text-[10px] text-notion-muted uppercase">L6M Refund Rate</div>
+                                                 <div className="text-lg font-mono font-semibold">{((enrichedProfile?.l6m_refund_rate || 0) * 100).toFixed(1)}%</div>
                                              </div>
                                          </div>
                                      </div>
@@ -1000,10 +1025,10 @@ const ChatAnalysis: React.FC = () => {
                                                 <div className="flex items-center justify-between mb-2">
                                                     <div>
                                                         <div className="text-2xl font-serif text-green-900 font-bold">
-                                                            ¥{(enrichedProfile as any).order_history[0].amount.toLocaleString()}
+                                                            ¥{Number((enrichedProfile as any).order_history?.[0]?.gmv || 0).toLocaleString()}
                                                         </div>
                                                         <div className="text-xs text-green-800 flex items-center gap-2 mt-1">
-                                                            <Calendar size={12} /> {(enrichedProfile as any).order_history[0].date}
+                                                            <Calendar size={12} /> {(enrichedProfile as any).order_history?.[0]?.date || 'N/A'}
                                                         </div>
                                                     </div>
                                                     <div className="p-2 bg-white rounded-full text-green-600 shadow-sm border border-green-100">
@@ -1075,12 +1100,12 @@ const ChatAnalysis: React.FC = () => {
                                          <div>
                                              <h3 className="text-sm font-bold text-green-900 uppercase tracking-wide mb-1">Latest Purchase</h3>
                                              <div className="text-2xl font-serif text-green-900">
-                                                 ¥{(enrichedProfile?.order_history || [])[0].amount.toLocaleString()}
+                                                 ¥{Number((enrichedProfile?.order_history || [])[0]?.gmv || 0).toLocaleString()}
                                              </div>
                                              <div className="text-xs text-green-800 mt-1 flex items-center gap-2">
-                                                 <Calendar size={12} /> {(enrichedProfile?.order_history || [])[0].date}
+                                                 <Calendar size={12} /> {(enrichedProfile?.order_history || [])[0]?.date || 'N/A'}
                                                  <span className="w-1 h-1 bg-green-400 rounded-full"></span>
-                                                 <span>{(enrichedProfile?.order_history || [])[0].status}</span>
+                                                 <span>{(enrichedProfile?.order_history || [])[0]?.fp_md || 'FP'}</span>
                                              </div>
                                          </div>
                                      </div>
@@ -1102,31 +1127,62 @@ const ChatAnalysis: React.FC = () => {
                                                  <tr className="border-b border-notion-border text-notion-muted text-xs uppercase bg-notion-gray_bg/30">
                                                      <th className="py-2 px-3 font-semibold">Date</th>
                                                      <th className="py-2 px-3 font-semibold">Order ID</th>
-                                                     <th className="py-2 px-3 font-semibold">Items</th>
-                                                     <th className="py-2 px-3 font-semibold">Amount</th>
-                                                     <th className="py-2 px-3 font-semibold">Status</th>
+                                                     <th className="py-2 px-3 font-semibold">Item</th>
+                                                     <th className="py-2 px-3 font-semibold">GMV</th>
+                                                     <th className="py-2 px-3 font-semibold">Gross Qty</th>
+                                                     <th className="py-2 px-3 font-semibold">NetSales</th>
+                                                     <th className="py-2 px-3 font-semibold">Net Qty</th>
+                                                     <th className="py-2 px-3 font-semibold">Refund</th>
+                                                     <th className="py-2 px-3 font-semibold">Type</th>
                                                  </tr>
                                              </thead>
                                              <tbody className="divide-y divide-notion-border">
                                                  {(enrichedProfile?.order_history || []).map((order: OrderRecord) => (
                                                      <tr key={order.order_id} className="hover:bg-notion-hover transition-colors">
-                                                         <td className="py-3 px-3 font-mono text-xs">{order.date}</td>
-                                                         <td className="py-3 px-3 font-mono text-xs text-notion-muted">{order.order_id}</td>
+                                                         <td className="py-3 px-3 font-mono text-xs whitespace-nowrap">{order.date}</td>
+                                                         <td className="py-3 px-3 font-mono text-xs text-notion-muted whitespace-nowrap">{order.order_id}</td>
                                                          <td className="py-3 px-3">
-                                                             <div className="flex flex-col gap-0.5">
-                                                                 {(order.items as string[]).map((item: string, i: number) => (
-                                                                     <span key={i} className="text-xs">{item}</span>
-                                                                 ))}
+                                                             <div className="flex items-center gap-2">
+                                                                 {order.image_url && (
+                                                                     <img
+                                                                         src={order.image_url}
+                                                                         alt={order.items[0]}
+                                                                         className="w-12 h-12 object-cover rounded border border-notion-border"
+                                                                         onError={(e) => {
+                                                                             const target = e.target as HTMLImageElement;
+                                                                             target.style.display = 'none';
+                                                                         }}
+                                                                     />
+                                                                 )}
+                                                                 <div className="flex flex-col gap-0.5">
+                                                                     {order.items.slice(0, 2).map((item: string, i: number) => (
+                                                                         <span key={i} className="text-xs line-clamp-1">{item}</span>
+                                                                     ))}
+                                                                 </div>
                                                              </div>
                                                          </td>
-                                                         <td className="py-3 px-3 font-semibold">¥{order.amount.toLocaleString()}</td>
+                                                         <td className="py-3 px-3 font-semibold text-xs">¥{(Number(order.gmv) || 0).toLocaleString()}</td>
+                                                         <td className="py-3 px-3 font-semibold text-xs text-center">{order.gross_qty || order.quantity || 0}</td>
+                                                         <td className="py-3 px-3 font-semibold text-xs">¥{(Number(order.netsales) || 0).toLocaleString()}</td>
+                                                         <td className="py-3 px-3 font-semibold text-xs text-center">
+                                                             <span className={Number(order.net_qty || 0) < (order.gross_qty || order.quantity || 0) ? 'text-orange-600' : ''}>
+                                                                 {order.net_qty || 0}
+                                                             </span>
+                                                         </td>
+                                                         <td className="py-3 px-3 text-xs">
+                                                             {(Number(order.refund_amount) || 0) > 0 ? (
+                                                                 <span className="text-red-600 font-semibold">¥{(Number(order.refund_amount) || 0).toLocaleString()}</span>
+                                                             ) : (
+                                                                 <span className="text-notion-muted">-</span>
+                                                             )}
+                                                         </td>
                                                          <td className="py-3 px-3">
                                                              <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
-                                                                 order.status === 'Completed' ? 'bg-green-50 text-green-700 border-green-100' :
-                                                                 order.status === 'Shipped' ? 'bg-blue-50 text-blue-700 border-blue-100' :
-                                                                 'bg-gray-100 text-gray-700 border-gray-200'
+                                                                 order.fp_md === 'FP'
+                                                                     ? 'bg-green-50 text-green-700 border-green-100'
+                                                                     : 'bg-orange-50 text-orange-700 border-orange-100'
                                                              }`}>
-                                                                 {order.status}
+                                                                 {order.fp_md}
                                                              </span>
                                                          </td>
                                                      </tr>
@@ -1203,8 +1259,8 @@ const ChatAnalysis: React.FC = () => {
                                                         <div key={msg.id} className={`flex ${isBuyer ? 'justify-start' : 'justify-end'}`}>
                                                             {/* Chat Bubble: Limited Width */}
                                                             <div className={`max-w-[80%] min-w-[20%] p-3 rounded-lg text-sm shadow-sm border group hover:shadow-md transition-shadow ${
-                                                                isBuyer 
-                                                                ? 'bg-white border-notion-border text-notion-text rounded-tl-none' 
+                                                                isBuyer
+                                                                ? 'bg-white border-notion-border text-notion-text rounded-tl-none'
                                                                 : 'bg-blue-50 border-blue-100 text-blue-900 rounded-tr-none'
                                                             }`}>
                                                                 <div className="flex justify-between items-center gap-4 mb-1 border-b border-black/5 pb-1">
@@ -1213,7 +1269,17 @@ const ChatAnalysis: React.FC = () => {
                                                                     </span>
                                                                     <span className="text-[10px] opacity-40 font-mono">{msg.msg_time.split(' ')[1]}</span>
                                                                 </div>
-                                                                <p className="leading-relaxed whitespace-pre-wrap mt-1">{msg.content}</p>
+                                                                {msg.msg_type === 'image' ? (
+                                                                    <div className="mt-1">
+                                                                        <img
+                                                                            src={msg.content}
+                                                                            alt="Chat image"
+                                                                            className="max-w-[300px] rounded border border-notion-border"
+                                                                        />
+                                                                    </div>
+                                                                ) : (
+                                                                    <p className="leading-relaxed whitespace-pre-wrap mt-1">{msg.content}</p>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     )

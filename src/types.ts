@@ -31,10 +31,19 @@ export interface CustomerAnalysis {
 
 export interface OrderRecord {
   order_id: string;
+  sub_order_id?: string;
   date: string;
-  amount: number;
-  status: 'Completed' | 'Shipped' | 'Refunded' | 'Pending';
-  items: string[];
+  gmv: number;              // 成交总金额
+  gross_qty?: number;       // 总件数
+  netsales: number;         // 净销售 = GMV - 退款
+  net_qty?: number;         // 净件数 = 总件数 - 退款件数
+  refund_amount: number;    // 退款金额
+  refund_type?: string;     // 退款类型：仅退款/退货退款
+  fp_md: string;           // FP/MD标识
+  image_url?: string;      // 商品图片URL
+  items: string[];         // 商品名称列表
+  quantity?: number;       // 件数（兼容旧字段）
+  refunded_qty?: number;   // 退款件数（内部计算）
 }
 
 export interface CustomerProfile {
