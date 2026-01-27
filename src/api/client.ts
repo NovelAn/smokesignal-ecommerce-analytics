@@ -1,33 +1,95 @@
 /**
  * API Client for SmokeSignal Backend
  * 连接到 FastAPI 后端 (使用预计算表 - v2 API)
+ *
+ * 功能：
+ * - 请求取消（AbortController）
+ * - 响应缓存
+ * - 统一错误处理
+ * - 请求日志
  */
 
-const API_BASE = '/api/v2';
+import config from '../config/env';
+import { fetchWithCache, cacheKeys } from '../utils/cache';
+import { logger } from '../utils/logger';
+import { CACHE } from '../constants/cache';
+
+const API_BASE = config.apiBaseUrl;
 
 /**
- * 通用错误处理
+ * 通用 API 错误类
  */
-class APIError extends Error {
-  constructor(public status: number, message: string) {
+export class APIError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public detail?: string
+  ) {
     super(message);
     this.name = 'APIError';
   }
 }
 
 /**
- * API响应包装器
+ * API 请求配置
+ */
+interface RequestConfig {
+  signal?: AbortSignal;
+  useCache?: boolean;
+  cacheTTL?: number;
+}
+
+/**
+ * API 响应包装器
+ * 统一处理响应和错误
  */
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new APIError(response.status, error.detail || error.message || '请求失败');
+    const error = await response.json().catch(() => ({
+      detail: response.statusText
+    }));
+
+    const message = error.detail || error.message || '请求失败';
+    logger.error(`API Error [${response.status}]:`, message);
+
+    throw new APIError(response.status, message, error.detail);
   }
+
   return response.json();
 }
 
 /**
- * API客户端
+ * 执行 fetch 请求（支持取消和缓存）
+ */
+async function fetchRequest<T>(
+  url: string,
+  options: RequestInit = {},
+  config: RequestConfig = {}
+): Promise<T> {
+  const { signal, useCache = false, cacheTTL } = config;
+
+  // 添加 signal 到 fetch options
+  const fetchOptions: RequestInit = {
+    ...options,
+    signal,
+  };
+
+  // 如果启用缓存，尝试从缓存获取
+  if (useCache) {
+    return fetchWithCache(
+      url,
+      () => fetch(url, fetchOptions).then(res => handleResponse<T>(res)),
+      cacheTTL
+    );
+  }
+
+  // 直接请求
+  const response = await fetch(url, fetchOptions);
+  return handleResponse<T>(response);
+}
+
+/**
+ * API 客户端
  */
 export const apiClient = {
   // ========== Dashboard 相关 ==========
@@ -35,10 +97,17 @@ export const apiClient = {
   /**
    * 获取Dashboard汇总指标
    * GET /api/v2/dashboard/metrics
+   *
+   * @param signal - 可选的 AbortSignal，用于取消请求
    */
-  getDashboardMetrics: async () => {
-    const response = await fetch(`${API_BASE}/dashboard/metrics`);
-    return handleResponse<DashboardMetrics>(response);
+  getDashboardMetrics: async (signal?: AbortSignal) => {
+    const url = `${API_BASE}/dashboard/metrics`;
+
+    return fetchRequest<DashboardMetrics>(url, {}, {
+      signal,
+      useCache: true, // Dashboard 数据可以缓存
+      cacheTTL: CACHE.DASHBOARD_TTL,
+    });
   },
 
   // ========== 买家列表相关 ==========
@@ -47,16 +116,20 @@ export const apiClient = {
    * 获取所有目标买家列表(分页)
    * GET /api/v2/buyers
    */
-  getBuyers: async (params: {
-    search?: string;
-    buyer_type?: 'SMOKER' | 'VIC' | 'BOTH';
-    vip_level?: 'V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP';
-    channel?: 'DTC' | 'PFS';
-    sort_by?: 'last_purchase' | 'l6m_netsales' | 'vip_level';
-    limit?: number;
-    offset?: number;
-  } = {}) => {
+  getBuyers: async (
+    params: {
+      search?: string;
+      buyer_type?: 'SMOKER' | 'VIC' | 'BOTH';
+      vip_level?: 'V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP';
+      channel?: 'DTC' | 'PFS';
+      sort_by?: 'last_purchase' | 'l6m_netsales' | 'vip_level';
+      limit?: number;
+      offset?: number;
+    } = {},
+    signal?: AbortSignal
+  ) => {
     const queryParams = new URLSearchParams();
+
     if (params.search) queryParams.append('search', params.search);
     if (params.buyer_type) queryParams.append('buyer_type', params.buyer_type);
     if (params.vip_level) queryParams.append('vip_level', params.vip_level);
@@ -65,36 +138,59 @@ export const apiClient = {
     queryParams.append('limit', String(params.limit || 100));
     queryParams.append('offset', String(params.offset || 0));
 
-    const response = await fetch(`${API_BASE}/buyers?${queryParams}`);
-    return handleResponse<BuyersListResponse>(response);
+    const url = `${API_BASE}/buyers?${queryParams}`;
+
+    return fetchRequest<BuyersListResponse>(url, {}, {
+      signal,
+      useCache: true, // 列表数据可以短期缓存
+      cacheTTL: CACHE.BUYERS_LIST_TTL,
+    });
   },
 
   /**
    * 获取买家360°详情
    * GET /api/v2/buyers/{user_nick}
    */
-  getBuyerProfile: async (userNick: string, includeAI = false) => {
+  getBuyerProfile: async (userNick: string, includeAI = false, signal?: AbortSignal) => {
     const params = includeAI ? '?include_ai=true' : '';
-    const response = await fetch(`${API_BASE}/buyers/${encodeURIComponent(userNick)}${params}`);
-    return handleResponse<BuyerProfile>(response);
+    const url = `${API_BASE}/buyers/${encodeURIComponent(userNick)}${params}`;
+
+    // AI 分析不缓存，普通请求缓存
+    const useCache = !includeAI;
+
+    return fetchRequest<BuyerProfile>(url, {}, {
+      signal,
+      useCache,
+      cacheTTL: CACHE.BUYER_DETAIL_TTL,
+    });
   },
 
   /**
    * 获取买家订单历史
    * GET /api/v2/buyers/{user_nick}/orders
    */
-  getBuyerOrders: async (userNick: string, limit = 50) => {
-    const response = await fetch(`${API_BASE}/buyers/${encodeURIComponent(userNick)}/orders?limit=${limit}`);
-    return handleResponse<OrderRecord[]>(response);
+  getBuyerOrders: async (userNick: string, limit = 50, signal?: AbortSignal) => {
+    const url = `${API_BASE}/buyers/${encodeURIComponent(userNick)}/orders?limit=${limit}`;
+
+    return fetchRequest<OrderRecord[]>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.MEDIUM_TTL,
+    });
   },
 
   /**
    * 获取买家聊天记录
    * GET /api/v2/buyers/{user_nick}/chats
    */
-  getBuyerChats: async (userNick: string, limit = 100) => {
-    const response = await fetch(`${API_BASE}/buyers/${encodeURIComponent(userNick)}/chats?limit=${limit}`);
-    return handleResponse<ChatMessage[]>(response);
+  getBuyerChats: async (userNick: string, limit = 100, signal?: AbortSignal) => {
+    const url = `${API_BASE}/buyers/${encodeURIComponent(userNick)}/chats?limit=${limit}`;
+
+    return fetchRequest<ChatMessage[]>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.SHORT_TTL, // 聊天数据变化较快，短期缓存
+    });
   },
 
   // ========== 筛选查询相关 ==========
@@ -103,54 +199,104 @@ export const apiClient = {
    * 按买家类型筛选
    * GET /api/v2/buyers/type/{buyer_type}
    */
-  getBuyersByType: async (buyerType: 'SMOKER' | 'VIC' | 'BOTH', limit = 100, offset = 0) => {
-    const response = await fetch(`${API_BASE}/buyers/type/${buyerType}?limit=${limit}&offset=${offset}`);
-    return handleResponse<BuyerInfo[]>(response);
+  getBuyersByType: async (
+    buyerType: 'SMOKER' | 'VIC' | 'BOTH',
+    limit = 100,
+    offset = 0,
+    signal?: AbortSignal
+  ) => {
+    const url = `${API_BASE}/buyers/type/${buyerType}?limit=${limit}&offset=${offset}`;
+
+    return fetchRequest<BuyerInfo[]>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.BUYERS_LIST_TTL,
+    });
   },
 
   /**
    * 按VIP等级筛选
    * GET /api/v2/buyers/vip-level/{vip_level}
    */
-  getBuyersByVIPLevel: async (vipLevel: 'V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP', limit = 100, offset = 0) => {
-    const response = await fetch(`${API_BASE}/buyers/vip-level/${vipLevel}?limit=${limit}&offset=${offset}`);
-    return handleResponse<BuyerInfo[]>(response);
+  getBuyersByVIPLevel: async (
+    vipLevel: 'V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP',
+    limit = 100,
+    offset = 0,
+    signal?: AbortSignal
+  ) => {
+    const url = `${API_BASE}/buyers/vip-level/${vipLevel}?limit=${limit}&offset=${offset}`;
+
+    return fetchRequest<BuyerInfo[]>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.BUYERS_LIST_TTL,
+    });
   },
 
   /**
    * 获取VIC买家列表
    * GET /api/v2/buyers/vic
    */
-  getVICBuyers: async (limit = 100, offset = 0) => {
-    const response = await fetch(`${API_BASE}/buyers/vic?limit=${limit}&offset=${offset}`);
-    return handleResponse<BuyerInfo[]>(response);
+  getVICBuyers: async (limit = 100, offset = 0, signal?: AbortSignal) => {
+    const url = `${API_BASE}/buyers/vic?limit=${limit}&offset=${offset}`;
+
+    return fetchRequest<BuyerInfo[]>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.BUYERS_LIST_TTL,
+    });
   },
 
   /**
    * 获取Smoker买家列表
    * GET /api/v2/buyers/smoker
    */
-  getSmokerBuyers: async (limit = 100, offset = 0) => {
-    const response = await fetch(`${API_BASE}/buyers/smoker?limit=${limit}&offset=${offset}`);
-    return handleResponse<BuyerInfo[]>(response);
+  getSmokerBuyers: async (limit = 100, offset = 0, signal?: AbortSignal) => {
+    const url = `${API_BASE}/buyers/smoker?limit=${limit}&offset=${offset}`;
+
+    return fetchRequest<BuyerInfo[]>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.BUYERS_LIST_TTL,
+    });
   },
 
   /**
    * 获取流失风险买家
    * GET /api/v2/buyers/churn-risk/{risk_level}
    */
-  getChurnRiskBuyers: async (riskLevel: '高' | '中' | '低', limit = 100, offset = 0) => {
-    const response = await fetch(`${API_BASE}/buyers/churn-risk/${riskLevel}?limit=${limit}&offset=${offset}`);
-    return handleResponse<BuyerInfo[]>(response);
+  getChurnRiskBuyers: async (
+    riskLevel: '高' | '中' | '低',
+    limit = 100,
+    offset = 0,
+    signal?: AbortSignal
+  ) => {
+    const url = `${API_BASE}/buyers/churn-risk/${riskLevel}?limit=${limit}&offset=${offset}`;
+
+    return fetchRequest<BuyerInfo[]>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.BUYERS_LIST_TTL,
+    });
   },
 
   /**
    * 获取高价值买家
    * GET /api/v2/buyers/high-value
    */
-  getHighValueBuyers: async (minL6MSpend = 5000, limit = 100, offset = 0) => {
-    const response = await fetch(`${API_BASE}/buyers/high-value?min_l6m_netsales=${minL6MSpend}&limit=${limit}&offset=${offset}`);
-    return handleResponse<BuyerInfo[]>(response);
+  getHighValueBuyers: async (
+    minL6MSpend = 5000,
+    limit = 100,
+    offset = 0,
+    signal?: AbortSignal
+  ) => {
+    const url = `${API_BASE}/buyers/high-value?min_l6m_netsales=${minL6MSpend}&limit=${limit}&offset=${offset}`;
+
+    return fetchRequest<BuyerInfo[]>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.BUYERS_LIST_TTL,
+    });
   },
 
   // ========== 统计数据相关 ==========
@@ -159,18 +305,28 @@ export const apiClient = {
    * 按渠道统计
    * GET /api/v2/stats/channel
    */
-  getChannelStats: async () => {
-    const response = await fetch(`${API_BASE}/stats/channel`);
-    return handleResponse<ChannelStats[]>(response);
+  getChannelStats: async (signal?: AbortSignal) => {
+    const url = `${API_BASE}/stats/channel`;
+
+    return fetchRequest<ChannelStats[]>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.STATS_TTL,
+    });
   },
 
   /**
    * 获取需要优先处理的客户
    * GET /api/v2/actionable-customers
    */
-  getActionableCustomers: async (limit = 50) => {
-    const response = await fetch(`${API_BASE}/actionable-customers?limit=${limit}`);
-    return handleResponse<ActionableCustomersResponse>(response);
+  getActionableCustomers: async (limit = 50, signal?: AbortSignal) => {
+    const url = `${API_BASE}/actionable-customers?limit=${limit}`;
+
+    return fetchRequest<ActionableCustomersResponse>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.BUYERS_LIST_TTL,
+    });
   },
 };
 
@@ -256,10 +412,14 @@ export interface BuyerProfile {
   refund_rate: number;
 
   // 时间段数据
+  l6m_gmv: number;
   l6m_netsales: number;
   l6m_orders: number;
+  l6m_refund_rate: number;
+  l1y_gmv: number;
   l1y_netsales: number;
   l1y_orders: number;
+  l1y_refund_rate: number;
   rolling_24m_netsales: number;
   rolling_24m_orders: number;
 

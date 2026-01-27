@@ -77,6 +77,7 @@ import { apiClient, DashboardMetrics, BuyerProfile as APIBuyerProfile } from './
 import { useDataFetchingWithRetry } from './hooks/useDataFetching';
 import { LoadingSpinner, CardSkeleton, TableSkeleton, MetricCardSkeleton } from './components/common/LoadingState';
 import { ErrorAlert, EmptyState } from './components/common/ErrorAlert';
+import { DashboardOverview } from './views/DashboardOverview';
 
 // --- Notion Style Components ---
 
@@ -110,433 +111,23 @@ const NotionTag: React.FC<{ text: string; color?: 'gray' | 'brown' | 'orange' | 
   return <span className={`px-1.5 py-0.5 rounded text-xs font-medium mr-1 ${colors[color]}`}>{text}</span>;
 };
 
-// --- New Keyword Analysis Component ---
-
-const KeywordAnalysisPanel: React.FC<{ timeRange: '7d' | '15d' | '30d' | '90d' | '1y' }> = ({ timeRange }) => {
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-
-  // Cool Tone Palette (Blue, Cyan, Indigo, Slate) - Professional, Clean, Distinct
-  const COOL_PALETTE = [
-    '#3B82F6', // Blue 500 (Primary)
-    '#0EA5E9', // Sky 500
-    '#06B6D4', // Cyan 500
-    '#6366F1', // Indigo 500
-    '#64748B', // Slate 500 (Neutral Cool)
-    '#8B5CF6', // Violet 500 (Accent)
-  ];
-
-  // ⚠️ 占位数据 - 后端API未实现，显示为0
-  // TODO: 等待第四阶段开发完成后再替换为真实数据
-  const { categoryData, keywordData, totalVolume } = useMemo(() => {
-    // 创建空的分类数据（显示为0）
-    const categoryDataList = [
-      { name: 'Shipping', value: 0, fill: COOL_PALETTE[0] },
-      { name: 'Specs', value: 0, fill: COOL_PALETTE[1] },
-      { name: 'After-sales', value: 0, fill: COOL_PALETTE[2] },
-      { name: 'Discount', value: 0, fill: COOL_PALETTE[3] },
-      { name: 'Packaging', value: 0, fill: COOL_PALETTE[4] },
-      { name: 'Gifted', value: 0, fill: COOL_PALETTE[5] },
-    ];
-
-    // 创建空的关键词数据（显示为0）
-    const keywordDataList = [
-      { text: 'Shipping Speed', value: 0, category: 'Shipping', fill: COOL_PALETTE[0] },
-      { text: 'Product Quality', value: 0, category: 'Specs', fill: COOL_PALETTE[1] },
-      { text: 'Return Policy', value: 0, category: 'After-sales', fill: COOL_PALETTE[2] },
-      { text: 'Price', value: 0, category: 'Discount', fill: COOL_PALETTE[3] },
-      { text: 'Packaging', value: 0, category: 'Packaging', fill: COOL_PALETTE[4] },
-    ];
-
-    return {
-      categoryData: categoryDataList,
-      keywordData: keywordDataList,
-      totalVolume: 0
-    };
-  }, [timeRange, selectedCategory]);
-
-  return (
-    <NotionCard
-        title="Keyword & Issue Analysis"
-        icon={Database}
-        className="h-[500px] flex flex-col"
-        action={
-            selectedCategory && (
-                <button
-                    onClick={() => setSelectedCategory(null)}
-                    className="px-2 py-1 text-xs text-notion-muted hover:text-blue-600 border border-transparent hover:border-blue-200 rounded transition-colors flex items-center gap-1"
-                >
-                    <XCircle size={12}/> Clear Filter: {selectedCategory}
-                </button>
-            )
-        }
-    >
-        <div className="flex flex-col lg:flex-row h-full gap-8">
-            {/* Left: Category Distribution (Donut) */}
-            <div className="flex-1 flex flex-col">
-                <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-xs font-bold text-notion-muted uppercase tracking-wider flex items-center gap-2">
-                        <PieIcon size={12} /> Categories Distribution
-                    </h4>
-                    <span className="px-2 py-1 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded text-[10px] font-medium">
-                        数据开发中 (Coming Soon)
-                    </span>
-                </div>
-                <div className="flex-1 relative">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <Pie
-                                data={categoryData}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={60}
-                                outerRadius={80}
-                                paddingAngle={2}
-                                dataKey="value"
-                                onClick={(data) => setSelectedCategory(data.name === selectedCategory ? null : data.name)}
-                                label={({ name, percent }) => percent > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : ''}
-                                labelLine={{ stroke: '#9B9A97', strokeWidth: 1 }}
-                            >
-                                {categoryData.map((entry, index) => (
-                                    <Cell
-                                        key={`cell-${index}`}
-                                        fill={entry.fill}
-                                        stroke={selectedCategory === entry.name ? '#1E3A8A' : 'none'}
-                                        strokeWidth={selectedCategory === entry.name ? 2 : 0}
-                                        className="cursor-pointer hover:opacity-80 transition-all"
-                                    />
-                                ))}
-                            </Pie>
-                            <Tooltip
-                                contentStyle={{ backgroundColor: '#fff', borderColor: '#E9E9E7', borderRadius: '4px', fontSize: '12px' }}
-                                itemStyle={{ color: '#37352F' }}
-                                formatter={(value: number) => [`${value}`, 'Volume']}
-                            />
-                        </PieChart>
-                    </ResponsiveContainer>
-                    {/* Centered Label */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                        <span className="text-2xl font-bold text-notion-muted">0</span>
-                        <span className="text-[10px] text-notion-muted uppercase tracking-wider">Total</span>
-                    </div>
-                </div>
-            </div>
-
-            {/* Separator */}
-            <div className="w-px bg-notion-border hidden lg:block my-4"></div>
-
-            {/* Right: Top Keywords (Bar) */}
-            <div className="flex-[1.2] flex flex-col">
-                <div className="flex items-center justify-between mb-2">
-                     <h4 className="text-xs font-bold text-notion-muted uppercase tracking-wider flex items-center gap-2">
-                        <BarChartIcon size={12} />
-                        {selectedCategory ? `${selectedCategory} Top Keywords` : 'Overall Top Keywords'}
-                    </h4>
-                </div>
-                <div className="flex-1">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                            layout="vertical"
-                            data={keywordData}
-                            margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                        >
-                            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E9E9E7" />
-                            <XAxis type="number" hide />
-                            <YAxis
-                                dataKey="text"
-                                type="category"
-                                width={100}
-                                tick={{ fontSize: 11, fill: '#37352F' }}
-                                axisLine={false}
-                                tickLine={false}
-                            />
-                            <Tooltip
-                                cursor={{ fill: '#F7F7F5' }}
-                                contentStyle={{ backgroundColor: '#fff', borderColor: '#E9E9E7', borderRadius: '4px', fontSize: '12px' }}
-                            />
-                            <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={20} animationDuration={500}>
-                                {keywordData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={entry.fill || '#9CA3AF'} />
-                                ))}
-                                <LabelList dataKey="value" position="right" fontSize={11} fill="#9CA3AF" />
-                            </Bar>
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
-            </div>
-        </div>
-
-        {/* Insight Footer */}
-        <div className="mt-4 pt-3 border-t border-notion-border flex items-start gap-3">
-            <div className="p-1.5 bg-yellow-50 rounded text-yellow-600 shrink-0 mt-0.5">
-                <Lightbulb size={14} />
-            </div>
-             <div className="text-xs text-notion-text">
-                <span className="font-semibold text-yellow-800">数据开发中:</span>
-                {' '}关键词分析功能正在开发中，将在第四阶段完成。届时将展示客户聊天中的关键词频率、问题类型分布等数据。
-            </div>
-        </div>
-    </NotionCard>
-  );
-};
-
-// --- Dashboard Sub-Components ---
-
-const DashboardOverview: React.FC = () => {
-  // 全局日期筛选器状态
-  const [timeRange, setTimeRange] = useState<'7d' | '15d' | '30d' | '90d' | '1y'>('1y');
-
-  // 获取Dashboard指标数据
-  const { data: metrics, isLoading: metricsLoading, error: metricsError } = useDataFetchingWithRetry<DashboardMetrics>(
-    () => apiClient.getDashboardMetrics(),
-    2 // 重试2次
-  );
-
-  // 获取可操作客户数据
-  const { data: actionableCustomers, isLoading: actionableLoading, error: actionableError } = useDataFetchingWithRetry(
-    () => apiClient.getActionableCustomers(50),
-    2
-  );
-
-  // 格式化数字
-  const formatNumber = (num: number | string) => {
-    const n = Number(num);
-    if (n >= 10000) return (n / 10000).toFixed(1) + '万';
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-    return n.toLocaleString();
-  };
-
-  // 格式化金额
-  const formatCurrency = (num: number | string) => {
-    const n = Number(num);
-    if (n >= 10000) return '¥' + (n / 10000).toFixed(1) + '万';
-    return '¥' + formatNumber(n);
-  };
-
-  return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Global Time Range Filter */}
-      <div className="flex justify-end">
-        <div className="flex bg-notion-gray_bg p-0.5 rounded-md border border-notion-border shadow-sm">
-          {[
-            { id: '7d' as const, label: '7 Days' },
-            { id: '15d' as const, label: '15 Days' },
-            { id: '30d' as const, label: '1 Mo' },
-            { id: '90d' as const, label: '1 Qtr' },
-            { id: '1y' as const, label: '1 Yr' }
-          ].map((range) => (
-            <button
-              key={range.id}
-              onClick={() => setTimeRange(range.id)}
-              className={`px-4 py-2 text-sm font-medium rounded-sm transition-all ${
-                timeRange === range.id
-                ? 'bg-white text-blue-700 shadow-sm border border-blue-100'
-                : 'text-notion-muted hover:text-notion-text'
-              }`}
-            >
-              {range.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      {/* Top Metrics - Minimalist */}
-      {metricsLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCardSkeleton />
-          <MetricCardSkeleton />
-          <MetricCardSkeleton />
-          <MetricCardSkeleton />
-        </div>
-      ) : metricsError ? (
-        <ErrorAlert message="无法加载Dashboard指标" onRetry={() => window.location.reload()} />
-      ) : metrics ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            {
-              label: '目标买家总数',
-              value: formatNumber(metrics.total_target_buyers),
-              change: `VIC: ${formatNumber(metrics.total_vics)} | Smoker: ${formatNumber(metrics.total_smokers)}`,
-              icon: Users,
-            },
-            {
-              label: '历史总净销售额',
-              value: formatCurrency(metrics.total_netsales),
-              change: `近6月: ${formatCurrency(metrics.total_l6m_netsales)}`,
-              icon: DollarSign,
-            },
-            {
-              label: '总订单数',
-              value: formatNumber(metrics.total_orders),
-              change: `人均: ${Number(metrics.avg_orders_per_buyer).toFixed(1)}单`,
-              icon: ShoppingBag,
-            },
-            {
-              label: '平均退款率',
-              value: (Number(metrics.avg_refund_rate) * 100).toFixed(1) + '%',
-              change: `高流失风险: ${formatNumber(metrics.high_churn_count)}人`,
-              icon: Percent,
-            },
-          ].map((stat, idx) => (
-            <NotionCard key={idx} className="hover:bg-notion-hover transition-colors cursor-pointer">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-notion-muted text-sm flex items-center gap-2">
-                   <stat.icon size={14} /> {stat.label}
-                </span>
-              </div>
-              <div className="flex items-end gap-2">
-                 <h4 className="text-3xl font-serif text-notion-text">{stat.value}</h4>
-              </div>
-              <div className="text-xs text-notion-muted mt-1">{stat.change}</div>
-            </NotionCard>
-          ))}
-        </div>
-      ) : null}
-
-      {/* Row 2: Keyword Analysis (New Module) */}
-      <KeywordAnalysisPanel timeRange={timeRange} />
-
-      {/* Row 3: Actionable Customers Table (New) */}
-      <NotionCard
-        title="Priority Attention Board (High Risk / Actionable)"
-        icon={AlertTriangle}
-        className="overflow-hidden"
-        action={
-            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-notion-gray_bg text-notion-text border border-notion-border rounded text-xs font-medium hover:bg-gray-200 transition-colors">
-                <Download size={12} /> Download CSV
-            </button>
-        }
-      >
-        {actionableLoading ? (
-          <TableSkeleton rows={5} />
-        ) : actionableError ? (
-          <ErrorAlert message="无法加载可操作客户列表" />
-        ) : actionableCustomers ? (
-          <div className="flex flex-col h-[500px]">
-            {/* Scrollable Table */}
-            <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent border border-notion-border rounded-sm">
-              <table className="w-full text-left text-sm sticky">
-                <thead className="sticky top-0 bg-white z-10 shadow-sm">
-                  <tr className="border-b border-notion-border text-notion-muted text-xs uppercase bg-notion-gray_bg/30">
-                    <th className="py-2.5 px-4 font-semibold">User</th>
-                    <th className="py-2.5 px-4 font-semibold">VIP Level</th>
-                    <th className="py-2.5 px-4 font-semibold">L6M Spend</th>
-                    <th className="py-2.5 px-4 font-semibold">Churn Risk</th>
-                    <th className="py-2.5 px-4 font-semibold">Last Purchase</th>
-                    <th className="py-2.5 px-4 font-semibold text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-notion-border">
-                  {/* 高流失风险 */}
-                  {actionableCustomers.high_churn_risk.map((buyer: any, idx) => (
-                    <tr key={`high-${idx}`} className="hover:bg-notion-hover transition-colors">
-                      <td className="py-3 px-4 font-medium text-notion-text">{buyer.buyer_nick || buyer.user_nick || 'Unknown'}</td>
-                      <td className="py-3 px-4">
-                        <NotionTag text={buyer.vip_level} color="red" />
-                      </td>
-                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_netsales)}</td>
-                      <td className="py-3 px-4">
-                        <span className="text-xs font-bold text-red-600">{buyer.churn_risk}</span>
-                      </td>
-                      <td className="py-3 px-4 text-notion-muted text-xs">{buyer.last_purchase_date}</td>
-                      <td className="py-3 px-4 text-right">
-                        <button className="text-blue-600 hover:text-blue-800 text-xs font-semibold underline">
-                          Handle
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {/* 高价值客户 */}
-                  {actionableCustomers.high_value.map((buyer: any, idx) => (
-                    <tr key={`value-${idx}`} className="hover:bg-notion-hover transition-colors">
-                      <td className="py-3 px-4 font-medium text-notion-text">{buyer.buyer_nick || buyer.user_nick || 'Unknown'}</td>
-                      <td className="py-3 px-4">
-                        <NotionTag text={buyer.vip_level} color="orange" />
-                      </td>
-                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_netsales)}</td>
-                      <td className="py-3 px-4">
-                        <span className="text-xs font-bold text-green-600">{buyer.churn_risk}</span>
-                      </td>
-                      <td className="py-3 px-4 text-notion-muted text-xs">{buyer.last_purchase_date}</td>
-                      <td className="py-3 px-4 text-right">
-                        <button className="text-blue-600 hover:text-blue-800 text-xs font-semibold underline">
-                          Follow Up
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {/* 中流失风险 */}
-                  {actionableCustomers.medium_churn_risk.map((buyer: any, idx) => (
-                    <tr key={`medium-${idx}`} className="hover:bg-notion-hover transition-colors">
-                      <td className="py-3 px-4 font-medium text-notion-text">{buyer.buyer_nick || buyer.user_nick || 'Unknown'}</td>
-                      <td className="py-3 px-4">
-                        <NotionTag text={buyer.vip_level} color="yellow" />
-                      </td>
-                      <td className="py-3 px-4 text-xs font-mono">¥{formatNumber(buyer.l6m_netsales)}</td>
-                      <td className="py-3 px-4">
-                        <span className="text-xs font-bold text-yellow-600">{buyer.churn_risk}</span>
-                      </td>
-                      <td className="py-3 px-4 text-notion-muted text-xs">{buyer.last_purchase_date}</td>
-                      <td className="py-3 px-4 text-right">
-                        <button className="text-blue-600 hover:text-blue-800 text-xs font-semibold underline">
-                          Monitor
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <EmptyState
-            title="暂无需要关注的客户"
-            description="所有客户状态正常"
-          />
-        )}
-      </NotionCard>
-
-      {/* Row 4: Other Charts (Sentiment, Intent, Peak Hours) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <NotionCard title="Sentiment Trend (7 Days)" icon={TrendingUp} className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={DAILY_STATS}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E9E9E7" vertical={false} />
-              <XAxis dataKey="date" stroke="#9B9A97" tick={{ fill: '#9B9A97', fontSize: 10 }} axisLine={false} tickLine={false} />
-              <YAxis stroke="#9B9A97" tick={{ fill: '#9B9A97', fontSize: 10 }} domain={[0, 1]} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#E9E9E7' }} />
-              <Line type="monotone" dataKey="sentimentScore" stroke="#EA580C" strokeWidth={2} dot={{ fill: '#fff', stroke: '#EA580C', strokeWidth: 2 }} activeDot={{ r: 4 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </NotionCard>
-
-        <NotionCard title="Intent Distribution" icon={Users} className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <RadarChart cx="50%" cy="50%" outerRadius="70%" data={INTENT_DISTRIBUTION}>
-              <PolarGrid stroke="#E9E9E7" />
-              <PolarAngleAxis dataKey="subject" tick={{ fill: '#37352F', fontSize: 10 }} />
-              <PolarRadiusAxis angle={30} domain={[0, 150]} tick={false} axisLine={false} />
-              <Radar name="Intents" dataKey="A" stroke="#F59E0B" fill="#F59E0B" fillOpacity={0.4} />
-              <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#E9E9E7' }} />
-            </RadarChart>
-          </ResponsiveContainer>
-        </NotionCard>
-        
-        <NotionCard title="Peak Hours" icon={Clock} className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={HOURLY_ACTIVITY}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E9E9E7" vertical={false} />
-                <XAxis dataKey="hour" stroke="#9B9A97" tick={{ fill: '#9B9A97', fontSize: 10 }} axisLine={false} tickLine={false} />
-                <YAxis stroke="#9B9A97" tick={{ fill: '#9B9A97', fontSize: 10 }} axisLine={false} tickLine={false} />
-                <Tooltip cursor={{fill: '#F7F7F5'}} contentStyle={{ backgroundColor: '#fff', borderColor: '#E9E9E7' }} />
-                <Bar dataKey="value" fill="#9B9A97" radius={[2, 2, 0, 0]} activeBar={{ fill: '#37352F' }} />
-                </BarChart>
-            </ResponsiveContainer>
-        </NotionCard>
-      </div>
-    </div>
-  );
-};
 
 // --- Chat Analysis with CRM Features ---
+
+// Helper function to format date to YYYY-MM-DD
+const formatShortDate = (dateStr: string | undefined | null): string => {
+  if (!dateStr) return 'N/A';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return 'N/A';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  } catch {
+    return 'N/A';
+  }
+};
 
 const ChatAnalysis: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -582,6 +173,7 @@ const ChatAnalysis: React.FC = () => {
           recent_chat_frequency: 0,
           avg_reply_interval_days: 0,
           last_interaction_date: buyer.last_purchase_date,
+          last_chat_date: buyer.last_chat_date || buyer.last_purchase_date, // 添加最后聊天时间
           tags: [buyer.vip_level, buyer.churn_risk, buyer.buyer_type],
           intent_scores: INTENT_DISTRIBUTION,
           order_history: [],
@@ -704,11 +296,16 @@ const ChatAnalysis: React.FC = () => {
       historical_net_sales: Number((buyerProfile as any).historical_net_sales ?? currentSession.profile.historical_net_sales),
       refund_rate: Number((buyerProfile as any).refund_rate ?? 0),
       total_orders: buyerProfile.total_orders ?? currentSession.profile.total_orders,
-      l6m_netsales: buyerProfile.l6m_netsales ?? currentSession.profile.l6m_netsales,
-      l6m_orders: buyerProfile.l6m_orders ?? currentSession.profile.l6m_orders,
-      l1y_netsales: (buyerProfile as any).l1y_netsales ?? currentSession.profile.l1y_netsales,
-      l1y_orders: (buyerProfile as any).l1y_orders ?? currentSession.profile.l1y_orders,
+      // L6M 指标 - 直接从buyerProfile获取
+      l6m_gmv: Number((buyerProfile as any).l6m_gmv ?? 0),
+      l6m_netsales: Number(buyerProfile.l6m_netsales ?? 0),
+      l6m_orders: Number(buyerProfile.l6m_orders ?? 0),
       l6m_refund_rate: Number((buyerProfile as any).l6m_refund_rate ?? 0),
+      // L1Y 指标 - 直接从buyerProfile获取
+      l1y_gmv: Number((buyerProfile as any).l1y_gmv ?? 0),
+      l1y_netsales: Number(buyerProfile.l1y_netsales ?? 0),
+      l1y_orders: Number(buyerProfile.l1y_orders ?? 0),
+      l1y_refund_rate: Number((buyerProfile as any).l1y_refund_rate ?? 0),
       vip_level: buyerProfile.vip_level ?? 'Unknown',
       city: buyerProfile.city ?? currentSession.profile.city,
       // 聊天指标
@@ -737,6 +334,39 @@ const ChatAnalysis: React.FC = () => {
     ? (enrichedProfile.l6m_netsales || 0) / enrichedProfile.l6m_orders
     : 0;
 
+  // Group orders by date and merge items for same date
+  const groupedOrders = useMemo(() => {
+    const orders = enrichedProfile?.order_history || [];
+    if (!orders || orders.length === 0) return [];
+
+    const grouped: Record<string, {
+      date: string;
+      total_gmv: number;
+      items: string[];
+      fp_md: string;
+      order_ids: string[];
+    }> = {};
+
+    orders.forEach((order: OrderRecord) => {
+      const date = order.date;
+      if (!grouped[date]) {
+        grouped[date] = {
+          date,
+          total_gmv: 0,
+          items: [],
+          fp_md: order.fp_md || 'FP',
+          order_ids: []
+        };
+      }
+      grouped[date].total_gmv += Number(order.gmv) || 0;
+      grouped[date].items.push(...order.items);
+      grouped[date].order_ids.push(order.order_id);
+    });
+
+    // Convert to array and sort by date descending (most recent first)
+    return Object.values(grouped).sort((a, b) => b.date.localeCompare(a.date));
+  }, [enrichedProfile?.order_history]);
+
   // Group messages by date and sort by date ascending (oldest first)
   const groupedMessages = useMemo<Record<string, ChatMessage[]>>(() => {
      const chatHistory = enrichedProfile?.chat_history || currentSession?.messages || [];
@@ -761,6 +391,17 @@ const ChatAnalysis: React.FC = () => {
   const sortedDates = useMemo(() => {
      return Object.keys(groupedMessages).sort((a, b) => a.localeCompare(b));
   }, [groupedMessages]);
+
+  // Auto-expand all dates when chat history changes
+  React.useEffect(() => {
+    if (sortedDates.length > 0 && Object.keys(openDates).length === 0) {
+      const newOpenDates: Record<string, boolean> = {};
+      sortedDates.forEach(date => {
+        newOpenDates[date] = true;
+      });
+      setOpenDates(newOpenDates);
+    }
+  }, [sortedDates]);
 
   const toggleDate = (date: string) => {
      setOpenDates(prev => ({ ...prev, [date]: !prev[date] }));
@@ -802,18 +443,14 @@ const ChatAnalysis: React.FC = () => {
                    </div>
                  ) : (
                    filteredSessions.map((session, idx) => (
-                    <div 
-                        key={idx} 
+                    <div
+                        key={idx}
                         onClick={() => handleSelectUser(session)}
                         className={`p-3 border-b border-notion-border cursor-pointer hover:bg-notion-hover transition-colors group ${currentSession.user_nick === session.user_nick ? 'bg-white border-l-4 border-l-orange-500' : 'border-l-4 border-l-transparent'}`}
                     >
-                        <div className="flex items-center gap-2 mb-1">
-                            <div className={`w-2 h-2 rounded-full ${session.sentimentScore > 0.6 ? 'bg-green-400' : session.sentimentScore < 0.3 ? 'bg-red-400' : 'bg-gray-400'}`}></div>
+                        <div className="flex items-center justify-between">
                             <span className="font-medium text-sm text-notion-text truncate">{session.user_nick}</span>
-                        </div>
-                        <div className="flex items-center justify-between mt-1">
-                             <span className="text-[10px] text-notion-muted bg-notion-gray_bg px-1.5 py-0.5 rounded">{session.dominantIntent}</span>
-                             <span className="text-[10px] text-notion-muted group-hover:text-notion-text">{session.profile.last_interaction_date}</span>
+                            <span className="text-[10px] text-notion-muted group-hover:text-notion-text whitespace-nowrap ml-2">{formatShortDate((session.profile as any).last_chat_date || session.profile.last_interaction_date)}</span>
                         </div>
                     </div>
                    ))
@@ -858,7 +495,11 @@ const ChatAnalysis: React.FC = () => {
                                 <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
                                 <span className="text-notion-muted">Discount: <span className="font-semibold text-notion-text">{(Number((enrichedProfile as any)?.discount_ratio || 0) * 100).toFixed(0)}%</span></span>
                                 <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
-                                <span className="text-notion-muted">Top 3: <span className="font-semibold text-notion-text">{(enrichedProfile as any)?.top_category || 'N/A'} / {(enrichedProfile as any)?.second_category || 'N/A'} / {(enrichedProfile as any)?.third_category || 'N/A'}</span></span>
+                                <span className="text-notion-muted">Top 3: <span className="font-semibold text-notion-text">{[
+                                  (enrichedProfile as any)?.top_category,
+                                  (enrichedProfile as any)?.second_category,
+                                  (enrichedProfile as any)?.third_category
+                                ].filter(Boolean).join(' / ') || 'N/A'}</span></span>
                              </div>
                          </div>
                      </div>
@@ -994,72 +635,57 @@ const ChatAnalysis: React.FC = () => {
                              {/* Financial Metrics */}
                              <NotionCard icon={TrendingUp} title="Recent Financial Performance">
                                  <div className="space-y-6">
-                                     {/* Recent L6M Metrics */}
+                                     {/* Last 1 Year Activity */}
                                      <div>
-                                         <h4 className="text-xs font-bold text-notion-muted uppercase mb-3 border-b border-notion-border pb-1">Last 6 Months Activity</h4>
-                                         <div className="grid grid-cols-2 gap-3">
-                                             <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
-                                                 <div className="text-[10px] text-notion-muted uppercase">L6M NetSales</div>
-                                                 <div className="text-lg font-mono font-semibold">¥{(enrichedProfile?.l6m_netsales || 0).toLocaleString()}</div>
+                                         <h4 className="text-xs font-bold text-notion-muted uppercase mb-3 border-b border-notion-border pb-1">Last 1 Year Activity</h4>
+                                         <div className="grid grid-cols-5 gap-2">
+                                             <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-3 rounded border border-emerald-200">
+                                                 <div className="text-[10px] text-emerald-700 uppercase font-semibold">L1Y GMV</div>
+                                                 <div className="text-base font-mono font-bold text-emerald-900">¥{(enrichedProfile?.l1y_gmv || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
                                              </div>
-                                             <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
-                                                 <div className="text-[10px] text-notion-muted uppercase">L6M Orders</div>
-                                                 <div className="text-lg font-mono font-semibold">{(enrichedProfile?.l6m_orders || 0).toLocaleString()}</div>
+                                             <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-3 rounded border border-emerald-200">
+                                                 <div className="text-[10px] text-emerald-700 uppercase font-semibold">L1Y NetSales</div>
+                                                 <div className="text-base font-mono font-bold text-emerald-900">¥{(enrichedProfile?.l1y_netsales || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
                                              </div>
-                                             <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
-                                                 <div className="text-[10px] text-notion-muted uppercase">L6M AOV</div>
-                                                 <div className="text-lg font-mono font-semibold">¥{l6mAov.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+                                             <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-3 rounded border border-emerald-200">
+                                                 <div className="text-[10px] text-emerald-700 uppercase font-semibold">L1Y Orders</div>
+                                                 <div className="text-base font-mono font-bold text-emerald-900">{(enrichedProfile?.l1y_orders || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
                                              </div>
-                                             <div className="bg-notion-gray_bg p-3 rounded border border-notion-border">
-                                                 <div className="text-[10px] text-notion-muted uppercase">L6M Refund Rate</div>
-                                                 <div className="text-lg font-mono font-semibold">{((enrichedProfile?.l6m_refund_rate || 0) * 100).toFixed(1)}%</div>
+                                             <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-3 rounded border border-emerald-200">
+                                                 <div className="text-[10px] text-emerald-700 uppercase font-semibold">L1Y AOV</div>
+                                                 <div className="text-base font-mono font-bold text-emerald-900">¥{(enrichedProfile?.l1y_orders ? (enrichedProfile.l1y_netsales || 0) / enrichedProfile.l1y_orders : 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+                                             </div>
+                                             <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-3 rounded border border-emerald-200">
+                                                 <div className="text-[10px] text-emerald-700 uppercase font-semibold">L1Y Refund</div>
+                                                 <div className="text-base font-mono font-bold text-emerald-900">{((enrichedProfile?.l1y_refund_rate || 0) * 100).toFixed(1)}%</div>
                                              </div>
                                          </div>
                                      </div>
 
-                                     {/* Latest Purchase */}
-                                     {(enrichedProfile as any)?.order_history && (enrichedProfile as any).order_history.length > 0 && (
-                                        <div>
-                                            <h4 className="text-xs font-bold text-notion-muted uppercase mb-3 border-b border-notion-border pb-1">Latest Purchase</h4>
-                                            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-100 p-4 rounded-sm">
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <div>
-                                                        <div className="text-2xl font-serif text-green-900 font-bold">
-                                                            ¥{Number((enrichedProfile as any).order_history?.[0]?.gmv || 0).toLocaleString()}
-                                                        </div>
-                                                        <div className="text-xs text-green-800 flex items-center gap-2 mt-1">
-                                                            <Calendar size={12} /> {(enrichedProfile as any).order_history?.[0]?.date || 'N/A'}
-                                                        </div>
-                                                    </div>
-                                                    <div className="p-2 bg-white rounded-full text-green-600 shadow-sm border border-green-100">
-                                                        <CheckCircle size={24} />
-                                                    </div>
-                                                </div>
-                                                <div className="text-xs text-green-800">
-                                                    Items: {(enrichedProfile as any).order_history[0].items.join(', ')}
-                                                </div>
-                                            </div>
-                                        </div>
-                                     )}
-
-                                     {/* Category Preferences */}
+                                     {/* Last 6 Months Activity */}
                                      <div>
-                                         <h4 className="text-xs font-bold text-notion-muted uppercase mb-3 border-b border-notion-border pb-1">Category Preferences (Top 3)</h4>
-                                         <div className="space-y-2">
-                                             {[
-                                                 { rank: 1, name: (enrichedProfile as any)?.top_category || 'N/A', color: 'bg-orange-100 text-orange-800 border-orange-200' },
-                                                 { rank: 2, name: (enrichedProfile as any)?.second_category || 'N/A', color: 'bg-blue-100 text-blue-800 border-blue-200' },
-                                                 { rank: 3, name: (enrichedProfile as any)?.third_category || 'N/A', color: 'bg-green-100 text-green-800 border-green-200' }
-                                             ].map((cat) => (
-                                                 <div key={cat.rank} className="flex items-center gap-3">
-                                                     <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${cat.color}`}>
-                                                         {cat.rank}
-                                                     </div>
-                                                     <div className="flex-1">
-                                                         <div className="text-sm font-medium text-notion-text">{cat.name}</div>
-                                                     </div>
-                                                 </div>
-                                             ))}
+                                         <h4 className="text-xs font-bold text-notion-muted uppercase mb-3 border-b border-notion-border pb-1">Last 6 Months Activity</h4>
+                                         <div className="grid grid-cols-5 gap-2">
+                                             <div className="bg-gradient-to-br from-sky-50 to-sky-100 p-3 rounded border border-sky-200">
+                                                 <div className="text-[10px] text-sky-700 uppercase font-semibold">L6M GMV</div>
+                                                 <div className="text-base font-mono font-bold text-sky-900">¥{(enrichedProfile?.l6m_gmv || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+                                             </div>
+                                             <div className="bg-gradient-to-br from-sky-50 to-sky-100 p-3 rounded border border-sky-200">
+                                                 <div className="text-[10px] text-sky-700 uppercase font-semibold">L6M NetSales</div>
+                                                 <div className="text-base font-mono font-bold text-sky-900">¥{(enrichedProfile?.l6m_netsales || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+                                             </div>
+                                             <div className="bg-gradient-to-br from-sky-50 to-sky-100 p-3 rounded border border-sky-200">
+                                                 <div className="text-[10px] text-sky-700 uppercase font-semibold">L6M Orders</div>
+                                                 <div className="text-base font-mono font-bold text-sky-900">{(enrichedProfile?.l6m_orders || 0).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+                                             </div>
+                                             <div className="bg-gradient-to-br from-sky-50 to-sky-100 p-3 rounded border border-sky-200">
+                                                 <div className="text-[10px] text-sky-700 uppercase font-semibold">L6M AOV</div>
+                                                 <div className="text-base font-mono font-bold text-sky-900">¥{l6mAov.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
+                                             </div>
+                                             <div className="bg-gradient-to-br from-sky-50 to-sky-100 p-3 rounded border border-sky-200">
+                                                 <div className="text-[10px] text-sky-700 uppercase font-semibold">L6M Refund</div>
+                                                 <div className="text-base font-mono font-bold text-sky-900">{((enrichedProfile?.l6m_refund_rate || 0) * 100).toFixed(1)}%</div>
+                                             </div>
                                          </div>
                                      </div>
                                  </div>
@@ -1089,9 +715,9 @@ const ChatAnalysis: React.FC = () => {
                  {/* VIEW 2: PURCHASE HISTORY (MOVED UP) */}
                  {activeSubTab === 'orders' && (
                      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                         {(enrichedProfile?.order_history || []).length > 0 ? (
+                         {groupedOrders.length > 0 ? (
                              <>
-                                {/* Latest Order Highlight */}
+                                {/* Latest Order Highlight - Merged by Date */}
                                 <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-100 p-5 rounded-sm shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                                      <div className="flex items-start gap-4">
                                          <div className="p-3 bg-white rounded-full text-green-600 shadow-sm border border-green-100">
@@ -1100,19 +726,19 @@ const ChatAnalysis: React.FC = () => {
                                          <div>
                                              <h3 className="text-sm font-bold text-green-900 uppercase tracking-wide mb-1">Latest Purchase</h3>
                                              <div className="text-2xl font-serif text-green-900">
-                                                 ¥{Number((enrichedProfile?.order_history || [])[0]?.gmv || 0).toLocaleString()}
+                                                 ¥{groupedOrders[0]?.total_gmv.toLocaleString() || '0'}
                                              </div>
                                              <div className="text-xs text-green-800 mt-1 flex items-center gap-2">
-                                                 <Calendar size={12} /> {(enrichedProfile?.order_history || [])[0]?.date || 'N/A'}
+                                                 <Calendar size={12} /> {groupedOrders[0]?.date || 'N/A'}
                                                  <span className="w-1 h-1 bg-green-400 rounded-full"></span>
-                                                 <span>{(enrichedProfile?.order_history || [])[0]?.fp_md || 'FP'}</span>
+                                                 <span>{groupedOrders[0]?.fp_md || 'FP'}</span>
                                              </div>
                                          </div>
                                      </div>
                                      <div className="flex-1 bg-white/60 p-3 rounded border border-green-100/50">
                                          <span className="text-[10px] text-green-800 font-bold uppercase block mb-1">Items in this order:</span>
                                          <ul className="list-disc list-inside text-sm text-green-900">
-                                             {(enrichedProfile?.order_history || [])[0].items.map((item: string, idx: number) => (
+                                             {groupedOrders[0]?.items.map((item: string, idx: number) => (
                                                  <li key={idx}>{item}</li>
                                              ))}
                                          </ul>

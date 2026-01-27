@@ -29,11 +29,13 @@ SELECT
     rolling_24m_orders,
 
     -- L6M指标
+    l6m_gmv,
     l6m_netsales,
     l6m_orders,
     l6m_refund_rate,
 
     -- L1Y指标
+    l1y_gmv,
     l1y_netsales,
     l1y_orders,
     l1y_refund_rate,
