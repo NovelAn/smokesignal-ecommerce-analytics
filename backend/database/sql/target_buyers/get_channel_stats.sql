@@ -10,9 +10,9 @@ SELECT
     COUNT(*) as buyer_count,
     SUM(historical_net_sales) as total_netsales,
     AVG(historical_net_sales) as avg_netsales,
-    SUM(l6m_spend) as total_l6m_spend,
-    AVG(l6m_spend) as avg_l6m_spend,
-    SUM(l1y_spend) as total_l1y_spend,
+    SUM(l6m_netsales) as total_l6m_netsales,
+    AVG(l6m_netsales) as avg_l6m_netsales,
+    SUM(l1y_netsales) as total_l1y_netsales,
     AVG(total_orders) as avg_orders,
     AVG(refund_rate) as avg_refund_rate,
 

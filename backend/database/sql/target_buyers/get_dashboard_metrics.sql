@@ -15,8 +15,8 @@ SELECT
     -- 金额指标
     SUM(historical_net_sales) as total_netsales,
     AVG(historical_net_sales) as avg_netsales,
-    SUM(l6m_spend) as total_l6m_spend,
-    SUM(l1y_spend) as total_l1y_spend,
+    SUM(l6m_netsales) as total_l6m_netsales,
+    SUM(l1y_netsales) as total_l1y_netsales,
 
     -- 订单指标
     SUM(total_orders) as total_orders,

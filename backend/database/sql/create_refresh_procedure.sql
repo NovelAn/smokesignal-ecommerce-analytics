@@ -127,9 +127,9 @@ BEGIN
         last_purchase_date,
         rolling_24m_netsales,
         rolling_24m_orders,
-        l6m_spend,
+        l6m_netsales,
         l6m_orders,
-        l1y_spend,
+        l1y_netsales,                   
         l1y_orders,
         city
     )

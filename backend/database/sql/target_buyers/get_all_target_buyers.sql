@@ -17,9 +17,9 @@ SELECT
     client_monthly_tag,
     historical_net_sales,
     total_orders,
-    l6m_spend,
+    l6m_netsales,
     l6m_orders,
-    l1y_spend,
+    l1y_netsales,
     l1y_orders,
     city,
     top_category,
@@ -36,7 +36,7 @@ WHERE 1=1
 ORDER BY
     CASE
         WHEN %(sort_by)s = 'last_purchase' THEN last_purchase_date
-        WHEN %(sort_by)s = 'l6m_spend' THEN l6m_spend
+        WHEN %(sort_by)s = 'l6m_netsales' THEN l6m_netsales
         WHEN %(sort_by)s = 'vip_level' THEN
             CASE vip_level
                 WHEN 'V3' THEN 5
