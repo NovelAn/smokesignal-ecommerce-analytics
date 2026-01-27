@@ -374,7 +374,14 @@ const ChatAnalysis: React.FC = () => {
 
      const groups: Record<string, ChatMessage[]> = {};
      chatHistory.forEach((msg: ChatMessage) => {
-         const date = msg.msg_time.split(' ')[0];
+         // Handle both ISO 8601 format (2026-01-19T22:54:32) and space-separated format (2026-01-19 22:54:32)
+         let date: string;
+         if (msg.msg_time.includes('T')) {
+             date = msg.msg_time.split('T')[0];  // ISO 8601 format
+         } else {
+             date = msg.msg_time.split(' ')[0];  // Space-separated format
+         }
+
          if (!groups[date]) groups[date] = [];
          groups[date].push(msg);
      });
