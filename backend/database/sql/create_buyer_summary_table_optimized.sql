@@ -157,8 +157,8 @@ DELIMITER ;
 -- 步骤5: 创建定时任务（每天凌晨2点）
 -- ============================================
 
--- 启用事件调度器
-SET GLOBAL event_scheduler = ON;
+-- 启用事件调度器 (需要SUPER权限, 如果已启用可跳过)
+-- SET GLOBAL event_scheduler = ON;
 
 -- 删除旧事件（如果存在）
 DROP EVENT IF EXISTS event_refresh_buyer_summary;

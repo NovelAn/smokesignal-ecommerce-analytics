@@ -12,7 +12,7 @@ SELECT
     vip_level,
     client_monthly_tag,
     historical_net_sales,
-    l6m_spend,
+    l6m_netsales,
     l6m_orders,
     city,
     top_category,
@@ -21,5 +21,5 @@ SELECT
     last_chat_date
 FROM target_buyers_precomputed
 WHERE buyer_type = %s
-ORDER BY l6m_spend DESC
+ORDER BY l6m_netsales DESC
 LIMIT %s OFFSET %s;

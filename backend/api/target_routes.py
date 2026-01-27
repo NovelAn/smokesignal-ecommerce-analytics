@@ -30,7 +30,7 @@ async def get_all_buyers(
     buyer_type: Optional[str] = Query(None, description="买家类型: SMOKER/VIC/BOTH"),
     vip_level: Optional[str] = Query(None, description="VIP等级: V3/V2/V1/V0/Non-VIP"),
     channel: Optional[str] = Query(None, description="渠道: DTC/PFS"),
-    sort_by: str = Query('last_purchase', description="排序字段: last_purchase/l6m_spend/vip_level"),
+    sort_by: str = Query('last_purchase', description="排序字段: last_purchase/l6m_netsales/vip_level"),
     limit: int = Query(100, ge=1, le=1000, description="返回数量"),
     offset: int = Query(0, ge=0, description="偏移量")
 ) -> Dict[str, Any]:
@@ -44,7 +44,7 @@ async def get_all_buyers(
     - buyer_type: 买家类型 (SMOKER/VIC/BOTH)
     - vip_level: VIP等级 (V3/V2/V1/V0/Non-VIP)
     - channel: 渠道 (DTC/PFS)
-    - sort_by: 排序字段 (last_purchase/l6m_spend/vip_level)
+    - sort_by: 排序字段 (last_purchase/l6m_netsales/vip_level)
     """
     try:
         result = analyzer.get_all_buyers(
@@ -162,7 +162,7 @@ async def get_smoker_buyers(
     """
     获取Smoker买家列表(按消费金额排序)
 
-    性能: < 0.1秒 (使用l6m_spend索引)
+    性能: < 0.1秒 (使用l6m_netsales索引)
     """
     try:
         buyers = analyzer.get_smoker_buyers(limit, offset)
@@ -202,17 +202,17 @@ async def get_churn_risk_buyers(
 
 @router.get("/buyers/high-value")
 async def get_high_value_buyers(
-    min_l6m_spend: float = Query(5000, ge=0, description="最小近6个月消费金额"),
+    min_l6m_netsales: float = Query(5000, ge=0, description="最小近6个月消费金额"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0)
 ) -> List[Dict[str, Any]]:
     """
     获取高价值买家(L6M消费 >= 阈值)
 
-    性能: < 0.1秒 (使用l6m_spend索引)
+    性能: < 0.1秒 (使用l6m_netsales索引)
     """
     try:
-        buyers = analyzer.get_high_value_buyers(min_l6m_spend, limit, offset)
+        buyers = analyzer.get_high_value_buyers(min_l6m_netsales, limit, offset)
         return buyers
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -282,22 +282,58 @@ async def get_actionable_customers(
 @router.get("/buyers/{user_nick}/orders")
 async def get_buyer_orders(
     user_nick: str,
-    limit: int = Query(50, ge=1, le=500)
+    time_range: str = Query('1y', description="时间范围: 7d/15d/30d/90d/1y/all"),
+    limit: int = Query(50, ge=1, le=1000)
 ) -> List[Dict[str, Any]]:
     """
-    获取买家订单历史
+    获取买家订单历史(使用订单明细预计算表 - 超快!)
 
-    注意: 这个查询使用VIEW,会比较慢(2-5秒)
-    建议前端显示loading状态
+    性能: < 0.5秒 (使用索引查询)
+
+    支持的时间范围:
+    - 7d: 近7天
+    - 15d: 近15天
+    - 30d: 近30天
+    - 90d: 近90天
+    - 1y: 近1年(默认)
+    - all: 全部历史
     """
     try:
         from backend.database import Database
         from backend.config import settings
+        import pymysql
 
-        db_name = settings.db_name_to_use if settings.db_name_to_use else None
+        # 默认使用aliyunDB数据库
+        db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
         db = Database(db_name=db_name)
 
-        query, params = BuyerQueries.get_buyer_order_history(user_nick, limit)
+        # 构建时间范围条件
+        time_conditions = {
+            '7d': "AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 7 DAY)",
+            '15d': "AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 15 DAY)",
+            '30d': "AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 30 DAY)",
+            '90d': "AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 90 DAY)",
+            '1y': "AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 1 YEAR)",
+            'all': ""
+        }
+
+        time_condition = time_conditions.get(time_range, time_conditions['1y'])
+
+        # 使用订单明细预计算表查询
+        query = f"""
+            SELECT
+                订单号, 子订单号, 商品名称, category as category,
+                成交总金额, 退款金额, 退款类型,
+                FP_MD, 图片地址, 最后付款时间, 件数,
+                (成交总金额 - IFNULL(退款金额, 0)) as netsales
+            FROM target_buyer_orders
+            WHERE 买家昵称 = %s
+              {time_condition}
+            ORDER BY 最后付款时间 DESC
+            LIMIT %s
+        """
+
+        params = [user_nick, limit]
         orders = db.execute_query(query, params)
 
         return orders
@@ -319,7 +355,8 @@ async def get_buyer_chats(
         from backend.database import Database
         from backend.config import settings
 
-        db_name = settings.db_name_to_use if settings.db_name_to_use else None
+        # 默认使用aliyunDB数据库
+        db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
         db = Database(db_name=db_name)
 
         query, params = BuyerQueries.get_chat_messages(user_nick, limit)
@@ -344,7 +381,8 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
         from backend.config import settings
         from backend.database import BuyerQueries
 
-        db_name = settings.db_name_to_use if settings.db_name_to_use else None
+        # 默认使用aliyunDB数据库
+        db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
         db = Database(db_name=db_name)
 
         # 获取聊天记录
@@ -353,7 +391,7 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
 
         # 2. 准备订单摘要（提供深度分析所需的完整上下文）
         historical_ltv = float(profile.get('historical_net_sales', profile.get('historical_ltv', 0)))
-        l6m_spend = float(profile.get('l6m_spend', 0))
+        l6m_netsales = float(profile.get('l6m_netsales', 0))
         total_orders = int(profile.get('total_orders', 0))
         l6m_orders = int(profile.get('l6m_orders', 0))
         avg_order_value = historical_ltv / total_orders if total_orders > 0 else 0
@@ -363,7 +401,7 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
         is_new_customer = profile.get('client_monthly_tag') == 'new'
 
         # 消费行为分析
-        l6m_ratio = (l6m_spend / historical_ltv * 100) if historical_ltv > 0 else 0
+        l6m_ratio = (l6m_netsales / historical_ltv * 100) if historical_ltv > 0 else 0
 
         order_summary = f"""
 【基本信息】
@@ -377,7 +415,7 @@ VIP等级：{profile.get('vip_level', 'N/A')}
 历史订单数：{total_orders}单
 平均客单价：¥{avg_order_value:.2f}元
 
-近6个月消费：¥{l6m_spend:.2f}元（占历史总消费{l6m_ratio:.1f}%）
+近6个月净销售：¥{l6m_netsales:.2f}元（占历史总消费{l6m_ratio:.1f}%）
 近6个月订单：{l6m_orders}单
 
 首购日期：{profile.get('first_purchase_date', 'N/A')}

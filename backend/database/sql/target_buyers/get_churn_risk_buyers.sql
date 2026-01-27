@@ -12,7 +12,7 @@ SELECT
     vip_level,
     client_monthly_tag,
     historical_net_sales,
-    l6m_spend,
+    l6m_netsales,
     city,
     top_category,
     churn_risk,

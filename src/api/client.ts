@@ -52,7 +52,7 @@ export const apiClient = {
     buyer_type?: 'SMOKER' | 'VIC' | 'BOTH';
     vip_level?: 'V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP';
     channel?: 'DTC' | 'PFS';
-    sort_by?: 'last_purchase' | 'l6m_spend' | 'vip_level';
+    sort_by?: 'last_purchase' | 'l6m_netsales' | 'vip_level';
     limit?: number;
     offset?: number;
   } = {}) => {
@@ -149,7 +149,7 @@ export const apiClient = {
    * GET /api/v2/buyers/high-value
    */
   getHighValueBuyers: async (minL6MSpend = 5000, limit = 100, offset = 0) => {
-    const response = await fetch(`${API_BASE}/buyers/high-value?min_l6m_spend=${minL6MSpend}&limit=${limit}&offset=${offset}`);
+    const response = await fetch(`${API_BASE}/buyers/high-value?min_l6m_netsales=${minL6MSpend}&limit=${limit}&offset=${offset}`);
     return handleResponse<BuyerInfo[]>(response);
   },
 
@@ -186,8 +186,8 @@ export interface DashboardMetrics {
   both_smoker_vic: number;
   total_netsales: number;
   avg_netsales: number;
-  total_l6m_spend: number;
-  total_l1y_spend: number;
+  total_l6m_netsales: number;
+  total_l1y_netsales: number;
   total_orders: number;
   avg_orders_per_buyer: number;
   avg_refund_rate: number;
@@ -221,14 +221,14 @@ export interface BuyersListResponse {
  * 买家基本信息
  */
 export interface BuyerInfo {
-  user_nick: string;
+  buyer_nick: string;
   vip_level: string;
   city: string;
   buyer_type: 'SMOKER' | 'VIC' | 'BOTH';
   channel: 'DTC' | 'PFS';
-  historical_ltv: number;
-  l6m_spend: number;
-  l1y_spend: number;
+  historical_net_sales: number;
+  l6m_netsales: number;
+  l1y_netsales: number;
   total_orders: number;
   last_purchase_date: string;
   churn_risk: '高' | '中' | '低';
@@ -240,42 +240,47 @@ export interface BuyerInfo {
  * 买家完整档案
  */
 export interface BuyerProfile {
-  user_nick: string;
+  buyer_nick: string;
   vip_level: string;
   city: string;
-  is_new_customer: boolean;
+  client_monthly_tag: 'new' | 'old';
   buyer_type: 'SMOKER' | 'VIC' | 'BOTH';
   channel: 'DTC' | 'PFS';
 
   // 历史数据
-  historical_ltv: number;
   historical_gmv: number;
   historical_refund: number;
   historical_net_sales: number;
   total_orders: number;
-
-  // 时间段数据
-  l6m_spend: number;
-  l6m_orders: number;
-  l1y_spend: number;
-  l1y_orders: number;
-  rolling_24m_spend: number;
-
-  // 退款数据
+  total_net_orders: number;
   refund_rate: number;
 
+  // 时间段数据
+  l6m_netsales: number;
+  l6m_orders: number;
+  l1y_netsales: number;
+  l1y_orders: number;
+  rolling_24m_netsales: number;
+  rolling_24m_orders: number;
+
+  // 折扣相关
+  discount_ratio: number;
+  discount_sensitivity: '高度敏感' | '中度敏感' | '低度敏感';
+
   // 最近购买
+  first_purchase_date: string;
   last_purchase_date: string;
-  days_since_last_purchase: number;
 
   // 聊天指标
-  chat_frequency: number;
-  last_chat_date: string;
-  days_since_last_chat: number;
+  chat_frequency_days: number;
+  first_chat_date: string | null;
+  last_chat_date: string | null;
+  l30d_chat_frequency_days: number;
+  l3m_chat_frequency_days: number;
+  avg_chat_interval_days: number;
 
   // 标签
   churn_risk: '高' | '中' | '低';
-  discount_sensitivity: '高度敏感' | '中度敏感' | '低度敏感';
   top_category: string;
   second_category: string;
   third_category: string;
@@ -296,11 +301,18 @@ export interface BuyerProfile {
  * 订单记录
  */
 export interface OrderRecord {
-  order_id: string;
-  date: string;
-  amount: number;
-  status: 'Completed' | 'Shipped' | 'Refunded' | 'Pending';
-  items: string[];
+  订单号: string;
+  子订单号: string;
+  商品名称: string;
+  category: string;
+  成交总金额: number;
+  退款金额: number | null;
+  退款类型: string | null;
+  FP_MD: string;
+  图片地址: string;
+  最后付款时间: string;
+  件数: number;
+  netsales: number;
 }
 
 /**
