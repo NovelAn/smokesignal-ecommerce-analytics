@@ -24,15 +24,23 @@ SELECT
     city,
     top_category,
     churn_risk,
-    last_purchase_date,
-    last_chat_date,
-    updated_at
+    l3m_chat_frequency_days,
+    last_purchase_date
 FROM target_buyers_precomputed
 WHERE 1=1
     [[AND buyer_nick LIKE %(search)s]]
-    [[AND buyer_type = %(buyer_type)s]]
-    [[AND vip_level = %(vip_level)s]]
-    [[AND channel = %(channel)s]]
+    [[AND buyer_type IN %(buyer_type)s]]
+    [[AND vip_level IN %(vip_level)s]]
+    [[AND channel IN %(channel)s]]
+    [[AND last_purchase_date >= %(last_purchase_after)s]]
+    [[AND last_chat_date IS NOT NULL AND %(chat_status)s = 'chatted']]
+    [[AND last_chat_date IS NULL AND %(chat_status)s = 'no_chat']]
+    AND NOT EXISTS (
+        SELECT 1 
+        FROM target_buyer_orders tbo 
+        WHERE tbo.买家昵称 = target_buyers_precomputed.buyer_nick 
+        AND (tbo.sc_flag = 1 OR tbo.ff_flag = 1)
+    )
 ORDER BY
     CASE
         WHEN %(sort_by)s = 'last_purchase' THEN last_purchase_date

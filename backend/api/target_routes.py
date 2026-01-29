@@ -1,16 +1,18 @@
 """
 优化版FastAPI路由 - 使用预计算表实现超快速查询
 性能提升: 10-50倍
+
+AI分析: 使用DeepSeek-R1 + 多级降级策略
 """
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Dict, Any, Optional
 from backend.analytics.target_buyer_analyzer import TargetBuyerAnalyzer
-from backend.ai import ZhipuClient
+from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
 from backend.database import BuyerQueries
 
 router = APIRouter(prefix="/api/v2", tags=["target_buyers"])
 analyzer = TargetBuyerAnalyzer()
-ai_client = ZhipuClient()
+ai_orchestrator = get_analyzer_orchestrator()
 
 
 @router.get("/")
@@ -27,9 +29,11 @@ async def root():
 @router.get("/buyers")
 async def get_all_buyers(
     search: Optional[str] = Query(None, description="昵称模糊搜索"),
-    buyer_type: Optional[str] = Query(None, description="买家类型: SMOKER/VIC/BOTH"),
-    vip_level: Optional[str] = Query(None, description="VIP等级: V3/V2/V1/V0/Non-VIP"),
-    channel: Optional[str] = Query(None, description="渠道: DTC/PFS"),
+    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH"),
+    vip_level: Optional[List[str]] = Query(None, description="VIP等级: V3/V2/V1/V0/Non-VIP"),
+    channel: Optional[List[str]] = Query(None, description="渠道: DTC/PFS"),
+    last_purchase_after: Optional[str] = Query(None, description="最后购买日期筛选 (YYYY-MM-DD)"),
+    chat_status: Optional[str] = Query(None, description="聊天状态: chatted/no_chat"),
     sort_by: str = Query('last_purchase', description="排序字段: last_purchase/l6m_netsales/vip_level"),
     limit: int = Query(100, ge=1, le=1000, description="返回数量"),
     offset: int = Query(0, ge=0, description="偏移量")
@@ -44,6 +48,8 @@ async def get_all_buyers(
     - buyer_type: 买家类型 (SMOKER/VIC/BOTH)
     - vip_level: VIP等级 (V3/V2/V1/V0/Non-VIP)
     - channel: 渠道 (DTC/PFS)
+    - last_purchase_after: 最后购买日期筛选
+    - chat_status: 聊天状态 (chatted/no_chat)
     - sort_by: 排序字段 (last_purchase/l6m_netsales/vip_level)
     """
     try:
@@ -52,6 +58,8 @@ async def get_all_buyers(
             buyer_type=buyer_type,
             vip_level=vip_level,
             channel=channel,
+            last_purchase_after=last_purchase_after,
+            chat_status=chat_status,
             sort_by=sort_by,
             limit=limit,
             offset=offset
@@ -261,6 +269,51 @@ async def get_channel_stats() -> List[Dict[str, Any]]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/ai/status")
+async def get_ai_system_status() -> Dict[str, Any]:
+    """
+    获取AI分析系统状态
+
+    返回:
+    - 可用的AI模型
+    - 成本统计
+    - 缓存状态
+    """
+    try:
+        from backend.monitoring.cost_monitor import get_cost_monitor
+        from backend.utils.cache_manager import get_cache_manager
+        from backend.config import settings
+
+        cost_monitor = get_cost_monitor()
+        cache_manager = get_cache_manager()
+
+        # 获取成本统计
+        cost_summary = cost_monitor.get_daily_summary()
+
+        # 获取缓存统计
+        cache_stats = cache_manager.get_stats()
+
+        # 检查模型可用性
+        models = {
+            "deepseek_available": bool(settings.deepseek_api_key),
+            "zhipu_available": bool(settings.zhipu_api_key)
+        }
+
+        return {
+            "status": "ok",
+            "models": models,
+            "cost": cost_summary,
+            "cache": cache_stats,
+            "config": {
+                "cache_ttl_days": settings.ai_cache_ttl_days,
+                "cache_enabled": settings.ai_enable_cache
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/actionable-customers")
 async def get_actionable_customers(
     limit: int = Query(50, ge=1, le=500, description="每个类别返回数量")
@@ -369,14 +422,20 @@ async def get_buyer_chats(
 
 async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
     """
-    添加AI生成的买家洞察
+    添加AI生成的买家洞察（使用增强版AI分析系统）
 
-    注意: 这个操作会比较慢(3-10秒),因为需要调用智谱AI
+    特性:
+    - 两阶段推理: 证据提取 → 画像推理
+    - 多级降级: DeepSeek-R1 → DeepSeek-Chat → Zhipu GLM-4 → 规则引擎
+    - 成本监控: 实时记录API调用和成本
+    - 智能缓存: 30天缓存，减少重复调用
+
+    性能: 3-10秒 (取决于模型和数据复杂度)
     """
     try:
         user_nick = profile.get("user_nick")
 
-        # 1. 获取聊天记录(最近20条)
+        # 1. 获取聊天记录(最近30条，增强分析需要更多数据)
         from backend.database import Database
         from backend.config import settings
         from backend.database import BuyerQueries
@@ -386,66 +445,106 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
         db = Database(db_name=db_name)
 
         # 获取聊天记录
-        query, params = BuyerQueries.get_chat_messages(user_nick, limit=20)
+        query, params = BuyerQueries.get_chat_messages(user_nick, limit=30)
         chats = db.execute_query(query, params)
 
-        # 2. 准备订单摘要（提供深度分析所需的完整上下文）
-        historical_ltv = float(profile.get('historical_net_sales', profile.get('historical_ltv', 0)))
-        l6m_netsales = float(profile.get('l6m_netsales', 0))
-        total_orders = int(profile.get('total_orders', 0))
-        l6m_orders = int(profile.get('l6m_orders', 0))
-        avg_order_value = historical_ltv / total_orders if total_orders > 0 else 0
-        refund_rate = float(profile.get('refund_rate', 0)) * 100
+        # 2. 获取订单记录（用于行为分析）
+        orders_query = """
+            SELECT
+                订单号, 商品名称 as commodity_name, category,
+                成交总金额 as payment, 退款金额, 退款类型 as refund_status,
+                最后付款时间 as pay_time
+            FROM target_buyer_orders
+            WHERE 买家昵称 = %s
+            ORDER BY 最后付款时间 DESC
+            LIMIT 50
+        """
+        orders = db.execute_query(orders_query, [user_nick])
 
-        # 客户类型判断
-        is_new_customer = profile.get('client_monthly_tag') == 'new'
+        # 3. 准备profile数据（传递所有预计算表字段，除了updated_at）
+        # 确保AI能够基于完整的真实数据进行分析
+        profile_data = {
+            # 基本信息（直接从profile传递所有字段）
+            "user_nick": user_nick,
+            "buyer_nick": profile.get('buyer_nick'),
+            "channel": profile.get('channel'),
+            "buyer_type": profile.get('buyer_type'),
+            "is_smoker": profile.get('is_smoker', 0),
+            "is_vic": profile.get('is_vic', 0),
+            "vip_level": profile.get('vip_level', 'Non-VIP'),
+            "client_monthly_tag": profile.get('client_monthly_tag'),
 
-        # 消费行为分析
-        l6m_ratio = (l6m_netsales / historical_ltv * 100) if historical_ltv > 0 else 0
+            # 历史消费指标
+            "historical_gmv": float(profile.get('historical_gmv', 0)),
+            "historical_refund": float(profile.get('historical_refund', 0)),
+            "historical_net_sales": float(profile.get('historical_net_sales', 0)),
+            "total_orders": int(profile.get('total_orders', 0)),
+            "total_net_orders": int(profile.get('total_net_orders', 0)),
+            "refund_rate": float(profile.get('refund_rate', 0)),
 
-        order_summary = f"""
-【基本信息】
-客户昵称：{user_nick}
-城市：{profile.get('city', 'Unknown')}
-客户类型：{'新客户' if is_new_customer else '老客户'}
-VIP等级：{profile.get('vip_level', 'N/A')}
+            # 时间维度指标
+            "first_purchase_date": profile.get('first_purchase_date', ''),
+            "last_purchase_date": profile.get('last_purchase_date', ''),
 
-【消费行为深度分析】
-历史总消费：¥{historical_ltv:.2f}元
-历史订单数：{total_orders}单
-平均客单价：¥{avg_order_value:.2f}元
+            # 滚动24个月指标
+            "rolling_24m_netsales": float(profile.get('rolling_24m_netsales', 0)),
+            "rolling_24m_orders": int(profile.get('rolling_24m_orders', 0)),
 
-近6个月净销售：¥{l6m_netsales:.2f}元（占历史总消费{l6m_ratio:.1f}%）
-近6个月订单：{l6m_orders}单
+            # L6M指标
+            "l6m_gmv": float(profile.get('l6m_gmv', 0)),
+            "l6m_netsales": float(profile.get('l6m_netsales', 0)),
+            "l6m_orders": int(profile.get('l6m_orders', 0)),
+            "l6m_refund_rate": float(profile.get('l6m_refund_rate', 0)),
 
-首购日期：{profile.get('first_purchase_date', 'N/A')}
-末购日期：{profile.get('last_purchase_date', 'N/A')}
+            # L1Y指标
+            "l1y_gmv": float(profile.get('l1y_gmv', 0)),
+            "l1y_netsales": float(profile.get('l1y_netsales', 0)),
+            "l1y_orders": int(profile.get('l1y_orders', 0)),
+            "l1y_refund_rate": float(profile.get('l1y_refund_rate', 0)),
 
-【品质与风险指标】
-平均退款率：{refund_rate:.1f}%
-折扣敏感度：{profile.get('discount_sensitivity', 'N/A')}
-流失风险等级：{profile.get('churn_risk', 'N/A')}
+            # 折扣和敏感度
+            "discount_ratio": float(profile.get('discount_ratio', 0)),
+            "discount_sensitivity": profile.get('discount_sensitivity', '未知'),
 
-【产品偏好】
-Top1类别：{profile.get('top_category', 'N/A')}
-Top2类别：{profile.get('second_category', 'N/A')}
-Top3类别：{profile.get('third_category', 'N/A')}
+            # 聊天行为指标
+            "chat_frequency_days": int(profile.get('chat_frequency_days', 0)),
+            "first_chat_date": profile.get('first_chat_date'),
+            "last_chat_date": profile.get('last_chat_date'),
+            "l30d_chat_frequency_days": int(profile.get('l30d_chat_frequency_days', 0)),
+            "l3m_chat_frequency_days": int(profile.get('l3m_chat_frequency_days', 0)),
+            "avg_chat_interval_days": float(profile.get('avg_chat_interval_days', 0)),
 
-【互动行为】
-聊天频率：每{profile.get('chat_frequency_days', 0)}天一次
-最近聊天：{profile.get('last_chat_date', 'N/A')}
-"""
+            # 风险和偏好
+            "churn_risk": profile.get('churn_risk', '未知'),
+            "city": profile.get('city', 'Unknown'),
+            "top_category": profile.get('top_category', 'Unknown'),
+            "second_category": profile.get('second_category'),
+            "third_category": profile.get('third_category'),
 
-        # 3. 调用Zhipu AI分析
-        ai_analysis = ai_client.analyze_buyer_persona(
-            user_nick=user_nick,
-            profile_data=profile,
-            recent_chats=chats,
-            order_summary=order_summary
+            # AI分析专用字段
+            "chat_history": chats,  # 传递聊天记录用于文本分析
+            "total_refund_count": int(float(profile.get('historical_refund', 0)) / 1000) if float(profile.get('historical_refund', 0)) > 0 else 0  # 估算退款次数
+        }
+
+        # 4. 调用增强版AI分析器（自动选择最优模型和降级策略）
+        import logging
+        logging.info(f"[AI] 开始分析客户 {user_nick}, VIP等级: {profile_data['vip_level']}")
+
+        ai_analysis = ai_orchestrator.analyze_buyer_persona(
+            buyer_nick=user_nick,
+            profile=profile_data,
+            chats=chats,
+            orders=orders
         )
 
-        # 4. 添加AI分析结果到profile
+        # 5. 添加AI分析结果到profile
         profile["ai_analysis"] = ai_analysis
+
+        # 记录使用的分析方法
+        method = ai_analysis.get('analysis_method', 'Unknown')
+        confidence = ai_analysis.get('confidence_level', 'Unknown')
+        logging.info(f"[AI] 分析完成 {user_nick}, 方法: {method}, 置信度: {confidence}")
+
         return profile
 
     except Exception as e:
@@ -457,6 +556,7 @@ Top3类别：{profile.get('third_category', 'N/A')}
             "key_interests": [],
             "pain_points": [],
             "recommended_action": "建议根据买家历史购买情况制定个性化跟进方案",
+            "analysis_method": "Error",
             "error": str(e)
         }
         return profile

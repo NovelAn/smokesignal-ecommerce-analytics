@@ -63,9 +63,11 @@ class TargetBuyerQueries:
     def get_all_target_buyers(
         self,
         search: Optional[str] = None,
-        buyer_type: Optional[str] = None,
-        vip_level: Optional[str] = None,
-        channel: Optional[str] = None,
+        buyer_type: Optional[Any] = None,
+        vip_level: Optional[Any] = None,
+        channel: Optional[Any] = None,
+        last_purchase_after: Optional[str] = None,
+        chat_status: Optional[str] = None,
         sort_by: str = 'last_purchase',
         limit: int = 100,
         offset: int = 0
@@ -75,9 +77,11 @@ class TargetBuyerQueries:
 
         Args:
             search: 昵称模糊搜索
-            buyer_type: 买家类型筛选 (SMOKER/VIC/BOTH)
-            vip_level: VIP等级筛选 (V3/V2/V1/V0/Non-VIP)
-            channel: 渠道筛选 (DTC/PFS)
+            buyer_type: 买家类型筛选 (SMOKER/VIC/BOTH) 或 列表
+            vip_level: VIP等级筛选 (V3/V2/V1/V0/Non-VIP) 或 列表
+            channel: 渠道筛选 (DTC/PFS) 或 列表
+            last_purchase_after: 最后购买日期筛选 (YYYY-MM-DD)
+            chat_status: 聊天状态筛选 ('chatted'/'no_chat')
             sort_by: 排序字段 (last_purchase/l6m_netsales/vip_level)
             limit: 返回数量
             offset: 偏移量
@@ -99,19 +103,50 @@ class TargetBuyerQueries:
 
         # 处理可选筛选条件
         if not buyer_type:
-            conditions_to_remove.append('AND buyer_type = %(buyer_type)s')
+            conditions_to_remove.append('AND buyer_type IN %(buyer_type)s')
         else:
-            params['buyer_type'] = buyer_type
+            if isinstance(buyer_type, (list, tuple)):
+                params['buyer_type'] = tuple(buyer_type)
+            else:
+                params['buyer_type'] = (buyer_type,)
 
         if not vip_level:
-            conditions_to_remove.append('AND vip_level = %(vip_level)s')
+            conditions_to_remove.append('AND vip_level IN %(vip_level)s')
         else:
-            params['vip_level'] = vip_level
+            if isinstance(vip_level, (list, tuple)):
+                params['vip_level'] = tuple(vip_level)
+            else:
+                params['vip_level'] = (vip_level,)
 
         if not channel:
-            conditions_to_remove.append('AND channel = %(channel)s')
+            conditions_to_remove.append('AND channel IN %(channel)s')
         else:
-            params['channel'] = channel
+            if isinstance(channel, (list, tuple)):
+                params['channel'] = tuple(channel)
+            else:
+                params['channel'] = (channel,)
+
+        if not last_purchase_after:
+            conditions_to_remove.append('AND last_purchase_date >= %(last_purchase_after)s')
+        else:
+            params['last_purchase_after'] = last_purchase_after
+
+        # 处理聊天状态筛选
+        # 逻辑：
+        # 如果 chat_status 是 'chatted'，启用 AND last_chat_date IS NOT NULL ...
+        # 如果 chat_status 是 'no_chat'，启用 AND last_chat_date IS NULL ...
+        # 如果是其他或None，都移除
+        
+        if chat_status == 'chatted':
+            params['chat_status'] = 'chatted'
+            conditions_to_remove.append("AND last_chat_date IS NULL AND %(chat_status)s = 'no_chat'")
+        elif chat_status == 'no_chat':
+            params['chat_status'] = 'no_chat'
+            conditions_to_remove.append("AND last_chat_date IS NOT NULL AND %(chat_status)s = 'chatted'")
+        else:
+            # 移除所有聊天相关的条件
+            conditions_to_remove.append("AND last_chat_date IS NOT NULL AND %(chat_status)s = 'chatted'")
+            conditions_to_remove.append("AND last_chat_date IS NULL AND %(chat_status)s = 'no_chat'")
 
         # 移除不需要的WHERE条件
         for condition in conditions_to_remove:
@@ -292,9 +327,11 @@ class TargetBuyerQueries:
 
     def get_target_buyers_count(
         self,
-        buyer_type: Optional[str] = None,
-        vip_level: Optional[str] = None,
-        channel: Optional[str] = None
+        buyer_type: Optional[Any] = None,
+        vip_level: Optional[Any] = None,
+        channel: Optional[Any] = None,
+        last_purchase_after: Optional[str] = None,
+        chat_status: Optional[str] = None
     ) -> int:
         """
         获取目标买家总数(用于分页)
@@ -303,29 +340,63 @@ class TargetBuyerQueries:
             buyer_type: 买家类型筛选
             vip_level: VIP等级筛选
             channel: 渠道筛选
+            last_purchase_after: 最后购买日期筛选
+            chat_status: 聊天状态筛选
 
         Returns:
             买家总数
         """
         # 构建WHERE条件
-        where_clauses = []
+        where_clauses = ["1=1"]
         params = []
 
+        # 始终排除 SC/FF Flag 客户
+        where_clauses.append("""
+            NOT EXISTS (
+                SELECT 1 
+                FROM target_buyer_orders tbo 
+                WHERE tbo.买家昵称 = target_buyers_precomputed.buyer_nick 
+                AND (tbo.sc_flag = 1 OR tbo.ff_flag = 1)
+            )
+        """)
+
         if buyer_type:
-            where_clauses.append("buyer_type = %s")
-            params.append(buyer_type)
+            if isinstance(buyer_type, (list, tuple)):
+                placeholders = ', '.join(['%s'] * len(buyer_type))
+                where_clauses.append(f"buyer_type IN ({placeholders})")
+                params.extend(buyer_type)
+            else:
+                where_clauses.append("buyer_type = %s")
+                params.append(buyer_type)
 
         if vip_level:
-            where_clauses.append("vip_level = %s")
-            params.append(vip_level)
+            if isinstance(vip_level, (list, tuple)):
+                placeholders = ', '.join(['%s'] * len(vip_level))
+                where_clauses.append(f"vip_level IN ({placeholders})")
+                params.extend(vip_level)
+            else:
+                where_clauses.append("vip_level = %s")
+                params.append(vip_level)
 
         if channel:
-            where_clauses.append("channel = %s")
-            params.append(channel)
+            if isinstance(channel, (list, tuple)):
+                placeholders = ', '.join(['%s'] * len(channel))
+                where_clauses.append(f"channel IN ({placeholders})")
+                params.extend(channel)
+            else:
+                where_clauses.append("channel = %s")
+                params.append(channel)
 
-        where_sql = ""
-        if where_clauses:
-            where_sql = "WHERE " + " AND ".join(where_clauses)
+        if last_purchase_after:
+            where_clauses.append("last_purchase_date >= %s")
+            params.append(last_purchase_after)
+
+        if chat_status == 'chatted':
+            where_clauses.append("last_chat_date IS NOT NULL")
+        elif chat_status == 'no_chat':
+            where_clauses.append("last_chat_date IS NULL")
+
+        where_sql = "WHERE " + " AND ".join(where_clauses)
 
         sql = f"SELECT COUNT(*) as total FROM target_buyers_precomputed {where_sql}"
 
