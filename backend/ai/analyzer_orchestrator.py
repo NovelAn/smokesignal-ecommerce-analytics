@@ -255,20 +255,21 @@ class AnalyzerOrchestrator:
 
     def _compare_dates(self, date1, date2) -> int:
         """比较两个日期，返回 1(date1>date2), 0(相等), -1(date1<date2)"""
-        # 处理 datetime 对象
-        if hasattr(date1, 'timestamp'):
-            date1 = date1.timestamp()
-        elif hasattr(date1, 'isoformat'):
-            date1 = date1.isoformat()
+        # 统一转换为标准格式字符串进行比较
+        def normalize_date_str(d):
+            if d is None:
+                return ""
+            # datetime 对象 - 使用 str() 保持与数据库一致
+            if hasattr(d, 'isoformat'):
+                return str(d)  # 使用 str() 而不是 isoformat() 保持格式一致
+            # 已经是字符串 - 标准化 T 为空格
+            if isinstance(d, str):
+                return d.replace('T', ' ')
+            # 其他类型 - 转字符串
+            return str(d)
 
-        if hasattr(date2, 'timestamp'):
-            date2 = date2.timestamp()
-        elif hasattr(date2, 'isoformat'):
-            date2 = date2.isoformat()
-
-        # 转换为字符串比较
-        str1 = str(date1) if date1 else ""
-        str2 = str(date2) if date2 else ""
+        str1 = normalize_date_str(date1)
+        str2 = normalize_date_str(date2)
 
         if str1 > str2:
             return 1
