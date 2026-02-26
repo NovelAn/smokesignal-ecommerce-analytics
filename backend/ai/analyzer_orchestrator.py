@@ -422,11 +422,16 @@ class AnalyzerOrchestrator:
 
         summary = result.get("summary", "")
 
-        # 检查是否为默认失败响应
+        # 检查是否为默认失败响应或AI拒绝分析的响应
         invalid_summaries = [
             "暂无AI分析",
             "AI分析暂时不可用",
-            "AI分析失败"
+            "AI分析失败",
+            "无法进行客户洞察分析",  # DeepSeek拒绝分析时的响应
+            "未包含任何有效的客户聊天记录",  # 数据不足时的响应
+            "证据中未包含",  # 证据不足时的响应
+            "无法分析",  # 通用拒绝响应
+            "无法提取"  # 提取失败响应
         ]
 
         for invalid in invalid_summaries:
