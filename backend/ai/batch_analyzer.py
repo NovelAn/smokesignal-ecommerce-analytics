@@ -71,8 +71,8 @@ class RateLimiter:
             self.last_call_time = time.time()
 
 
-# 聊天天数阈值（情感分析前提条件）
-CHAT_THRESHOLD_DAYS = 10
+# 客户发送消息条数阈值（情感分析前提条件，排除客服自动回复）
+CHAT_THRESHOLD_MESSAGES = 5
 
 
 class BatchAnalyzer:
@@ -80,7 +80,7 @@ class BatchAnalyzer:
     Batch analyzer for sentiment and intent analysis
 
     缓存策略: 纯增量更新
-    - 前提条件: 聊天天数 >= 10
+    - 前提条件: 聊天条数 >= 10
     - 触发条件: 首次分析 或 有新聊天
 
     Features:
@@ -130,12 +130,12 @@ class BatchAnalyzer:
         Get buyers that need sentiment analysis (增量更新)
 
         Criteria:
-        1. Has chat records (chat_frequency_days >= 10)  -- 前提条件
+        1. Has enough customer messages (total_chat_messages >= 5, sender_nick=user_nick)  -- 前提条件
         2. Never analyzed before (sentiment_score IS NULL)
         3. OR has new chats since last analysis (last_chat_date > analyzed_last_chat_date)
 
         Returns:
-            List of buyer dicts with buyer_nick, last_chat_date, chat_frequency_days, etc.
+            List of buyer dicts with buyer_nick, last_chat_date, total_chat_messages, etc.
         """
         from backend.database import Database
         from backend.config import settings
@@ -148,6 +148,7 @@ class BatchAnalyzer:
                 tb.buyer_nick,
                 tb.last_chat_date,
                 tb.last_purchase_date,
+                tb.total_chat_messages,
                 tb.chat_frequency_days,
                 tb.vip_level,
                 tb.historical_net_sales,
@@ -158,7 +159,7 @@ class BatchAnalyzer:
             FROM target_buyers_precomputed tb
             LEFT JOIN buyer_ai_analysis_cache cache
                 ON tb.buyer_nick = cache.buyer_nick
-            WHERE tb.chat_frequency_days >= %s
+            WHERE tb.total_chat_messages >= %s
             AND (
                 cache.buyer_nick IS NULL
                 OR cache.sentiment_score IS NULL
@@ -174,8 +175,8 @@ class BatchAnalyzer:
             LIMIT %s
         """
 
-        buyers = db.execute_query(query, [CHAT_THRESHOLD_DAYS, limit])
-        logger.info(f"[BatchAnalyzer] Found {len(buyers)} buyers needing analysis (chat>={CHAT_THRESHOLD_DAYS}days)")
+        buyers = db.execute_query(query, [CHAT_THRESHOLD_MESSAGES, limit])
+        logger.info(f"[BatchAnalyzer] Found {len(buyers)} buyers needing analysis (messages>={CHAT_THRESHOLD_MESSAGES})")
         return buyers
 
     def get_buyer_chats(self, buyer_nick: str, limit: int = 50) -> List[Dict[str, Any]]:

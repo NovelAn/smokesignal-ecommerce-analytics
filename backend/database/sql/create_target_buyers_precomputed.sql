@@ -63,6 +63,7 @@ CREATE TABLE target_buyers_precomputed (
 
     -- === 聊天指标 ===
     chat_frequency_days INT COMMENT '历史沟通频次(去重日期天数)',
+    total_chat_messages INT COMMENT '客户发送的消息总条数(sender_nick=user_nick)',
     last_chat_date DATETIME COMMENT '最后聊天时间',
     first_chat_date DATETIME COMMENT '首次聊天时间',
     l30d_chat_frequency_days INT COMMENT '近30天沟通频次(去重日期天数)',
@@ -80,6 +81,23 @@ CREATE TABLE target_buyers_precomputed (
     second_category VARCHAR(50) COMMENT '第二常购品类',
     third_category VARCHAR(50) COMMENT '第三常购品类',
 
+    -- === RFM客户分类模型 ===
+    rfm_recency_score INT DEFAULT 0 COMMENT 'R分数(1-5): 最近购买时间',
+    rfm_frequency_score INT DEFAULT 0 COMMENT 'F分数(1-5): 购买频次',
+    rfm_monetary_score INT DEFAULT 0 COMMENT 'M分数(1-5): 消费金额',
+    rfm_segment VARCHAR(50) COMMENT 'RFM客户分类',
+
+    -- === 情绪与意图分析 ===
+    sentiment_label VARCHAR(20) COMMENT '整体情绪标签: Positive/Neutral/Negative',
+    sentiment_score DECIMAL(3,2) COMMENT '情绪分数(0-1)',
+    dominant_intent VARCHAR(50) COMMENT '主要意图',
+    pre_sale_score INT DEFAULT 0 COMMENT '售前热度(0-100)',
+    post_sale_score INT DEFAULT 0 COMMENT '售后需求(0-100)',
+    complaint_tendency VARCHAR(10) COMMENT '投诉倾向: 高/中/低',
+
+    -- === 运营标签 ===
+    follow_priority VARCHAR(10) COMMENT '跟进优先级: 紧急/高/中/低',
+
     -- === 元数据 ===
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -93,7 +111,11 @@ CREATE TABLE target_buyers_precomputed (
     INDEX idx_updated (updated_at),
     INDEX idx_l6m_netsales (l6m_netsales),
     INDEX idx_l1y_netsales (l1y_netsales),
-    INDEX idx_rolling_24m_gmv (rolling_24m_gmv)
+    INDEX idx_rolling_24m_gmv (rolling_24m_gmv),
+    INDEX idx_rfm_segment (rfm_segment),
+    INDEX idx_sentiment (sentiment_label),
+    INDEX idx_intent (dominant_intent),
+    INDEX idx_follow_priority (follow_priority)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 COMMENT='目标买家预计算表 - 每天上午11点更新';
 
@@ -311,6 +333,12 @@ SET
         SELECT COUNT(DISTINCT DATE(msg_time))
         FROM chat_history
         WHERE user_nick = tb.buyer_nick
+    ),
+    total_chat_messages = (
+        SELECT COUNT(*)
+        FROM chat_history
+        WHERE user_nick = tb.buyer_nick
+          AND sender_nick = tb.buyer_nick
     ),
     first_chat_date = (
         SELECT MIN(msg_time)
@@ -647,6 +675,11 @@ BEGIN
     SET
         chat_frequency_days = (
             SELECT COUNT(DISTINCT DATE(msg_time))
+            FROM chat_history
+            WHERE user_nick = tb.buyer_nick
+        ),
+        total_chat_messages = (
+            SELECT COUNT(*)
             FROM chat_history
             WHERE user_nick = tb.buyer_nick
         ),
