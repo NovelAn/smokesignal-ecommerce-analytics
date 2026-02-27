@@ -13,6 +13,12 @@ import config from '../config/env';
 import { fetchWithCache, cacheKeys } from '../utils/cache';
 import { logger } from '../utils/logger';
 import { CACHE } from '../constants/cache';
+import {
+  ExternalRecord,
+  ExternalRecordsListResponse,
+  ExternalRecordsStats,
+  BatchImportResult
+} from '../types';
 
 const API_BASE = config.apiBaseUrl;
 
@@ -119,9 +125,11 @@ export const apiClient = {
   getBuyers: async (
     params: {
       search?: string;
-      buyer_type?: 'SMOKER' | 'VIC' | 'BOTH';
-      vip_level?: 'V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP';
-      channel?: 'DTC' | 'PFS';
+      buyer_type?: ('SMOKER' | 'VIC' | 'BOTH')[] | 'SMOKER' | 'VIC' | 'BOTH';
+      vip_level?: ('V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP')[] | 'V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP';
+      channel?: ('DTC' | 'PFS')[] | 'DTC' | 'PFS';
+      last_purchase_after?: string;
+      chat_status?: 'chatted' | 'no_chat';
       sort_by?: 'last_purchase' | 'l6m_netsales' | 'vip_level';
       limit?: number;
       offset?: number;
@@ -131,9 +139,39 @@ export const apiClient = {
     const queryParams = new URLSearchParams();
 
     if (params.search) queryParams.append('search', params.search);
-    if (params.buyer_type) queryParams.append('buyer_type', params.buyer_type);
-    if (params.vip_level) queryParams.append('vip_level', params.vip_level);
-    if (params.channel) queryParams.append('channel', params.channel);
+    
+    if (params.buyer_type) {
+      if (Array.isArray(params.buyer_type)) {
+        params.buyer_type.forEach(t => queryParams.append('buyer_type', t));
+      } else {
+        queryParams.append('buyer_type', params.buyer_type);
+      }
+    }
+
+    if (params.vip_level) {
+      if (Array.isArray(params.vip_level)) {
+        params.vip_level.forEach(l => queryParams.append('vip_level', l));
+      } else {
+        queryParams.append('vip_level', params.vip_level);
+      }
+    }
+
+    if (params.channel) {
+      if (Array.isArray(params.channel)) {
+        params.channel.forEach(c => queryParams.append('channel', c));
+      } else {
+        queryParams.append('channel', params.channel);
+      }
+    }
+
+    if (params.last_purchase_after) {
+      queryParams.append('last_purchase_after', params.last_purchase_after);
+    }
+
+    if (params.chat_status) {
+      queryParams.append('chat_status', params.chat_status);
+    }
+    
     queryParams.append('sort_by', params.sort_by || 'last_purchase');
     queryParams.append('limit', String(params.limit || 100));
     queryParams.append('offset', String(params.offset || 0));
@@ -169,8 +207,8 @@ export const apiClient = {
    * 获取买家订单历史
    * GET /api/v2/buyers/{user_nick}/orders
    */
-  getBuyerOrders: async (userNick: string, limit = 50, signal?: AbortSignal) => {
-    const url = `${API_BASE}/buyers/${encodeURIComponent(userNick)}/orders?limit=${limit}`;
+  getBuyerOrders: async (userNick: string, limit = 50, timeRange = '1y', signal?: AbortSignal) => {
+    const url = `${API_BASE}/buyers/${encodeURIComponent(userNick)}/orders?limit=${limit}&time_range=${timeRange}`;
 
     return fetchRequest<OrderRecord[]>(url, {}, {
       signal,
@@ -327,6 +365,220 @@ export const apiClient = {
       useCache: true,
       cacheTTL: CACHE.BUYERS_LIST_TTL,
     });
+  },
+
+  /**
+   * 获取 API Base URL
+   */
+  getBaseUrl: () => API_BASE,
+
+  // ========== 场外信息相关 ==========
+
+  /**
+   * 获取场外记录列表
+   * GET /api/v2/external/records
+   */
+  getExternalRecords: async (
+    params: {
+      search?: string;
+      record_type?: 'communication' | 'purchase';
+      channel?: string;
+      date_from?: string;
+      date_to?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+    signal?: AbortSignal
+  ) => {
+    const queryParams = new URLSearchParams();
+
+    if (params.search) queryParams.append('search', params.search);
+    if (params.record_type) queryParams.append('record_type', params.record_type);
+    if (params.channel) queryParams.append('channel', params.channel);
+    if (params.date_from) queryParams.append('date_from', params.date_from);
+    if (params.date_to) queryParams.append('date_to', params.date_to);
+    queryParams.append('limit', String(params.limit || 100));
+    queryParams.append('offset', String(params.offset || 0));
+
+    const url = `${API_BASE}/external/records?${queryParams}`;
+
+    return fetchRequest<ExternalRecordsListResponse>(url, {}, {
+      signal,
+      useCache: false, // 不缓存，确保数据实时
+    });
+  },
+
+  /**
+   * 获取单条场外记录
+   * GET /api/v2/external/records/{id}
+   */
+  getExternalRecord: async (id: string, signal?: AbortSignal) => {
+    const url = `${API_BASE}/external/records/${id}`;
+
+    return fetchRequest<ExternalRecord>(url, {}, { signal });
+  },
+
+  /**
+   * 创建场外记录
+   * POST /api/v2/external/records
+   */
+  createExternalRecord: async (record: Partial<ExternalRecord>, signal?: AbortSignal) => {
+    const url = `${API_BASE}/external/records`;
+
+    return fetchRequest<ExternalRecord>(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+      signal,
+    }, {});
+  },
+
+  /**
+   * 更新场外记录
+   * PUT /api/v2/external/records/{id}
+   */
+  updateExternalRecord: async (id: string, record: Partial<ExternalRecord>, signal?: AbortSignal) => {
+    const url = `${API_BASE}/external/records/${id}`;
+
+    return fetchRequest<ExternalRecord>(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+      signal,
+    }, {});
+  },
+
+  /**
+   * 删除场外记录
+   * DELETE /api/v2/external/records/{id}
+   */
+  deleteExternalRecord: async (id: string, signal?: AbortSignal) => {
+    const url = `${API_BASE}/external/records/${id}`;
+
+    return fetchRequest<{ success: boolean; message: string }>(url, {
+      method: 'DELETE',
+      signal,
+    }, {});
+  },
+
+  /**
+   * 批量导入场外记录
+   * POST /api/v2/external/import
+   */
+  importExternalRecords: async (file: File, createdBy?: string, signal?: AbortSignal) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const params = createdBy ? `?created_by=${encodeURIComponent(createdBy)}` : '';
+    const url = `${API_BASE}/external/import${params}`;
+
+    return fetchRequest<BatchImportResult>(url, {
+      method: 'POST',
+      body: formData,
+      signal,
+    }, {});
+  },
+
+  /**
+   * 获取导入模板
+   * GET /api/v2/external/export/template
+   */
+  getExternalRecordsTemplate: () => {
+    return `${API_BASE}/external/export/template`;
+  },
+
+  /**
+   * 获取场外信息统计
+   * GET /api/v2/external/statistics
+   */
+  getExternalRecordsStats: async (signal?: AbortSignal) => {
+    const url = `${API_BASE}/external/statistics`;
+
+    return fetchRequest<ExternalRecordsStats>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.SHORT_TTL,
+    });
+  },
+
+  /**
+   * 获取某客户的场外记录
+   * GET /api/v2/external/users/{user_nick}
+   */
+  getUserExternalRecords: async (userNick: string, limit = 50, signal?: AbortSignal) => {
+    const url = `${API_BASE}/external/users/${encodeURIComponent(userNick)}?limit=${limit}`;
+
+    return fetchRequest<ExternalRecord[]>(url, {}, { signal });
+  },
+
+  // ========== AI 批量分析相关 ==========
+
+  /**
+   * 启动批量情感/意图分析
+   * POST /api/v2/ai/batch-analyze
+   */
+  startBatchAnalysis: async (buyerLimit = 200, signal?: AbortSignal) => {
+    const url = `${API_BASE}/ai/batch-analyze?buyer_limit=${buyerLimit}`;
+
+    return fetchRequest<BatchAnalysisStartResponse>(url, {
+      method: 'POST',
+      signal,
+    }, {});
+  },
+
+  /**
+   * 查询批量分析任务状态
+   * GET /api/v2/ai/batch-status/{task_id}
+   */
+  getBatchAnalysisStatus: async (taskId: string, signal?: AbortSignal) => {
+    const url = `${API_BASE}/ai/batch-status/${taskId}`;
+
+    return fetchRequest<BatchAnalysisStatus>(url, {}, { signal });
+  },
+
+  /**
+   * 获取情感分析汇总
+   * GET /api/v2/analytics/sentiment-summary
+   */
+  getSentimentSummary: async (signal?: AbortSignal) => {
+    const url = `${API_BASE}/analytics/sentiment-summary`;
+
+    return fetchRequest<SentimentSummary>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.SHORT_TTL,
+    });
+  },
+
+  /**
+   * 获取意图分析汇总
+   * GET /api/v2/analytics/intent-summary
+   */
+  getIntentSummary: async (signal?: AbortSignal) => {
+    const url = `${API_BASE}/analytics/intent-summary`;
+
+    return fetchRequest<IntentSummary>(url, {}, {
+      signal,
+      useCache: true,
+      cacheTTL: CACHE.SHORT_TTL,
+    });
+  },
+
+  /**
+   * 强制刷新单个客户的AI分析
+   * POST /api/v2/buyers/{user_nick}/force-refresh
+   */
+  forceRefreshAnalysis: async (
+    userNick: string,
+    refreshType: 'persona' | 'sentiment' | 'all' = 'all',
+    signal?: AbortSignal
+  ) => {
+    const url = `${API_BASE}/buyers/${encodeURIComponent(userNick)}/force-refresh?refresh_type=${refreshType}`;
+
+    return fetchRequest<{ buyer_nick: string; refresh_type: string; message: string }>(url, {
+      method: 'POST',
+      signal,
+    }, {});
   },
 };
 
@@ -504,4 +756,58 @@ export interface ActionableCustomersResponse {
   high_churn_risk: BuyerInfo[];
   high_value: BuyerInfo[];
   medium_churn_risk: BuyerInfo[];
+}
+
+/**
+ * 批量分析启动响应
+ */
+export interface BatchAnalysisStartResponse {
+  task_id: string;
+  status: 'pending';
+  message: string;
+}
+
+/**
+ * 批量分析任务状态
+ */
+export interface BatchAnalysisStatus {
+  task_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  total_buyers: number;
+  processed_buyers: number;
+  skipped_buyers: number;
+  failed_buyers: number;
+  progress_percent: number;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+}
+
+/**
+ * 情感分析汇总
+ */
+export interface SentimentSummary {
+  total_analyzed: number;
+  positive: { count: number; avg_score: number };
+  neutral: { count: number; avg_score: number };
+  negative: { count: number; avg_score: number };
+  distribution_percent: {
+    positive: number;
+    neutral: number;
+    negative: number;
+  };
+}
+
+/**
+ * 意图分析汇总
+ */
+export interface IntentSummary {
+  total_analyzed: number;
+  intents: {
+    'Pre-sale Inquiry': number;
+    'Post-sale Support': number;
+    'Logistics': number;
+    'Usage Guide': number;
+    'Complaint': number;
+  };
 }
