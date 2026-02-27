@@ -156,7 +156,6 @@ class BuyerQueries:
         """
         query = """
         SELECT
-            id,
             user_nick,
             sender_nick,
             msg_time,
