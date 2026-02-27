@@ -343,7 +343,12 @@ class AnalyzerOrchestrator:
                     result["analysis_method"] = "DeepSeek-Chat"
                     result["data_source"] = "消费数据"
 
-                return self._cache_and_return(buyer_nick, profile, result)
+                # 检查结果是否有效，无效则降级
+                if self._is_valid_analysis(result):
+                    return self._cache_and_return(buyer_nick, profile, result)
+                else:
+                    print(f"[L1→L2] DeepSeek返回无效结果，降级到Zhipu GLM-4.7")
+                    result = None  # 重置result以便继续降级
 
             except TimeoutError:
                 print(f"[L1→L2] DeepSeek超时，降级到Zhipu GLM-4.7")
@@ -432,7 +437,10 @@ class AnalyzerOrchestrator:
             "未包含任何有效的客户聊天记录",  # 数据不足时的响应
             "证据中未包含",  # 证据不足时的响应
             "无法分析",  # 通用拒绝响应
-            "无法提取"  # 提取失败响应
+            "无法提取",  # 提取失败响应
+            "数据提取失败",  # DeepSeek证据提取失败
+            "无法分析客户特征",  # DeepSeek分析失败
+            "分析失败"  # 通用失败响应
         ]
 
         for invalid in invalid_summaries:
