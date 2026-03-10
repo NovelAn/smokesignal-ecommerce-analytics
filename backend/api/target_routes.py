@@ -559,12 +559,14 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
         logging.info(f"[DEBUG AI] fetched {len(chats)} chats")
 
         # 2. 获取订单记录（用于行为分析）
+        # 注意: 使用原始表dunhill_t01_trade_line获取完整历史订单
+        # target_buyer_orders表只有近3个月数据，会导致AI分析数据不完整
         orders_query = """
             SELECT
                 订单号, 商品名称 as commodity_name, category,
                 成交总金额 as payment, 退款金额, 退款类型 as refund_status,
                 最后付款时间 as pay_time
-            FROM target_buyer_orders
+            FROM dunhill_t01_trade_line
             WHERE 买家昵称 = %s
             ORDER BY 最后付款时间 DESC
             LIMIT 50
