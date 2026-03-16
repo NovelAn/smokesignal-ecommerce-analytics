@@ -336,3 +336,318 @@ class TagCalculator:
             return "新一线"
         else:
             return "其他城市"
+
+    # ============================================
+    # RFM Customer Classification Methods
+    # ============================================
+
+    @staticmethod
+    def calculate_rfm_scores(
+        last_purchase_date: Optional[datetime],
+        total_orders: int,
+        historical_net_sales: float,
+        chat_frequency_days: int = 0
+    ) -> Dict[str, int]:
+        """
+        Calculate RFM scores for a buyer
+
+        RFM Model (Luxury E-commerce Optimized):
+        - R (Recency): How recently did they purchase?
+        - F (Frequency): How often do they purchase?
+        - M (Monetary): How much do they spend?
+
+        Luxury thresholds (dunhill specific - lower frequency, higher value):
+        - R: ≤60d=5, 61-180d=4, 181-365d=3, 366-730d=2, >730d=1
+        - F: ≥5单=5, 3-4单=4, 2单=3, 1单+聊天=2, 1单无聊天=1
+        - M: ≥50K=5, 20K-50K=4, 10K-20K=3, 5K-10K=2, <5K=1
+
+        Returns:
+            {
+                "r_score": int (1-5),
+                "f_score": int (1-5),
+                "m_score": int (1-5)
+            }
+        """
+        now = datetime.now()
+
+        # Calculate R Score (Recency)
+        if last_purchase_date is None:
+            r_score = 0
+        else:
+            days_since_purchase = (now - last_purchase_date).days
+            if days_since_purchase <= 60:
+                r_score = 5
+            elif days_since_purchase <= 180:
+                r_score = 4
+            elif days_since_purchase <= 365:
+                r_score = 3
+            elif days_since_purchase <= 730:
+                r_score = 2
+            else:
+                r_score = 1
+
+        # Calculate F Score (Frequency)
+        if total_orders >= 5:
+            f_score = 5
+        elif total_orders >= 3:
+            f_score = 4
+        elif total_orders == 2:
+            f_score = 3
+        elif total_orders == 1 and chat_frequency_days > 0:
+            f_score = 2
+        elif total_orders == 1:
+            f_score = 1
+        else:
+            f_score = 0
+
+        # Calculate M Score (Monetary)
+        if historical_net_sales >= 50000:
+            m_score = 5
+        elif historical_net_sales >= 20000:
+            m_score = 4
+        elif historical_net_sales >= 10000:
+            m_score = 3
+        elif historical_net_sales >= 5000:
+            m_score = 2
+        else:
+            m_score = 1
+
+        return {
+            "r_score": r_score,
+            "f_score": f_score,
+            "m_score": m_score
+        }
+
+    @staticmethod
+    def determine_rfm_segment(r_score: int, f_score: int, m_score: int) -> Dict[str, Any]:
+        """
+        Determine customer segment based on RFM scores
+        Simplified Version - 11 Categories
+        覆盖所有 125 combinations
+        """
+        segment = "待分类"
+        strategy = ""
+        priority = "中"
+
+        # M=5 (>=50K) - 核心VIP
+        if m_score == 5:
+            if r_score >= 4 and f_score >= 4:
+                segment = "重要价值客户"
+                strategy = "VIP专属服务，新品优先"
+                priority = "紧急"
+            elif r_score >= 4:
+                segment = "重要发展客户"
+                strategy = "提升复购频次"
+                priority = "高"
+            elif f_score >= 4:
+                segment = "重要保持客户"
+                strategy = "召回维护"
+                priority = "紧急"
+            else:
+                segment = "重要挽留客户"
+                strategy = "紧急挽回"
+                priority = "紧急"
+
+        # M=4 (20K-50K) - 高价值
+        elif m_score == 4:
+            if r_score >= 4 and f_score >= 4:
+                segment = "优质活跃客户"
+                strategy = "重点培养，升级VIP"
+                priority = "高"
+            elif r_score >= 4 and f_score == 3:
+                segment = "优质发展客户"
+                strategy = "有升级潜力"
+                priority = "高"
+            elif r_score >= 4:
+                segment = "优质新客"
+                strategy = "新发展优质客户"
+                priority = "高"
+            elif f_score >= 3:
+                segment = "优质保持客户"
+                strategy = "持续维护"
+                priority = "高"
+            else:
+                segment = "优质挽留客户"
+                strategy = "激活召回"
+                priority = "高"
+
+        # M=3 (10K-20K) - 中等价值
+        elif m_score == 3:
+            if r_score >= 4 and f_score >= 4:
+                segment = "成长活跃客户"
+                strategy = "成长性好，升级潜力"
+                priority = "中"
+            elif r_score >= 4 and f_score == 3:
+                segment = "成长发展客户"
+                strategy = "有潜力，推荐升级"
+                priority = "中"
+            elif r_score >= 4:
+                segment = "成长新客"
+                strategy = "新客户，首次复购激励"
+                priority = "中"
+            elif f_score >= 3:
+                segment = "成长保持客户"
+                strategy = "维护关系，定期触达"
+                priority = "中"
+            else:
+                segment = "成长挽留客户"
+                strategy = "激活活动，促销触达"
+                priority = "中"
+
+        # M=2 (5K-10K) - 潜力
+        elif m_score == 2:
+            if r_score >= 4:
+                segment = "潜力客户"
+                strategy = "引导升级，推荐高客单"
+                priority = "中"
+            else:
+                segment = "待激活客户"
+                strategy = "促销激活，限时优惠"
+                priority = "低"
+
+        # M=1 (<5K) - 入门
+        elif m_score == 1:
+            if r_score >= 4:
+                segment = "新客户"
+                strategy = "培育转化，面向引导"
+                priority = "中"
+            else:
+                segment = "低价值客户"
+                strategy = "低优先级，批量触达"
+                priority = "低"
+
+        # 特殊情况
+        if r_score == 1:
+            segment = "已流失"
+            strategy = "批量触达，大促唤醒"
+            priority = "低"
+        elif r_score == 0:
+            segment = "无购买记录"
+            strategy = "数据异常，需核实"
+            priority = "低"
+
+        return {
+            "segment": segment,
+            "strategy": strategy,
+            "priority": priority
+        }
+
+    @staticmethod
+    def calculate_follow_priority(
+        rfm_segment: str,
+        churn_risk: str,
+        l6m_netsales: float,
+        vip_level: str
+    ) -> str:
+        """
+        Calculate follow-up priority based on multiple factors
+
+        Priority levels: 紧急/高/中/低
+
+        Factors:
+        - RFM segment
+        - Churn risk
+        - Recent spending (L6M)
+        - VIP level
+        """
+        # Start with RFM segment priority
+        priority_map = {
+            "重要价值客户": "紧急",
+            "重要发展客户": "高",
+            "重要保持客户": "高",
+            "一般客户": "中",
+            "潜力客户": "中",
+            "流失预警": "紧急",
+            "已流失": "低"
+        }
+
+        priority = priority_map.get(rfm_segment, "中")
+
+        # Upgrade priority based on additional factors
+        if churn_risk == "高" and priority in ["中", "低"]:
+            priority = "高"
+
+        if vip_level in ["V3", "V2"] and priority != "紧急":
+            priority = "高" if priority == "中" else priority
+
+        if l6m_netsales >= 10000 and priority == "低":
+            priority = "中"
+
+        return priority
+
+    @staticmethod
+    def calculate_complaint_tendency(
+        refund_rate: float,
+        chat_frequency_days: int,
+        sentiment_score: Optional[float] = None
+    ) -> str:
+        """
+        Calculate complaint tendency based on refund rate and chat behavior
+
+        Returns: 高/中/低
+        """
+        # High refund rate indicates potential complaint tendency
+        if refund_rate >= 0.15:
+            return "高"
+        elif refund_rate >= 0.08:
+            return "中"
+
+        # High chat frequency without purchase may indicate issues
+        if chat_frequency_days > 10 and sentiment_score and sentiment_score < 0.4:
+            return "高"
+
+        # If we have sentiment score, use it
+        if sentiment_score is not None:
+            if sentiment_score < 0.3:
+                return "高"
+            elif sentiment_score < 0.5:
+                return "中"
+
+        return "低"
+
+    @staticmethod
+    def calculate_intent_scores(intent_distribution: Dict[str, int]) -> Dict[str, int]:
+        """
+        Calculate pre-sale and post-sale scores from intent distribution
+
+        Args:
+            intent_distribution: {
+                "Pre-sale Inquiry": int,
+                "Post-sale Support": int,
+                "Logistics": int,
+                "Usage Guide": int,
+                "Complaint": int
+            }
+
+        Returns:
+            {
+                "pre_sale_score": int (0-100),
+                "post_sale_score": int (0-100),
+                "dominant_intent": str
+            }
+        """
+        total = sum(intent_distribution.values()) or 1
+
+        # Pre-sale score: Pre-sale Inquiry占比
+        pre_sale_count = intent_distribution.get("Pre-sale Inquiry", 0)
+        pre_sale_score = min(100, int((pre_sale_count / total) * 100))
+
+        # Post-sale score: Post-sale Support + Complaint + Usage Guide
+        post_sale_count = (
+            intent_distribution.get("Post-sale Support", 0) +
+            intent_distribution.get("Complaint", 0) +
+            intent_distribution.get("Usage Guide", 0)
+        )
+        post_sale_score = min(100, int((post_sale_count / total) * 100))
+
+        # Determine dominant intent
+        if intent_distribution:
+            dominant_intent = max(intent_distribution.items(), key=lambda x: x[1])[0]
+        else:
+            dominant_intent = "Unknown"
+
+        return {
+            "pre_sale_score": pre_sale_score,
+            "post_sale_score": post_sale_score,
+            "dominant_intent": dominant_intent
+        }

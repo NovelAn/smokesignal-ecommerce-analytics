@@ -1,5 +1,7 @@
 """
-Zhipu AI (GLM-4.7) client for buyer persona analysis
+Zhipu AI Client - 备选模型 (Fallback Model)
+当DeepSeek API余额不足(429)或超时时，自动降级到此模型
+当前使用: GLM-4.7 (glm-4-plus)
 """
 import json
 from typing import Dict, List, Any
@@ -41,6 +43,8 @@ class ZhipuClient:
         prompt = self._build_persona_prompt(user_nick, profile_data, recent_chats, order_summary)
 
         try:
+            print(f"[ZhipuClient] Calling model: {self.model}", flush=True)
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -53,15 +57,25 @@ class ZhipuClient:
                         "content": prompt
                     }
                 ],
-                temperature=0.3,
-                max_tokens=1500
+                temperature=0.3
+                # GLM-5 不需要设置 max_tokens，让它自动生成完整响应
             )
 
             response_text = response.choices[0].message.content
+            print(f"[ZhipuClient] Response length: {len(response_text) if response_text else 0}", flush=True)
+            print(f"[ZhipuClient] Response preview: {response_text[:300] if response_text else 'EMPTY'}", flush=True)
+
             return self._parse_ai_response(response_text)
 
         except Exception as e:
-            print(f"Error calling Zhipu AI: {e}")
+            error_str = str(e).lower()
+            # 检测429错误（余额不足）
+            if "429" in error_str or "rate" in error_str or "insufficient" in error_str or "余额" in error_str:
+                print(f"[ZhipuClient] API余额不足(429): {e}", flush=True)
+            else:
+                print(f"[ZhipuClient] Error calling Zhipu AI: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             return self._default_analysis()
 
     def _build_persona_prompt(
@@ -155,24 +169,45 @@ class ZhipuClient:
     def _parse_ai_response(self, response_text: str) -> Dict[str, Any]:
         """Parse AI response and extract JSON"""
         try:
+            if not response_text:
+                print("[ZhipuClient] Response is empty!", flush=True)
+                return self._default_analysis()
+
+            # 去除 markdown 代码块标记
+            cleaned = response_text.strip()
+            if cleaned.startswith('```'):
+                # 移除开头的 ```json 或 ```
+                first_newline = cleaned.find('\n')
+                if first_newline != -1:
+                    cleaned = cleaned[first_newline + 1:]
+                # 移除结尾的 ```
+                if cleaned.endswith('```'):
+                    cleaned = cleaned[:-3]
+                cleaned = cleaned.strip()
+
+            print(f"[ZhipuClient] Cleaned response: {cleaned[:300]}", flush=True)
+
             # Try to extract JSON from response
-            start = response_text.find('{')
-            end = response_text.rfind('}') + 1
+            start = cleaned.find('{')
+            end = cleaned.rfind('}') + 1
 
             if start != -1 and end > start:
-                json_str = response_text[start:end]
-                return json.loads(json_str)
+                json_str = cleaned[start:end]
+                result = json.loads(json_str)
+                print(f"[ZhipuClient] Parsed JSON successfully", flush=True)
+                return result
             else:
+                print(f"[ZhipuClient] No JSON found in response", flush=True)
                 # If no JSON found, return as summary
                 return {
-                    "summary": response_text[:500],
+                    "summary": cleaned[:500],
                     "key_interests": [],
                     "pain_points": [],
                     "recommended_action": "请根据买家情况制定跟进策略"
                 }
 
         except json.JSONDecodeError as e:
-            print(f"Error parsing AI response: {e}")
+            print(f"[ZhipuClient] JSON decode error: {e}", flush=True)
             return {
                 "summary": response_text[:500] if response_text else "AI分析失败",
                 "key_interests": [],
@@ -269,11 +304,27 @@ class ZhipuClient:
         """
         prompt = f"""
 请分析以下买家消息的意图类型，将每条消息分类到以下类型之一：
-1. Pre-sale Inquiry (售前咨询) - 询问产品、价格、推荐等
-2. Post-sale Support (售后支持) - 收到产品后的问题反馈
-3. Logistics (物流) - 关于发货、快递、物流跟踪
-4. Usage Guide (使用指南) - 询问如何使用、保养等
-5. Complaint (投诉) - 明确的投诉、不满
+1. Pre-sale Inquiry (售前咨询) - 询问产品、价格、推荐、库存、款式等购买前问题
+2. Post-sale Support (售后支持) - 收到产品后的问题反馈、退换货咨询、保修维修
+3. Logistics (物流) - 关于发货、快递、物流跟踪、配送时间
+4. Usage Guide (使用指南) - 询问如何使用、保养、功能说明
+5. Complaint (投诉) - 仅限【明确投诉行为】：明确说"我要投诉"、"给差评"、"举报你"、"找经理"、"315投诉"等
+
+【重要】Complaint判断标准：
+
+一、满足以下任一条件就算投诉：
+1. 包含明确的投诉行为词汇：投诉/差评/举报/315/消费者协会/工商/找经理
+2. 或者表达了不满情绪：太差/质量差/很差/垃圾/骗子/假货/欺骗/失望/不满/态度差/服务差
+
+二、以下情况【不算投诉】，属于Post-sale Support：
+- 单纯的"退款"/"退货"/"换货"/"催发货"，没有不满情绪词
+- 只是咨询物流状态、发货时间
+
+三、示例：
+- "质量太差了" → Complaint（有不满情绪）
+- "我要投诉你们" → Complaint（有投诉行为）
+- "我要退款" → Post-sale Support（功能性请求，无不满情绪）
+- "什么时候发货" → Logistics（物流咨询）
 
 消息列表：
 {self._format_messages_for_sentiment(messages)}

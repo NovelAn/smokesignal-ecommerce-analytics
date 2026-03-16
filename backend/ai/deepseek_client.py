@@ -120,7 +120,7 @@ class DeepSeekClient:
             证据字典
         """
         # 数据预处理
-        chat_insights = extract_chat_insights(chats)
+        chat_insights = extract_chat_insights(chats, buyer_nick)
         order_behavior = structure_order_behavior(profile, orders)
 
         # 格式化为prompt
@@ -241,7 +241,7 @@ class DeepSeekClient:
         适用于: 中等复杂度（10-20条聊天记录）
         """
         # 数据预处理
-        chat_insights = extract_chat_insights(chats)
+        chat_insights = extract_chat_insights(chats, buyer_nick)
         order_behavior = structure_order_behavior(profile, orders)
 
         # Serialize datetime objects before JSON encoding
@@ -418,6 +418,22 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
     "dominant_intent": "主要意图(上述数量最多的类别)",
     "complaint_count": 投诉相关消息总数
 }}
+
+【重要】Complaint判断标准：
+
+一、满足以下任一条件才算投诉：
+1. 包含明确的投诉行为词汇：投诉/差评/举报/315/消费者协会/工商/找经理
+2. 或者表达了不满情绪：太差/质量差/很差/垃圾/骗子/假货/欺骗/失望/不满/态度差/服务差
+
+二、以下情况【不算投诉】，属于Post-sale Support：
+- 单纯的"退款"/"退货"/"换货"/"催发货"，没有不满情绪词
+- 只是咨询物流状态、发货时间
+
+三、示例：
+- "质量太差了" → Complaint（有不满情绪）
+- "我要投诉你们" → Complaint（有投诉行为）
+- "我要退款" → Post-sale Support（功能性请求，无不满情绪）
+- "什么时候发货" → Logistics（物流咨询）
 
 只返回JSON，不要其他内容。"""
 

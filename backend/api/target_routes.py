@@ -694,7 +694,8 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/buyers/{user_nick}/force-refresh")
 async def force_refresh_analysis(
     user_nick: str,
-    refresh_type: str = "all"  # "persona" | "sentiment" | "all"
+    refresh_type: str = "all",  # "persona" | "sentiment" | "all"
+    reanalyze: bool = Query(True, description="是否立即重新分析")
 ) -> Dict[str, Any]:
     """
     强制刷新AI分析结果
@@ -710,23 +711,33 @@ async def force_refresh_analysis(
             - "persona": 仅刷新客户画像
             - "sentiment": 仅刷新情感/意图分析
             - "all": 刷新全部
+        reanalyze: 是否在清除缓存后立即重新分析（默认True）
 
     Returns:
         {
             "buyer_nick": str,
             "refresh_type": str,
+            "cleared": list,
+            "reanalyzed": list,
+            "ai_provider": str,  # 如果重新分析了情感，返回使用的AI模型
             "message": str
         }
     """
     try:
         from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
         from backend.ai.batch_analyzer import get_batch_analyzer
+        from backend.database import Database, BuyerQueries
+        from backend.config import settings
+        import logging
 
         orchestrator = get_analyzer_orchestrator()
         batch_analyzer = get_batch_analyzer()
 
         cleared = []
+        reanalyzed = []
+        ai_provider = None
 
+        # 1. 清除缓存
         if refresh_type in ["persona", "all"]:
             orchestrator.force_refresh(user_nick)
             cleared.append("画像")
@@ -735,14 +746,53 @@ async def force_refresh_analysis(
             batch_analyzer.force_refresh(user_nick)
             cleared.append("情感")
 
+        # 2. 如果需要重新分析
+        if reanalyze:
+            db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
+            db = Database(db_name=db_name)
+
+            # 获取聊天记录
+            query, params = BuyerQueries.get_chat_messages(user_nick, limit=50)
+            chats = db.execute_query(query, params)
+
+            if refresh_type in ["sentiment", "all"]:
+                # 重新进行情感/意图分析
+                result = batch_analyzer.analyze_single_buyer(user_nick, chats)
+
+                # 获取客户档案用于保存
+                profile_query = "SELECT * FROM target_buyers_precomputed WHERE buyer_nick = %s"
+                profile_result = db.execute_query(profile_query, [user_nick])
+                profile = profile_result[0] if profile_result else None
+
+                # 保存结果
+                batch_analyzer.save_analysis_result(result, profile=profile)
+                reanalyzed.append("情感")
+                ai_provider = result.get('sentiment_method', 'unknown')
+                logging.info(f"[ForceRefresh] 情感分析完成: {user_nick}, method={ai_provider}")
+
+            if refresh_type in ["persona", "all"]:
+                # 重新进行画像分析需要从买家详情页触发
+                # 这里只清除缓存，不重新分析
+                logging.info(f"[ForceRefresh] 画像缓存已清除: {user_nick}")
+
+        # 构建返回消息
+        if reanalyzed:
+            message = f"已清除 {', '.join(cleared)} 缓存并重新分析完成"
+        else:
+            message = f"已清除 {', '.join(cleared)} 缓存，下次请求将重新分析"
+
         return {
             "buyer_nick": user_nick,
             "refresh_type": refresh_type,
             "cleared": cleared,
-            "message": f"已清除 {', '.join(cleared)} 缓存，下次请求将重新分析"
+            "reanalyzed": reanalyzed,
+            "ai_provider": ai_provider,
+            "message": message
         }
 
     except Exception as e:
+        import logging
+        logging.error(f"[ForceRefresh] 失败: {e}")
         raise HTTPException(status_code=500, detail=f"强制刷新失败: {str(e)}")
 
 

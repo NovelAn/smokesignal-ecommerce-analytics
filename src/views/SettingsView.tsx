@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Terminal, Play, RefreshCw, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Terminal, Play, RefreshCw, CheckCircle, AlertCircle, Loader2, Search, User } from 'lucide-react';
 import { apiClient, BatchAnalysisStatus, SentimentSummary } from '../api/client';
 
 const SettingsView: React.FC = () => {
@@ -8,6 +8,11 @@ const SettingsView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Single customer analysis state
+  const [singleCustomerNick, setSingleCustomerNick] = useState('');
+  const [singleAnalysisLoading, setSingleAnalysisLoading] = useState(false);
+  const [singleAnalysisResult, setSingleAnalysisResult] = useState<{success: boolean; message: string} | null>(null);
 
   // 加载情感分析汇总
   useEffect(() => {
@@ -68,6 +73,43 @@ const SettingsView: React.FC = () => {
       setError(err.message || '启动批量分析失败');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Single customer analysis handler
+  const handleSingleCustomerAnalysis = async () => {
+    if (!singleCustomerNick.trim()) {
+      setSingleAnalysisResult({ success: false, message: '请输入客户昵称' });
+      return;
+    }
+
+    setSingleAnalysisLoading(true);
+    setSingleAnalysisResult(null);
+
+    try {
+      const response = await apiClient.forceRefreshAnalysis(
+        singleCustomerNick.trim(),
+        'sentiment' // 只刷新情感/意图分析，不影响画像缓存
+      );
+      const aiProvider = (response as any).ai_provider;
+      const reanalyzed = (response as any).reanalyzed || [];
+      const message = (response as any).message || '分析完成';
+
+      setSingleAnalysisResult({
+        success: true,
+        message: reanalyzed.length > 0
+          ? `客户 "${singleCustomerNick}" 情感分析完成！${aiProvider ? ` (使用 ${aiProvider})` : ''}`
+          : message
+      });
+      // Refresh sentiment summary after single analysis
+      loadSentimentSummary();
+    } catch (err: any) {
+      setSingleAnalysisResult({
+        success: false,
+        message: err.message || '分析失败，请重试'
+      });
+    } finally {
+      setSingleAnalysisLoading(false);
     }
   };
 
@@ -208,6 +250,68 @@ const SettingsView: React.FC = () => {
                 )}
                 {isLoading ? 'Starting...' : isPolling ? 'Analyzing...' : 'Start Batch Analysis'}
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Single Customer Analysis */}
+        <div className="bg-notion-bg border border-notion-border rounded-sm p-6 shadow-sm mt-4">
+          <div className="flex items-start gap-4">
+            <div className="p-2 bg-blue-50 rounded text-blue-700">
+              <User size={20} />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-medium text-notion-text">Single Customer Analysis</h3>
+              <p className="text-sm text-notion-muted mt-1 leading-relaxed">
+                Analyze sentiment and intent for a specific customer by their nickname.
+              </p>
+
+              {/* Search Input */}
+              <div className="mt-4 flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-notion-muted" />
+                  <input
+                    type="text"
+                    placeholder="Enter customer nickname..."
+                    value={singleCustomerNick}
+                    onChange={(e) => setSingleCustomerNick(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-notion-sidebar border border-notion-border rounded-sm text-sm text-notion-text focus:outline-none focus:ring-1 focus:ring-blue-300"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !singleAnalysisLoading) {
+                        handleSingleCustomerAnalysis();
+                      }
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={handleSingleCustomerAnalysis}
+                  disabled={singleAnalysisLoading || !singleCustomerNick.trim()}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-sm hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  {singleAnalysisLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4" />
+                  )}
+                  {singleAnalysisLoading ? 'Analyzing...' : 'Analyze'}
+                </button>
+              </div>
+
+              {/* Analysis Result */}
+              {singleAnalysisResult && (
+                <div className={`mt-4 flex items-center gap-2 text-sm p-3 rounded border ${
+                  singleAnalysisResult.success
+                    ? 'text-green-700 bg-green-50 border-green-200'
+                    : 'text-red-600 bg-red-50 border-red-200'
+                }`}>
+                  {singleAnalysisResult.success ? (
+                    <CheckCircle className="w-4 h-4" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4" />
+                  )}
+                  {singleAnalysisResult.message}
+                </div>
+              )}
             </div>
           </div>
         </div>

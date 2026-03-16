@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 import threading
 
+from backend.analytics.tag_calculator import TagCalculator
+
 logger = logging.getLogger(__name__)
 
 
@@ -154,6 +156,7 @@ class BatchAnalyzer:
                 tb.historical_net_sales,
                 cache.sentiment_score,
                 cache.sentiment_label,
+                cache.intent_distribution,
                 cache.sentiment_analyzed_last_chat_date,
                 cache.sentiment_analyzed_at
             FROM target_buyers_precomputed tb
@@ -164,6 +167,7 @@ class BatchAnalyzer:
                 cache.buyer_nick IS NULL
                 OR cache.sentiment_score IS NULL
                 OR tb.last_chat_date > cache.sentiment_analyzed_last_chat_date
+                OR (cache.intent_distribution IS NOT NULL AND tb.pre_sale_score = 0 AND tb.post_sale_score = 0)
             )
             ORDER BY
                 CASE
@@ -289,6 +293,11 @@ class BatchAnalyzer:
                 result['sentiment_method'] = 'zhipu_glm4'
                 result['complaint_count'] = intent_dist.get('Complaint', 0)
 
+                # Calculate pre_sale_score and post_sale_score from intent_distribution
+                intent_scores = TagCalculator.calculate_intent_scores(intent_dist)
+                result['pre_sale_score'] = intent_scores['pre_sale_score']
+                result['post_sale_score'] = intent_scores['post_sale_score']
+
                 # Extract keywords
                 result['pre_sale_keywords'] = self._extract_keywords(buyer_messages, 'pre_sale')
                 result['post_sale_keywords'] = self._extract_keywords(buyer_messages, 'post_sale')
@@ -317,6 +326,11 @@ class BatchAnalyzer:
                 result['complaint_count'] = deepseek_result.get('complaint_count', 0)
                 result['sentiment_method'] = 'deepseek'
 
+                # Calculate pre_sale_score and post_sale_score from intent_distribution
+                intent_scores = TagCalculator.calculate_intent_scores(result['intent_distribution'])
+                result['pre_sale_score'] = intent_scores['pre_sale_score']
+                result['post_sale_score'] = intent_scores['post_sale_score']
+
                 # Extract keywords
                 result['pre_sale_keywords'] = self._extract_keywords(buyer_messages, 'pre_sale')
                 result['post_sale_keywords'] = self._extract_keywords(buyer_messages, 'post_sale')
@@ -341,7 +355,19 @@ class BatchAnalyzer:
 
         pre_sale_keywords = ['价格', '多少钱', '有货', '尺寸', '颜色', '款式', '推荐', '新款', '上市']
         post_sale_keywords = ['退货', '换货', '维修', '保修', '发票', '物流', '快递', '收到']
-        complaint_keywords = ['投诉', '差评', '不满', '要求', '经理', '退款', '赔偿']
+
+        # 投诉关键词分类
+        # 强投诉词：明确的投诉行为
+        strong_complaint_keywords = ['投诉', '差评', '举报', '315', '消费者协会', '工商', '找经理']
+        # 不满情绪词：对产品/服务表达不满（核心投诉信号）
+        dissatisfaction_keywords = [
+            '太差', '质量差', '很差', '垃圾', '骗子', '骗人', '假的', '假货', '欺骗',
+            '失望', '不满', '不满意', '太慢', '态度差', '服务差', '差的', '不好用',
+            '质量太差', '质量不好', '做工差', '掉色', '褪色', '破损', '坏了', '有问题',
+            '差劲', '太差了', '质量太差了', '差评', '给差评'
+        ]
+        # 功能性请求词（单独出现不算投诉，只是正常的售后需求）
+        functional_keywords = ['退款', '退货', '换货', '催促', '发货', '收到货', '物流']
 
         all_text = ' '.join(messages).lower()
 
@@ -350,7 +376,25 @@ class BatchAnalyzer:
 
         pre_sale_count = sum(1 for word in pre_sale_keywords if word in all_text)
         post_sale_count = sum(1 for word in post_sale_keywords if word in all_text)
-        complaint_count = sum(1 for word in complaint_keywords if word in all_text)
+
+        # 投诉计数逻辑：
+        # 1. 强投诉词出现1个 = 1次投诉（明确的投诉行为，如"我要投诉"）
+        # 2. 不满情绪词出现1个 = 1次投诉（表达了对产品/服务的不满，如"质量太差了"）
+        # 3. 但如果只有功能性请求词（退款/催发货），没有不满情绪词，不算投诉
+        strong_matches = [kw for kw in strong_complaint_keywords if kw in all_text]
+        dissatisfaction_matches = [kw for kw in dissatisfaction_keywords if kw in all_text]
+        functional_matches = [kw for kw in functional_keywords if kw in all_text]
+
+        complaint_count = 0
+        if len(strong_matches) >= 1:
+            # 强投诉词出现，直接算投诉（如"我要投诉"、"差评"）
+            complaint_count = 1
+        elif len(dissatisfaction_matches) >= 1:
+            # 有不满情绪词，算投诉（如"质量太差了"、"垃圾产品"、"太失望了"）
+            complaint_count = 1
+        # 如果只有功能性请求词（退款/催发货），没有不满情绪，不算投诉
+        # 例如："我要退款" 不算投诉，只是正常的售后请求
+        # 例如："质量太差了，我要退款" 算投诉，因为有不满情绪词"太差"
 
         # Calculate sentiment score
         total_sentiment = positive_count + negative_count
@@ -381,12 +425,17 @@ class BatchAnalyzer:
         else:
             dominant_intent = 'Unknown'
 
+        # Calculate pre_sale_score and post_sale_score from intent_distribution
+        intent_scores = TagCalculator.calculate_intent_scores(intent_dist)
+
         return {
             "buyer_nick": buyer_nick,
             "sentiment_score": round(sentiment_score, 2),
             "sentiment_label": sentiment_label,
             "intent_distribution": intent_dist,
             "dominant_intent": dominant_intent,
+            "pre_sale_score": intent_scores['pre_sale_score'],
+            "post_sale_score": intent_scores['post_sale_score'],
             "pre_sale_keywords": [],
             "post_sale_keywords": [],
             "complaint_count": complaint_count,
@@ -408,6 +457,8 @@ class BatchAnalyzer:
                 "Complaint": 0
             },
             "dominant_intent": "Unknown",
+            "pre_sale_score": 0,
+            "post_sale_score": 0,
             "pre_sale_keywords": [],
             "post_sale_keywords": [],
             "complaint_count": 0,
@@ -487,13 +538,15 @@ class BatchAnalyzer:
 
             db.execute_update(query, params)
 
-            # Also update the main precomputed table
+            # Also update the main precomputed table with sentiment and intent scores
             update_query = """
                 UPDATE target_buyers_precomputed
                 SET
                     sentiment_label = %s,
                     sentiment_score = %s,
-                    dominant_intent = %s
+                    dominant_intent = %s,
+                    pre_sale_score = %s,
+                    post_sale_score = %s
                 WHERE buyer_nick = %s
             """
 
@@ -501,6 +554,8 @@ class BatchAnalyzer:
                 result.get('sentiment_label', 'Neutral'),
                 result.get('sentiment_score', 0.5),
                 result.get('dominant_intent', 'Unknown'),
+                result.get('pre_sale_score', 0),
+                result.get('post_sale_score', 0),
                 buyer_nick
             ])
 
