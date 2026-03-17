@@ -285,6 +285,12 @@ export interface BuyerProfile {
   second_category: string;
   third_category: string;
 
+  // RFM 分析
+  rfm_recency_score: number;       // 1-5分，最近购买时间
+  rfm_frequency_score: number;     // 1-5分，购买频次
+  rfm_monetary_score: number;      // 1-5分，消费金额
+  rfm_segment: string;             // RFM分层结果，如 "Champions", "Loyal Customers" 等
+
   // AI分析 (如果 include_ai=true)
   ai_analysis?: {
     summary: string;
@@ -292,6 +298,12 @@ export interface BuyerProfile {
     pain_points: string[];
     recommended_action: string;
   };
+
+  // Intent Distribution (from buyer_ai_analysis_cache)
+  intent_distribution?: Record<string, number>; // e.g., {"Pre-sale Inquiry": 10, "Post-sale Support": 5}
+  ai_dominant_intent?: string; // e.g., "Pre-sale Inquiry"
+  sentiment_label?: string; // e.g., "Positive", "Neutral", "Negative"
+  sentiment_score?: number; // e.g., 0.8
 
   // 更新时间
   updated_at: string;

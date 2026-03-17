@@ -247,3 +247,18 @@ When adding new queries:
 - **Deployment guide**: `docs/部署运维/目标买家部署指南.md`
 - **Data model**: `docs/架构设计/数据模型设计.md`
 - **Field reference**: `docs/field_reference/客户月度标签字段.md`
+
+## Frontend Development Guidelines
+
+### UI/Visual Modifications Priority
+
+**对于所有前端视觉相关的修改，优先调用 `frontend-design` skill**：
+
+当任务涉及以下内容时，应首先使用frontend-design skill：
+- UI组件布局调整
+- 样式和颜色修改
+- 新增视觉模块（卡片、图表、标签等）
+- 交互组件设计（按钮、筛选器、表单等）
+- Notion风格UI优化
+
+使用方式：在开始前端视觉修改前，调用 `Skill` tool 并指定 `skill: "frontend-design"`，让skill指导设计实现。

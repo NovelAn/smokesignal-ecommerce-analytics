@@ -3,65 +3,96 @@
 -- ============================================
 -- 用途: 买家360°详情页
 -- 性能: < 0.1秒(主键查询)
+-- 更新: 2026-03-17 JOIN buyer_ai_analysis_cache获取intent_distribution
 -- ============================================
 
 SELECT
-    buyer_nick,
-    channel,
-    buyer_type,
-    is_smoker,
-    is_vic,
-    vip_level,
-    client_monthly_tag,
+    tb.buyer_nick,
+    tb.channel,
+    tb.buyer_type,
+    tb.is_smoker,
+    tb.is_vic,
+    tb.vip_level,
+    tb.client_monthly_tag,
 
     -- 历史指标
-    historical_gmv,
-    historical_refund,
-    historical_net_sales,
-    total_orders,
-    total_net_orders,
-    refund_rate,
-    first_purchase_date,
-    last_purchase_date,
+    tb.historical_gmv,
+    tb.historical_refund,
+    tb.historical_net_sales,
+    tb.total_orders,
+    tb.total_net_orders,
+    tb.refund_rate,
+    tb.first_purchase_date,
+    tb.last_purchase_date,
 
     -- Rolling 24个月
-    rolling_24m_netsales,
-    rolling_24m_orders,
+    tb.rolling_24m_gmv,
+    tb.rolling_24m_netsales,
+    tb.rolling_24m_orders,
+    tb.rolling_24m_net_orders,
 
     -- L6M指标
-    l6m_netsales,
-    l6m_orders,
-    l6m_refund_rate,
+    tb.l6m_netsales,
+    tb.l6m_gmv,
+    tb.l6m_orders,
+    tb.l6m_refund_rate,
 
     -- L1Y指标
-    l1y_netsales,
-    l1y_orders,
-    l1y_refund_rate,
+    tb.l1y_netsales,
+    tb.l1y_gmv,
+    tb.l1y_orders,
+    tb.l1y_refund_rate,
 
     -- 折扣敏感度
-    discount_ratio,
-    discount_sensitivity,
+    tb.discount_ratio,
+    tb.discount_sensitivity,
 
     -- 聊天指标
-    chat_frequency_days,
-    first_chat_date,
-    last_chat_date,
-    l30d_chat_frequency_days,
-    l3m_chat_frequency_days,
-    avg_chat_interval_days,
+    tb.chat_frequency_days,
+    tb.total_chat_messages,
+    tb.first_chat_date,
+    tb.last_chat_date,
+    tb.l30d_chat_frequency_days,
+    tb.l3m_chat_frequency_days,
+    tb.avg_chat_interval_days,
 
     -- 流失风险
-    churn_risk,
+    tb.churn_risk,
 
     -- 地理位置
-    city,
+    tb.city,
 
     -- 品类偏好
-    top_category,
-    second_category,
-    third_category,
+    tb.top_category,
+    tb.second_category,
+    tb.third_category,
+
+    -- RFM分层
+    tb.rfm_recency_score,
+    tb.rfm_frequency_score,
+    tb.rfm_monetary_score,
+    tb.rfm_segment,
+
+    -- 情绪与意图
+    tb.sentiment_label,
+    tb.sentiment_score,
+    tb.dominant_intent,
+    tb.pre_sale_score,
+    tb.post_sale_score,
+    tb.complaint_tendency,
+
+    -- 运营标签
+    tb.follow_priority,
 
     -- 元数据
-    updated_at
-FROM target_buyers_precomputed
-WHERE buyer_nick = %s;
+    tb.updated_at,
+
+    -- AI分析缓存字段
+    cache.intent_distribution,
+    cache.dominant_intent as ai_dominant_intent,
+    cache.sentiment_score as ai_sentiment_score,
+    cache.sentiment_label as ai_sentiment_label
+
+FROM target_buyers_precomputed tb
+LEFT JOIN buyer_ai_analysis_cache cache ON tb.buyer_nick = cache.buyer_nick
+WHERE tb.buyer_nick = %s;
