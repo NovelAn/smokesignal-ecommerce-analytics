@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>场外信息配置 - 设计原型</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            stone: {
+              50: '#fafaf9',
+              100: '#f5f5f4',
+              200: '#e7e5e4',
+              300: '#d6d3d1',
+              400: '#a8a29e',
+              500: '#78716c',
+              600: '#57534e',
+              700: '#44403c',
+              800: '#292524',
+              900: '#1c1917',
+            },
+            amber: {
+              50: '#fffbeb',
+              100: '#fef3c7',
+              200: '#fde68a',
+              300: '#fcd34d',
+              400: '#fbbf24',
+              500: '#f59e0b',
+              600: '#d97706',
+              700: '#b45309',
+              800: '#92400e',
+              900: '#78350f',
+            }
+          },
+          fontFamily: {
+            'serif': ['Noto Serif SC', 'serif'],
+            'sans': ['IBM Plex Sans', 'system-ui', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .scrollbar-thin::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .scrollbar-thin::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .scrollbar-thin::-webkit-scrollbar-thumb {
+      background: #d6d3d1;
+      border-radius: 3px;
+    }
+    .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+      background: #a8a29e;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .animate-fade-in {
+      animation: fadeIn 0.3s ease-out forwards;
+    }
+
+    .table-row-hover:hover {
+      background: linear-gradient(90deg, rgba(254,243,199,0.3) 0%, rgba(254,243,199,0.1) 100%);
+    }
+  </style>
+</head>
+<body class="bg-stone-50 font-sans text-stone-800">
+
+  <!-- 主容器 -->
+  <div class="min-h-screen flex flex-col">
+
+    <!-- 顶部导航 -->
+    <header class="h-14 border-b border-stone-200 bg-white flex items-center justify-between px-6 shrink-0 sticky top-0 z-40">
+      <div class="flex items-center gap-8">
+        <!-- Brand -->
+        <div class="flex items-center gap-2 cursor-default">
+          <div class="w-5 h-5 bg-amber-500 rounded flex items-center justify-center text-white text-xs font-bold font-serif">S</div>
+          <span class="font-semibold text-sm tracking-tight">SmokeSignal</span>
+        </div>
+
+        <!-- Nav Tabs -->
+        <nav class="flex items-center gap-1 bg-stone-50/80 p-1 rounded-lg border border-stone-200/50">
+          <button class="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-stone-500 hover:text-stone-700 hover:bg-white/50 transition-all">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+            <span>Overview</span>
+          </button>
+          <button class="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium text-stone-500 hover:text-stone-700 hover:bg-white/50 transition-all">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+            <span>Chat & CRM</span>
+          </button>
+          <button class="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-white text-amber-700 shadow-sm">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <span>场外信息</span>
+          </button>
+        </nav>
+      </div>
+
+      <!-- User -->
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 cursor-pointer hover:bg-stone-50 p-1.5 rounded-md transition-colors">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-200 to-amber-300 flex items-center justify-center text-xs font-medium text-amber-700">A</div>
+          <span class="text-sm font-medium text-stone-600">Admin</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="flex-1 overflow-hidden p-6">
+      <div class="max-w-6xl mx-auto h-full flex flex-col">
+
+        <!-- 页面标题 -->
+        <div class="mb-6">
+          <h1 class="text-2xl font-serif text-stone-800 tracking-tight">场外信息配置</h1>
+          <p class="text-sm text-stone-500 mt-1">补充客户的线下消费和私域沟通记录，用于 AI 综合分析</p>
+        </div>
+
+        <!-- 工具栏 -->
+        <div class="flex items-center justify-between mb-4 gap-4 flex-wrap">
+
+          <!-- 左侧：搜索和筛选 -->
+          <div class="flex items-center gap-3">
+            <!-- 搜索框 -->
+            <div class="relative">
+              <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <input
+                type="text"
+                placeholder="搜索客户昵称..."
+                class="w-64 pl-10 pr-4 py-2 bg-white border border-stone-200 rounded-lg text-sm
+                       placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-amber-200
+                       focus:border-amber-300 transition-all"
+              />
+            </div>
+
+            <!-- 类型筛选 -->
+            <select class="px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm text-stone-600
+                          focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 cursor-pointer">
+              <option>全部类型</option>
+              <option value="communication">沟通记录</option>
+              <option value="purchase">消费记录</option>
+            </select>
+
+            <!-- 渠道筛选 -->
+            <select class="px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm text-stone-600
+                          focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 cursor-pointer">
+              <option>全部渠道</option>
+              <option>微信</option>
+              <option>电话</option>
+              <option>北京SKP</option>
+              <option>上海IFC</option>
+            </select>
+          </div>
+
+          <!-- 右侧：操作按钮 -->
+          <div class="flex items-center gap-2">
+            <button class="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-stone-600
+                           bg-white border border-stone-200 rounded-lg hover:bg-stone-50 transition-colors">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+              批量导入
+            </button>
+            <button class="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white
+                           bg-amber-500 rounded-lg hover:bg-amber-600 transition-colors shadow-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              添加记录
+            </button>
+          </div>
+
+        </div>
+
+        <!-- 数据表格 -->
+        <div class="flex-1 bg-white border border-stone-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
+
+          <!-- 表头 -->
+          <div class="grid grid-cols-12 gap-2 px-4 py-3 bg-stone-50 border-b border-stone-200 text-xs font-medium text-stone-500 uppercase tracking-wide shrink-0">
+            <div class="col-span-2">客户</div>
+            <div class="col-span-1">类型</div>
+            <div class="col-span-2">日期</div>
+            <div class="col-span-2">渠道/门店</div>
+            <div class="col-span-3">内容/金额</div>
+            <div class="col-span-1">操作</div>
+            <div class="col-span-1 w-8"></div>
+          </div>
+
+          <!-- 表格内容 -->
+          <div class="flex-1 overflow-y-auto scrollbar-thin">
+
+            <!-- 沟通记录 -->
+            <div class="grid grid-cols-12 gap-2 px-4 py-3 border-b border-stone-100 table-row-hover transition-colors group items-center">
+              <div class="col-span-2 flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-amber-100 to-amber-200 flex items-center justify-center text-amber-700 text-xs font-medium">王</div>
+                <span class="text-sm font-medium text-stone-700">王小明</span>
+              </div>
+              <div class="col-span-1">
+                <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-sky-100 text-sky-700 rounded">沟通</span>
+              </div>
+              <div class="col-span-2 text-sm text-stone-600">2026-02-20</div>
+              <div class="col-span-2 text-sm text-stone-600">微信</div>
+              <div class="col-span-3 text-sm text-stone-600 truncate">咨询春季新品上市时间，对香水系列感兴趣</div>
+              <div class="col-span-1">
+                <button class="text-stone-400 hover:text-amber-500 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                </button>
+              </div>
+              <div class="col-span-1 w-8">
+                <button class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-all">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- 消费记录 -->
+            <div class="grid grid-cols-12 gap-2 px-4 py-3 border-b border-stone-100 table-row-hover transition-colors group items-center">
+              <div class="col-span-2 flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-rose-100 to-rose-200 flex items-center justify-center text-rose-700 text-xs font-medium">李</div>
+                <span class="text-sm font-medium text-stone-700">李女士</span>
+              </div>
+              <div class="col-span-1">
+                <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 rounded">消费</span>
+              </div>
+              <div class="col-span-2 text-sm text-stone-600">2026-02-18</div>
+              <div class="col-span-2 text-sm text-stone-600">北京SKP</div>
+              <div class="col-span-3 text-sm font-medium text-stone-700">¥8,500 <span class="text-stone-400 font-normal">(香水)</span></div>
+              <div class="col-span-1">
+                <button class="text-stone-400 hover:text-amber-500 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                </button>
+              </div>
+              <div class="col-span-1 w-8">
+                <button class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-all">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- 沟通记录 -->
+            <div class="grid grid-cols-12 gap-2 px-4 py-3 border-b border-stone-100 table-row-hover transition-colors group items-center">
+              <div class="col-span-2 flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-sky-100 to-sky-200 flex items-center justify-center text-sky-700 text-xs font-medium">张</div>
+                <span class="text-sm font-medium text-stone-700">张先生</span>
+              </div>
+              <div class="col-span-1">
+                <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-sky-100 text-sky-700 rounded">沟通</span>
+              </div>
+              <div class="col-span-2 text-sm text-stone-600">2026-02-15</div>
+              <div class="col-span-2 text-sm text-stone-600">电话</div>
+              <div class="col-span-3 text-sm text-stone-600 truncate">投诉物流配送延迟，已安抚并补偿优惠券</div>
+              <div class="col-span-1">
+                <button class="text-stone-400 hover:text-amber-500 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                </button>
+              </div>
+              <div class="col-span-1 w-8">
+                <button class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-all">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- 消费记录 -->
+            <div class="grid grid-cols-12 gap-2 px-4 py-3 border-b border-stone-100 table-row-hover transition-colors group items-center">
+              <div class="col-span-2 flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-violet-100 to-violet-200 flex items-center justify-center text-violet-700 text-xs font-medium">陈</div>
+                <span class="text-sm font-medium text-stone-700">陈女士</span>
+              </div>
+              <div class="col-span-1">
+                <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 rounded">消费</span>
+              </div>
+              <div class="col-span-2 text-sm text-stone-600">2026-02-10</div>
+              <div class="col-span-2 text-sm text-stone-600">上海IFC</div>
+              <div class="col-span-3 text-sm font-medium text-stone-700">¥12,800 <span class="text-stone-400 font-normal">(皮具)</span></div>
+              <div class="col-span-1">
+                <button class="text-stone-400 hover:text-amber-500 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                </button>
+              </div>
+              <div class="col-span-1 w-8">
+                <button class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-all">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- 沟通记录 -->
+            <div class="grid grid-cols-12 gap-2 px-4 py-3 border-b border-stone-100 table-row-hover transition-colors group items-center">
+              <div class="col-span-2 flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-100 to-emerald-200 flex items-center justify-center text-emerald-700 text-xs font-medium">刘</div>
+                <span class="text-sm font-medium text-stone-700">刘先生</span>
+              </div>
+              <div class="col-span-1">
+                <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-sky-100 text-sky-700 rounded">沟通</span>
+              </div>
+              <div class="col-span-2 text-sm text-stone-600">2026-02-08</div>
+              <div class="col-span-2 text-sm text-stone-600">微信</div>
+              <div class="col-span-3 text-sm text-stone-600 truncate">VIP会员生日问候，客户表示满意</div>
+              <div class="col-span-1">
+                <button class="text-stone-400 hover:text-amber-500 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                </button>
+              </div>
+              <div class="col-span-1 w-8">
+                <button class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-all">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- 消费记录 -->
+            <div class="grid grid-cols-12 gap-2 px-4 py-3 border-b border-stone-100 table-row-hover transition-colors group items-center">
+              <div class="col-span-2 flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-orange-100 to-orange-200 flex items-center justify-center text-orange-700 text-xs font-medium">赵</div>
+                <span class="text-sm font-medium text-stone-700">赵女士</span>
+              </div>
+              <div class="col-span-1">
+                <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-700 rounded">消费</span>
+              </div>
+              <div class="col-span-2 text-sm text-stone-600">2026-02-05</div>
+              <div class="col-span-2 text-sm text-stone-600">广州太古汇</div>
+              <div class="col-span-3 text-sm font-medium text-stone-700">¥5,200 <span class="text-stone-400 font-normal">(配饰)</span></div>
+              <div class="col-span-1">
+                <button class="text-stone-400 hover:text-amber-500 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                </button>
+              </div>
+              <div class="col-span-1 w-8">
+                <button class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-all">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- 沟通记录 -->
+            <div class="grid grid-cols-12 gap-2 px-4 py-3 border-b border-stone-100 table-row-hover transition-colors group items-center">
+              <div class="col-span-2 flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-pink-100 to-pink-200 flex items-center justify-center text-pink-700 text-xs font-medium">周</div>
+                <span class="text-sm font-medium text-stone-700">周女士</span>
+              </div>
+              <div class="col-span-1">
+                <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-sky-100 text-sky-700 rounded">沟通</span>
+              </div>
+              <div class="col-span-2 text-sm text-stone-600">2026-02-01</div>
+              <div class="col-span-2 text-sm text-stone-600">微信</div>
+              <div class="col-span-3 text-sm text-stone-600 truncate">咨询定制礼盒服务，安排门店对接</div>
+              <div class="col-span-1">
+                <button class="text-stone-400 hover:text-amber-500 transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                </button>
+              </div>
+              <div class="col-span-1 w-8">
+                <button class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-stone-600 transition-all">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"/></svg>
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 分页 -->
+          <div class="px-4 py-3 bg-stone-50 border-t border-stone-200 flex items-center justify-between shrink-0">
+            <span class="text-sm text-stone-500">共 156 条记录</span>
+            <div class="flex items-center gap-1">
+              <button class="w-8 h-8 flex items-center justify-center rounded text-stone-400 hover:bg-stone-100 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+              </button>
+              <button class="w-8 h-8 flex items-center justify-center rounded bg-amber-100 text-amber-700 font-medium text-sm">1</button>
+              <button class="w-8 h-8 flex items-center justify-center rounded text-stone-600 hover:bg-stone-100 transition-colors text-sm">2</button>
+              <button class="w-8 h-8 flex items-center justify-center rounded text-stone-600 hover:bg-stone-100 transition-colors text-sm">3</button>
+              <span class="text-stone-400">...</span>
+              <button class="w-8 h-8 flex items-center justify-center rounded text-stone-600 hover:bg-stone-100 transition-colors text-sm">10</button>
+              <button class="w-8 h-8 flex items-center justify-center rounded text-stone-400 hover:bg-stone-100 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 添加记录弹窗 (模拟) -->
+        <div class="mt-6 bg-white border-2 border-dashed border-amber-300 rounded-xl p-6">
+          <div class="text-center text-sm text-stone-400 mb-4">
+            ↓ 点击"添加记录"后显示的弹窗 ↓
+          </div>
+
+          <div class="bg-white rounded-xl border border-stone-200 shadow-xl overflow-hidden max-w-lg mx-auto">
+            <!-- 头部 -->
+            <div class="px-5 py-4 border-b border-stone-200 flex items-center justify-between">
+              <h3 class="font-medium text-stone-800">添加场外记录</h3>
+              <button class="text-stone-400 hover:text-stone-600 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            <!-- 表单 -->
+            <div class="p-5 space-y-4">
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-medium text-stone-500 mb-1.5">客户昵称</label>
+                  <input type="text" placeholder="搜索或输入客户昵称"
+                         class="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm
+                                focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-stone-500 mb-1.5">记录类型</label>
+                  <select class="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm
+                                 focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300">
+                    <option value="communication">沟通记录</option>
+                    <option value="purchase">消费记录</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-medium text-stone-500 mb-1.5">日期</label>
+                  <input type="date" class="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm
+                                         focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300" />
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-stone-500 mb-1.5">渠道/门店</label>
+                  <input type="text" placeholder="如：微信、电话、北京SKP..."
+                         class="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm
+                                focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300" />
+                </div>
+              </div>
+
+              <!-- 消费记录专用字段 -->
+              <div class="grid grid-cols-2 gap-4 p-3 bg-emerald-50/50 rounded-lg border border-emerald-100">
+                <div>
+                  <label class="block text-xs font-medium text-emerald-600 mb-1.5">消费金额（仅消费类型）</label>
+                  <div class="relative">
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-sm">¥</span>
+                    <input type="number" placeholder="0.00"
+                           class="w-full pl-7 pr-3 py-2 bg-white border border-stone-200 rounded-lg text-sm
+                                  focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-300" />
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-emerald-600 mb-1.5">商品品类</label>
+                  <input type="text" placeholder="如：香水、皮具、配饰..."
+                         class="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm
+                                focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:border-emerald-300" />
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-medium text-stone-500 mb-1.5">内容描述</label>
+                <textarea rows="3" placeholder="记录沟通内容或消费详情..."
+                          class="w-full px-3 py-2 bg-white border border-stone-200 rounded-lg text-sm
+                                 focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300
+                                 placeholder:text-stone-400 resize-none"></textarea>
+              </div>
+            </div>
+
+            <!-- 底部按钮 -->
+            <div class="px-5 py-4 bg-stone-50 border-t border-stone-200 flex justify-end gap-3">
+              <button class="px-4 py-2 text-sm text-stone-600 hover:text-stone-800 transition-colors">
+                取消
+              </button>
+              <button class="px-5 py-2 text-sm font-medium bg-amber-500 text-white rounded-lg
+                             hover:bg-amber-600 transition-colors shadow-sm">
+                保存记录
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+  </div>
+
+</body>
+</html>
