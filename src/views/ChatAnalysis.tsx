@@ -417,21 +417,39 @@ const ChatAnalysis: React.FC = () => {
     const newEnableAI = !enableAI;
     setEnableAI(newEnableAI);
 
-    // 当从OFF切换到ON时，触发强制刷新AI分析
+    // 当从OFF切换到ON时，激活AI分析
+    // 注意：不再调用forceRefreshAnalysis，避免清除缓存
+    // 后端会自动检查缓存，只有数据变化时才重新分析
     if (newEnableAI && currentSession?.user_nick) {
       setHasActivatedAI(true);
+      // 直接触发重新获取profile，后端会使用缓存或重新分析
       setIsRefreshingAI(true);
       try {
-        await apiClient.forceRefreshAnalysis(currentSession.user_nick, 'persona');
-        // 刷新成功后重新获取profile
         refetchProfile();
-      } catch (error) {
-        console.error('Failed to refresh AI analysis:', error);
       } finally {
-        setIsRefreshingAI(false);
+        // 延迟关闭loading状态，等待数据加载
+        setTimeout(() => setIsRefreshingAI(false), 500);
       }
     }
     // 当从ON切换到OFF时，不做任何操作，保持显示已有结果
+  };
+
+  // 强制重新分析AI画像
+  const handleForceRefreshPersona = async () => {
+    if (!currentSession?.user_nick) return;
+
+    setIsRefreshingAI(true);
+    try {
+      // 1. 调用force-refresh API清除缓存并重新分析
+      await apiClient.forceRefreshAnalysis(currentSession.user_nick, 'persona');
+      // 2. 重新获取profile数据
+      refetchProfile();
+    } catch (error) {
+      console.error('Force refresh failed:', error);
+    } finally {
+      // 延迟关闭loading状态，等待AI分析完成
+      setTimeout(() => setIsRefreshingAI(false), 1000);
+    }
   };
 
   // 合并基本信息和AI分析结果
@@ -503,7 +521,20 @@ const ChatAnalysis: React.FC = () => {
       'Usage Guide',
       'Complaint'
     ];
-    const rawDistribution = (buyerProfile as any)?.intent_distribution;
+
+    // 获取intent_distribution（可能是JSON字符串或已解析的对象）
+    let rawDistribution = (buyerProfile as any)?.intent_distribution;
+
+    // 如果是字符串，解析为JSON对象
+    if (typeof rawDistribution === 'string') {
+      try {
+        rawDistribution = JSON.parse(rawDistribution);
+      } catch (e) {
+        console.error('Failed to parse intent_distribution:', e);
+        return allIntentKeys.map((key) => ({ subject: key, A: 0, fullMark: 100 }));
+      }
+    }
+
     if (!rawDistribution || typeof rawDistribution !== 'object') {
       return allIntentKeys.map((key) => ({ subject: key, A: 0, fullMark: 100 }));
     }

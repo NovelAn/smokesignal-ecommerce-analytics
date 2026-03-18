@@ -605,6 +605,48 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
 
         # 3. 准备profile数据（传递所有预计算表字段，除了updated_at）
         # 确保AI能够基于完整的真实数据进行分析
+
+        # ⚠️ 预先计算距今天数，避免AI自己计算时产生幻觉
+        from datetime import datetime as dt
+        today = dt.now()
+
+        last_purchase_date = profile.get('last_purchase_date')
+        first_purchase_date = profile.get('first_purchase_date')
+        last_chat_date = profile.get('last_chat_date')
+
+        days_since_last_purchase = 0
+        days_since_last_chat = 0
+        avg_repurchase_interval_days = 0
+
+        if last_purchase_date:
+            try:
+                if isinstance(last_purchase_date, str):
+                    last_purchase_date = dt.strptime(last_purchase_date[:19], '%Y-%m-%d %H:%M:%S')
+                days_since_last_purchase = (today - last_purchase_date).days
+            except:
+                pass
+
+        if last_chat_date:
+            try:
+                if isinstance(last_chat_date, str):
+                    last_chat_date = dt.strptime(last_chat_date[:19], '%Y-%m-%d %H:%M:%S')
+                days_since_last_chat = (today - last_chat_date).days
+            except:
+                pass
+
+        # 计算平均复购间隔
+        total_orders = int(profile.get('total_orders', 0))
+        if first_purchase_date and last_purchase_date and total_orders > 1:
+            try:
+                if isinstance(first_purchase_date, str):
+                    first_purchase_date = dt.strptime(first_purchase_date[:19], '%Y-%m-%d %H:%M:%S')
+                if isinstance(last_purchase_date, str):
+                    last_purchase_date = dt.strptime(last_purchase_date[:19], '%Y-%m-%d %H:%M:%S')
+                days_span = (last_purchase_date - first_purchase_date).days
+                avg_repurchase_interval_days = round(days_span / (total_orders - 1)) if days_span > 0 else 0
+            except:
+                pass
+
         profile_data = {
             # 基本信息（直接从profile传递所有字段）
             "user_nick": user_nick,
@@ -627,6 +669,11 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
             # 时间维度指标
             "first_purchase_date": str(profile.get('first_purchase_date', '')) if profile.get('first_purchase_date') else '',
             "last_purchase_date": str(profile.get('last_purchase_date', '')) if profile.get('last_purchase_date') else '',
+
+            # ⚠️ 预计算的天数字段（AI直接使用，不要自己计算！）
+            "days_since_last_purchase": days_since_last_purchase,
+            "days_since_last_chat": days_since_last_chat,
+            "avg_repurchase_interval_days": avg_repurchase_interval_days,
 
             # 滚动24个月指标
             "rolling_24m_netsales": float(profile.get('rolling_24m_netsales', 0)),
@@ -794,9 +841,89 @@ async def force_refresh_analysis(
                 logging.info(f"[ForceRefresh] 情感分析完成: {user_nick}, method={ai_provider}")
 
             if refresh_type in ["persona", "all"]:
-                # 重新进行画像分析需要从买家详情页触发
-                # 这里只清除缓存，不重新分析
-                logging.info(f"[ForceRefresh] 画像缓存已清除: {user_nick}")
+                # 重新进行画像分析
+                from backend.analytics.target_buyer_analyzer import TargetBuyerAnalyzer
+
+                analyzer = TargetBuyerAnalyzer()
+                profile = analyzer.get_buyer_profile(user_nick)
+
+                if profile:
+                    # 准备profile_data（包含预计算的天数字段）
+                    from datetime import datetime as dt
+                    today = dt.now()
+
+                    last_purchase_date = profile.get('last_purchase_date')
+                    first_purchase_date = profile.get('first_purchase_date')
+                    last_chat_date = profile.get('last_chat_date')
+
+                    days_since_last_purchase = 0
+                    days_since_last_chat = 0
+                    avg_repurchase_interval_days = 0
+
+                    if last_purchase_date:
+                        try:
+                            if isinstance(last_purchase_date, str):
+                                last_purchase_date = dt.strptime(last_purchase_date[:19], '%Y-%m-%d %H:%M:%S')
+                            days_since_last_purchase = (today - last_purchase_date).days
+                        except:
+                            pass
+
+                    if last_chat_date:
+                        try:
+                            if isinstance(last_chat_date, str):
+                                last_chat_date = dt.strptime(last_chat_date[:19], '%Y-%m-%d %H:%M:%S')
+                            days_since_last_chat = (today - last_chat_date).days
+                        except:
+                            pass
+
+                    # 计算平均复购间隔
+                    total_orders = int(profile.get('total_orders', 0))
+                    if first_purchase_date and last_purchase_date and total_orders > 1:
+                        try:
+                            if isinstance(first_purchase_date, str):
+                                first_purchase_date = dt.strptime(first_purchase_date[:19], '%Y-%m-%d %H:%M:%S')
+                            if isinstance(last_purchase_date, str):
+                                last_purchase_date = dt.strptime(last_purchase_date[:19], '%Y-%m-%d %H:%M:%S')
+                            days_span = (last_purchase_date - first_purchase_date).days
+                            avg_repurchase_interval_days = round(days_span / (total_orders - 1)) if days_span > 0 else 0
+                        except:
+                            pass
+
+                    # 构建profile_data
+                    profile_data = {
+                        "user_nick": user_nick,
+                        "buyer_nick": profile.get('buyer_nick'),
+                        "vip_level": profile.get('vip_level', 'Non-VIP'),
+                        "buyer_type": profile.get('buyer_type'),
+                        "city": profile.get('city', 'Unknown'),
+                        "first_purchase_date": str(profile.get('first_purchase_date', '')),
+                        "last_purchase_date": str(profile.get('last_purchase_date', '')),
+                        "total_orders": int(profile.get('total_orders', 0)),
+                        "historical_net_sales": float(profile.get('historical_net_sales', 0)),
+                        "days_since_last_purchase": days_since_last_purchase,
+                        "days_since_last_chat": days_since_last_chat,
+                        "avg_repurchase_interval_days": avg_repurchase_interval_days,
+                        "top_category": profile.get('top_category', 'Unknown'),
+                        "churn_risk": profile.get('churn_risk', '未知'),
+                        "chat_history": chats,
+                    }
+
+                    # 调用orchestrator进行分析
+                    ai_result = orchestrator.analyze_buyer_persona(
+                        buyer_nick=user_nick,
+                        profile=profile_data,
+                        chats=chats,
+                        orders=[]  # 订单数据已在profile中
+                    )
+
+                    # 保存结果到缓存
+                    orchestrator.cache_manager.set_persona(user_nick, ai_result, profile_data)
+
+                    reanalyzed.append("画像")
+                    persona_method = ai_result.get('analysis_method', 'unknown')
+                    logging.info(f"[ForceRefresh] 画像分析完成: {user_nick}, method={persona_method}")
+                else:
+                    logging.warning(f"[ForceRefresh] 未找到客户档案: {user_nick}")
 
         # 构建返回消息
         if reanalyzed:

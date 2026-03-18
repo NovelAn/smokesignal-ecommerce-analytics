@@ -142,6 +142,9 @@ class DeepSeekClient:
             buyer_type=profile.get("buyer_type", "UNKNOWN"),
             first_purchase_date=profile.get("first_purchase_date", ""),
             last_purchase_date=profile.get("last_purchase_date", ""),
+            days_since_last_purchase=profile.get("days_since_last_purchase", 0),
+            days_since_last_chat=profile.get("days_since_last_chat", 0),
+            avg_repurchase_interval_days=profile.get("avg_repurchase_interval_days", 0),
             external_info=formatted_external
         )
 

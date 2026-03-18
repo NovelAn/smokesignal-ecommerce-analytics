@@ -375,17 +375,20 @@ SET
         WHERE user_nick = tb.buyer_nick
     );
 
--- 3.6 计算流失风险
+-- 3.6 计算流失风险（两个维度都要不活跃才升高风险）
 UPDATE target_buyers_precomputed
 SET churn_risk = CASE
+    -- 高风险：购买 > 2年 且 聊天 > 6个月（两个维度都长期不活跃）
     WHEN
         DATEDIFF(NOW(), last_purchase_date) > 730  -- 2年无复购
         AND DATEDIFF(NOW(), last_chat_date) > 180  -- 6个月无咨询
     THEN '高'
+    -- 中风险：购买 > 6个月 且 聊天 > 3个月（两个维度都不太活跃）
     WHEN
         DATEDIFF(NOW(), last_purchase_date) > 180  -- 6个月无复购
-        OR DATEDIFF(NOW(), last_chat_date) > 90   -- 3个月无咨询
+        AND DATEDIFF(NOW(), last_chat_date) > 90   -- 3个月无咨询
     THEN '中'
+    -- 低风险：至少有一个维度活跃
     ELSE '低'
 END;
 
@@ -718,17 +721,20 @@ BEGIN
             WHERE user_nick = tb.buyer_nick
         );
 
-    -- 流失风险
+    -- 流失风险（两个维度都要不活跃才升高风险）
     UPDATE target_buyers_precomputed
     SET churn_risk = CASE
+        -- 高风险：购买 > 2年 且 聊天 > 6个月（两个维度都长期不活跃）
         WHEN
             DATEDIFF(NOW(), last_purchase_date) > 730
             AND DATEDIFF(NOW(), last_chat_date) > 180
         THEN '高'
+        -- 中风险：购买 > 6个月 且 聊天 > 3个月（两个维度都不太活跃）
         WHEN
             DATEDIFF(NOW(), last_purchase_date) > 180
-            OR DATEDIFF(NOW(), last_chat_date) > 90
+            AND DATEDIFF(NOW(), last_chat_date) > 90
         THEN '中'
+        -- 低风险：至少有一个维度活跃
         ELSE '低'
     END;
 

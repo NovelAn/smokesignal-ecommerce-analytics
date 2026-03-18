@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Terminal, Play, RefreshCw, CheckCircle, AlertCircle, Loader2, Search, User } from 'lucide-react';
+import { Terminal, Play, RefreshCw, CheckCircle, AlertCircle, Loader2, Search, User, Sparkles } from 'lucide-react';
 import { apiClient, BatchAnalysisStatus, SentimentSummary } from '../api/client';
 
 const SettingsView: React.FC = () => {
@@ -13,6 +13,10 @@ const SettingsView: React.FC = () => {
   const [singleCustomerNick, setSingleCustomerNick] = useState('');
   const [singleAnalysisLoading, setSingleAnalysisLoading] = useState(false);
   const [singleAnalysisResult, setSingleAnalysisResult] = useState<{success: boolean; message: string} | null>(null);
+
+  // AI Persona refresh state
+  const [personaRefreshLoading, setPersonaRefreshLoading] = useState(false);
+  const [personaRefreshResult, setPersonaRefreshResult] = useState<{success: boolean; message: string} | null>(null);
 
   // 加载情感分析汇总
   useEffect(() => {
@@ -110,6 +114,38 @@ const SettingsView: React.FC = () => {
       });
     } finally {
       setSingleAnalysisLoading(false);
+    }
+  };
+
+  // AI Persona重新分析处理函数
+  const handlePersonaRefresh = async () => {
+    if (!singleCustomerNick.trim()) {
+      setPersonaRefreshResult({ success: false, message: '请输入客户昵称' });
+      return;
+    }
+
+    setPersonaRefreshLoading(true);
+    setPersonaRefreshResult(null);
+
+    try {
+      // 调用force-refresh API，刷新persona类型
+      const response = await apiClient.forceRefreshAnalysis(
+        singleCustomerNick.trim(),
+        'persona' // 只刷新AI画像分析
+      );
+      const message = (response as any).message || 'AI画像分析完成';
+
+      setPersonaRefreshResult({
+        success: true,
+        message: `客户 "${singleCustomerNick}" AI画像已重新生成！`
+      });
+    } catch (err: any) {
+      setPersonaRefreshResult({
+        success: false,
+        message: err.message || 'AI画像分析失败，请重试'
+      });
+    } finally {
+      setPersonaRefreshLoading(false);
     }
   };
 
@@ -263,7 +299,7 @@ const SettingsView: React.FC = () => {
             <div className="flex-1">
               <h3 className="font-medium text-notion-text">Single Customer Analysis</h3>
               <p className="text-sm text-notion-muted mt-1 leading-relaxed">
-                Analyze sentiment and intent for a specific customer by their nickname.
+                对指定客户进行分析：情感/意图分析 和 AI画像重新生成。
               </p>
 
               {/* Search Input */}
@@ -283,17 +319,33 @@ const SettingsView: React.FC = () => {
                     }}
                   />
                 </div>
+                {/* 情感/意图分析按钮 */}
                 <button
                   onClick={handleSingleCustomerAnalysis}
                   disabled={singleAnalysisLoading || !singleCustomerNick.trim()}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-sm hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                  title="分析客户的情感倾向和意图分布"
                 >
                   {singleAnalysisLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <RefreshCw className="w-4 h-4" />
                   )}
-                  {singleAnalysisLoading ? 'Analyzing...' : 'Analyze'}
+                  {singleAnalysisLoading ? '分析中...' : '情感分析'}
+                </button>
+                {/* AI画像重新分析按钮 */}
+                <button
+                  onClick={handlePersonaRefresh}
+                  disabled={personaRefreshLoading || !singleCustomerNick.trim()}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-sm hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                  title="清除缓存并重新生成AI画像分析"
+                >
+                  {personaRefreshLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-4 h-4" />
+                  )}
+                  {personaRefreshLoading ? '重新生成中...' : '重新生成画像'}
                 </button>
               </div>
 
@@ -310,6 +362,22 @@ const SettingsView: React.FC = () => {
                     <AlertCircle className="w-4 h-4" />
                   )}
                   {singleAnalysisResult.message}
+                </div>
+              )}
+
+              {/* Persona Refresh Result */}
+              {personaRefreshResult && (
+                <div className={`mt-2 flex items-center gap-2 text-sm p-3 rounded border ${
+                  personaRefreshResult.success
+                    ? 'text-purple-700 bg-purple-50 border-purple-200'
+                    : 'text-red-600 bg-red-50 border-red-200'
+                }`}>
+                  {personaRefreshResult.success ? (
+                    <Sparkles className="w-4 h-4" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4" />
+                  )}
+                  {personaRefreshResult.message}
                 </div>
               )}
             </div>
