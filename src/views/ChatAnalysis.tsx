@@ -1311,10 +1311,10 @@ const ChatAnalysis: React.FC = () => {
                                     )
                                   }
                                 >
-                                     <div className="overflow-x-auto">
+                                     <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
                                          <table className="w-full text-left text-sm">
-                                             <thead>
-                                                 <tr className="border-b border-notion-border text-notion-muted text-xs uppercase bg-notion-gray_bg/30">
+                                             <thead className="sticky top-0 z-10">
+                                                 <tr className="border-b border-notion-border text-notion-muted text-xs uppercase bg-notion-gray_bg">
                                                      <th className="py-2 px-3 font-semibold">Date</th>
                                                      <th className="py-2 px-3 font-semibold">Order ID</th>
                                                      <th className="py-2 px-3 font-semibold">Item</th>
