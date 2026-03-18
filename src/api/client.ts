@@ -128,9 +128,12 @@ export const apiClient = {
   /**
    * 获取买家订单历史
    * GET /api/v2/buyers/{user_nick}/orders
+   * @param userNick 买家昵称
+   * @param limit 返回数量限制
+   * @param timeRange 时间范围: 7d/15d/30d/90d/1y/all (默认 'all' 获取全部历史)
    */
-  getBuyerOrders: async (userNick: string, limit = 50) => {
-    const response = await fetch(`${API_BASE}/buyers/${encodeURIComponent(userNick)}/orders?limit=${limit}`);
+  getBuyerOrders: async (userNick: string, limit = 50, timeRange = 'all') => {
+    const response = await fetch(`${API_BASE}/buyers/${encodeURIComponent(userNick)}/orders?limit=${limit}&time_range=${timeRange}`);
     return handleResponse<OrderRecord[]>(response);
   },
 
@@ -229,6 +232,151 @@ export const apiClient = {
       { method: 'POST' }
     );
     return handleResponse<{ buyer_nick: string; refresh_type: string; message: string }>(response);
+  },
+
+  // ========== 场外信息相关 ==========
+
+  /**
+   * 获取场外记录列表（支持分页和筛选）
+   * GET /api/v2/external/records
+   */
+  getExternalRecords: async (params: {
+    search?: string;
+    record_type?: 'communication' | 'purchase';
+    channel?: string;
+    date_from?: string;
+    date_to?: string;
+    limit?: number;
+    offset?: number;
+  } = {}) => {
+    const queryParams = new URLSearchParams();
+    if (params.search) queryParams.append('search', params.search);
+    if (params.record_type) queryParams.append('record_type', params.record_type);
+    if (params.channel) queryParams.append('channel', params.channel);
+    if (params.date_from) queryParams.append('date_from', params.date_from);
+    if (params.date_to) queryParams.append('date_to', params.date_to);
+    queryParams.append('limit', String(params.limit || 100));
+    queryParams.append('offset', String(params.offset || 0));
+
+    const response = await fetch(`${API_BASE}/external/records?${queryParams}`);
+    return handleResponse<ExternalRecordsListResponse>(response);
+  },
+
+  /**
+   * 获取单条场外记录
+   * GET /api/v2/external/records/{record_id}
+   */
+  getExternalRecord: async (recordId: string) => {
+    const response = await fetch(`${API_BASE}/external/records/${recordId}`);
+    return handleResponse<ExternalRecord>(response);
+  },
+
+  /**
+   * 创建场外记录
+   * POST /api/v2/external/records
+   */
+  createExternalRecord: async (record: Omit<ExternalRecord, 'id' | 'created_at' | 'updated_at'>) => {
+    const response = await fetch(`${API_BASE}/external/records`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+    });
+    return handleResponse<ExternalRecord>(response);
+  },
+
+  /**
+   * 更新场外记录
+   * PUT /api/v2/external/records/{record_id}
+   */
+  updateExternalRecord: async (recordId: string, record: Partial<Omit<ExternalRecord, 'id' | 'created_at' | 'updated_at'>>) => {
+    const response = await fetch(`${API_BASE}/external/records/${recordId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+    });
+    return handleResponse<ExternalRecord>(response);
+  },
+
+  /**
+   * 删除场外记录
+   * DELETE /api/v2/external/records/{record_id}
+   */
+  deleteExternalRecord: async (recordId: string) => {
+    const response = await fetch(`${API_BASE}/external/records/${recordId}`, {
+      method: 'DELETE',
+    });
+    return handleResponse<{ message: string }>(response);
+  },
+
+  /**
+   * 获取场外记录统计
+   * GET /api/v2/external/statistics
+   */
+  getExternalRecordsStats: async () => {
+    const response = await fetch(`${API_BASE}/external/statistics`);
+    return handleResponse<ExternalRecordsStats>(response);
+  },
+
+  /**
+   * 批量导入场外记录
+   * POST /api/v2/external/import
+   */
+  importExternalRecords: async (file: File, createdBy?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (createdBy) formData.append('created_by', createdBy);
+
+    const response = await fetch(`${API_BASE}/external/import`, {
+      method: 'POST',
+      body: formData,
+    });
+    return handleResponse<BatchImportResult>(response);
+  },
+
+  /**
+   * 获取CSV模板URL
+   */
+  getExternalRecordsTemplate: () => `${API_BASE}/external/export/template`,
+
+  /**
+   * 获取指定用户的场外记录
+   * GET /api/v2/external/users/{user_nick}
+   */
+  getExternalRecordsByUser: async (userNick: string, limit = 50) => {
+    const response = await fetch(`${API_BASE}/external/users/${encodeURIComponent(userNick)}?limit=${limit}`);
+    return handleResponse<ExternalRecord[]>(response);
+  },
+
+  // ========== AI 批量分析相关 ==========
+
+  /**
+   * 启动批量AI情感/意图分析
+   * POST /api/v2/ai/batch-analyze
+   */
+  startBatchAnalysis: async (buyerLimit: number = 100) => {
+    const response = await fetch(
+      `${API_BASE}/ai/batch-analyze?buyer_limit=${buyerLimit}`,
+      { method: 'POST' }
+    );
+    return handleResponse<{ task_id: string; status: string; message: string }>(response);
+  },
+
+  /**
+   * 获取批量分析任务状态
+   * GET /api/v2/ai/batch-status/{task_id}
+   */
+  getBatchAnalysisStatus: async (taskId: string) => {
+    const response = await fetch(`${API_BASE}/ai/batch-status/${taskId}`);
+    return handleResponse<BatchAnalysisStatus>(response);
+  },
+
+  /**
+   * 获取情感分析汇总
+   * GET /api/v2/analytics/sentiment-summary
+   */
+  getSentimentSummary: async () => {
+    const response = await fetch(`${API_BASE}/analytics/sentiment-summary`);
+    return handleResponse<SentimentSummary>(response);
   },
 };
 
@@ -418,4 +566,82 @@ export interface ActionableCustomersResponse {
   high_churn_risk: BuyerInfo[];
   high_value: BuyerInfo[];
   medium_churn_risk: BuyerInfo[];
+}
+
+// ========== 场外信息类型定义 ==========
+
+export type ExternalRecordType = 'communication' | 'purchase';
+
+export interface ExternalRecord {
+  id: string;
+  user_nick: string;
+  record_type: ExternalRecordType;
+  record_date: string;
+  channel: string | null;
+  content: string | null;
+  notes: string | null;
+  amount: number | null;
+  category: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExternalRecordsListResponse {
+  records: ExternalRecord[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ExternalRecordsStats {
+  total_records: number;
+  communication_count: number;
+  purchase_count: number;
+  total_offline_amount: number;
+  top_channels: Array<{ channel: string; count: number }>;
+  recent_records: ExternalRecord[];
+}
+
+export interface BatchImportResult {
+  success_count: number;
+  failed_count: number;
+  errors: string[];
+  parse_errors?: string[];
+}
+
+// ========== 批量分析类型定义 ==========
+
+export interface BatchAnalysisStatus {
+  task_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  total_buyers: number;
+  processed_buyers: number;
+  skipped_buyers: number;
+  failed_buyers: number;
+  progress_percent: number;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+}
+
+export interface SentimentSummary {
+  total_analyzed: number;
+  positive: {
+    count: number;
+    avg_score: number;
+  };
+  neutral: {
+    count: number;
+    avg_score: number;
+  };
+  negative: {
+    count: number;
+    avg_score: number;
+  };
+  distribution_percent: {
+    positive: number;
+    neutral: number;
+    negative: number;
+  };
 }

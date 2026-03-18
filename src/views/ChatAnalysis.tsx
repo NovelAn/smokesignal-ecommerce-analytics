@@ -41,6 +41,7 @@ import {
   Percent,
   Clock,
   Calendar,
+  ChevronLeft,
   ChevronRight,
   ChevronDown,
   Database,
@@ -160,20 +161,27 @@ const ChatAnalysis: React.FC = () => {
   // Filter states - pending (user selected but not applied)
   const [pendingChannelFilter, setPendingChannelFilter] = useState<('DTC' | 'PFS')[]>([]);
   const [pendingBuyerTypeFilter, setPendingBuyerTypeFilter] = useState<('SMOKER' | 'VIC' | 'BOTH')[]>([]);
-  const [pendingDateRangeFilter, setPendingDateRangeFilter] = useState<DateRangeFilter>('LAST_6_MONTH');
+  const [pendingDateRangeFilter, setPendingDateRangeFilter] = useState<DateRangeFilter>('LAST_1_YEAR');
   const [showFilters, setShowFilters] = useState(false);
 
   // Applied filter states (actually used for API calls)
   const [appliedChannelFilter, setAppliedChannelFilter] = useState<('DTC' | 'PFS')[]>([]);
   const [appliedBuyerTypeFilter, setAppliedBuyerTypeFilter] = useState<('SMOKER' | 'VIC' | 'BOTH')[]>([]);
-  const [appliedDateRangeFilter, setAppliedDateRangeFilter] = useState<DateRangeFilter>('LAST_6_MONTH');
+  const [appliedDateRangeFilter, setAppliedDateRangeFilter] = useState<DateRangeFilter>('LAST_1_YEAR');
+
+  // Order history pagination
+  const [orderCurrentPage, setOrderCurrentPage] = useState(1);
+  const ORDERS_PER_PAGE = 10;
+
+  // 图片放大状态
+  const [enlargedImage, setEnlargedImage] = useState<{ url: string; alt: string } | null>(null);
 
   // Calculate pending filter count for badge (filters selected but not yet applied)
   const pendingFilterCount = useMemo(() => {
     let count = 0;
     if (pendingChannelFilter.length > 0) count++;
     if (pendingBuyerTypeFilter.length > 0) count++;
-    if (pendingDateRangeFilter !== 'LAST_6_MONTH') count++;
+    if (pendingDateRangeFilter !== 'LAST_1_YEAR') count++;
     return count;
   }, [pendingChannelFilter, pendingBuyerTypeFilter, pendingDateRangeFilter]);
 
@@ -182,7 +190,7 @@ const ChatAnalysis: React.FC = () => {
     let count = 0;
     if (appliedChannelFilter.length > 0) count++;
     if (appliedBuyerTypeFilter.length > 0) count++;
-    if (appliedDateRangeFilter !== 'LAST_6_MONTH') count++; // Only count non-default date range
+    if (appliedDateRangeFilter !== 'LAST_1_YEAR') count++; // Only count non-default date range
     return count;
   }, [appliedChannelFilter, appliedBuyerTypeFilter, appliedDateRangeFilter]);
 
@@ -208,10 +216,10 @@ const ChatAnalysis: React.FC = () => {
   const handleClearFilters = () => {
     setPendingChannelFilter([]);
     setPendingBuyerTypeFilter([]);
-    setPendingDateRangeFilter('LAST_6_MONTH');
+    setPendingDateRangeFilter('LAST_1_YEAR');
     setAppliedChannelFilter([]);
     setAppliedBuyerTypeFilter([]);
-    setAppliedDateRangeFilter('LAST_6_MONTH');
+    setAppliedDateRangeFilter('LAST_1_YEAR');
   };
 
   // Track open states for chat dates. Default empty.
@@ -222,12 +230,13 @@ const ChatAnalysis: React.FC = () => {
     () => apiClient.getBuyers({
       limit: 100,
       sort_by: 'last_purchase',
+      search: searchTerm || undefined, // 添加搜索参数，由后端进行搜索
       channel: appliedChannelFilter.length > 0 ? appliedChannelFilter : undefined,
       buyer_type: appliedBuyerTypeFilter.length > 0 ? appliedBuyerTypeFilter : undefined,
       last_purchase_after: calculateLastPurchaseAfter(appliedDateRangeFilter),
     }),
     2,
-    [appliedChannelFilter, appliedBuyerTypeFilter, appliedDateRangeFilter] // 当已应用的筛选条件变化时重新获取
+    [appliedChannelFilter, appliedBuyerTypeFilter, appliedDateRangeFilter, searchTerm] // 添加searchTerm依赖
   );
 
   const { data: buyersCountData, isLoading: buyersCountLoading } = useDataFetchingWithRetry(
@@ -261,6 +270,8 @@ const ChatAnalysis: React.FC = () => {
           total_orders: Number(buyer.total_orders || 0),
           discount_spend_amount: 0,
           discount_ratio: Number(buyer.discount_ratio || 0),
+          l6m_spend: Number(buyer.l6m_netsales || 0),
+          l6m_frequency: Number(buyer.l6m_orders || 0),
           l6m_netsales: Number(buyer.l6m_netsales || 0),
           l6m_orders: Number(buyer.l6m_orders || 0),
           l1y_netsales: Number(buyer.l1y_netsales || 0),
@@ -294,13 +305,8 @@ const ChatAnalysis: React.FC = () => {
     });
   }, [buyersData]);
 
-  // Filter based on user_nick only as requested for precise lookup
-  const filteredSessions = useMemo(() => {
-    if (!searchTerm) return buyerSessions;
-    return buyerSessions.filter(s =>
-      s.user_nick.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [searchTerm, buyerSessions]);
+  // 搜索已由后端API处理，直接使用buyerSessions
+  const filteredSessions = buyerSessions;
 
   // 当买家列表变化时（比如应用新筛选条件），检查当前选中是否仍在列表中
   // 如果不在，自动选择第一个
@@ -318,6 +324,11 @@ const ChatAnalysis: React.FC = () => {
 
   // 当前选中的会话（如果没有选中，默认选择第一个）
   const currentSession = selectedSession || (filteredSessions.length > 0 ? filteredSessions[0] : null);
+
+  // Reset order pagination when user changes
+  useEffect(() => {
+    setOrderCurrentPage(1);
+  }, [currentSession?.user_nick]);
 
   // 当选中的用户改变时，按需获取其详细信息（AI默认关闭，仅激活后获取）
   const { data: buyerProfile, isLoading: profileLoading, error: profileError, refetch: refetchProfile } = useDataFetchingWithRetry(
@@ -390,6 +401,8 @@ const ChatAnalysis: React.FC = () => {
     // Reset AI switch to off when switching users (but keep any cached results)
     setEnableAI(false);
     setHasActivatedAI(false);
+    // Reset order pagination when switching users
+    setOrderCurrentPage(1);
     // Open all dates by default when selecting a new user for better visibility
     const dates: Record<string, boolean> = {};
     session.messages.forEach(m => {
@@ -633,38 +646,11 @@ const ChatAnalysis: React.FC = () => {
      setOpenDates(prev => ({ ...prev, [date]: !prev[date] }));
   };
   
-  if (buyersLoading) {
-    return (
-      <div className="p-8">
-        <LoadingSpinner size={24} text="加载买家数据中..." />
-      </div>
-    );
-  }
-
-  if (buyersError) {
-    return (
-      <div className="p-8">
-        <ErrorAlert message={buyersError} />
-      </div>
-    );
-  }
-
-  if (!currentSession) {
-    return (
-      <div className="p-8">
-        <EmptyState
-          title="暂无可显示的买家"
-          description="请检查后端服务与买家数据接口是否正常"
-        />
-      </div>
-    );
-  }
-
-  if (!currentSession.profile) {
-    return <div className="p-8 text-center text-notion-muted">加载中...</div>;
-  }
+  // Note: We don't use early return for buyersLoading to avoid full page refresh.
+  // Loading state is handled inline in the customer list section.
 
   return (
+    <>
     <div className="h-[calc(100vh-120px)] flex gap-6">
         {/* Left Sidebar: Search & User List */}
         <div className="w-64 flex-none border border-notion-border bg-notion-sidebar rounded-sm flex flex-col shadow-sm">
@@ -675,10 +661,19 @@ const ChatAnalysis: React.FC = () => {
                     <input
                         type="text"
                         placeholder="Search user..."
-                        className="w-full bg-notion-gray_bg border-0 text-notion-text pl-9 pr-3 py-1.5 rounded text-sm focus:ring-1 focus:ring-blue-400 placeholder-notion-muted/70 transition-all"
+                        className="w-full bg-notion-gray_bg border-0 text-notion-text pl-9 pr-8 py-1.5 rounded text-sm focus:ring-1 focus:ring-blue-400 placeholder-notion-muted/70 transition-all"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
+                    {searchTerm && (
+                      <button
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-notion-muted hover:text-notion-text transition-colors"
+                        title="清除搜索"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
                   </div>
                   {/* Filter Button */}
                   <button
@@ -755,8 +750,8 @@ const ChatAnalysis: React.FC = () => {
                         onChange={(e) => setPendingDateRangeFilter(e.target.value as DateRangeFilter)}
                         className="w-full bg-notion-gray_bg border border-notion-border text-notion-text text-xs rounded px-2 py-1.5 focus:ring-1 focus:ring-blue-400 cursor-pointer"
                       >
-                        <option value="LAST_6_MONTH">近6个月</option>
                         <option value="LAST_1_YEAR">近1年</option>
+                        <option value="LAST_6_MONTH">近6个月</option>
                         <option value="LAST_2_YEAR">近2年</option>
                         <option value="ALL">全部时间</option>
                       </select>
@@ -834,7 +829,26 @@ const ChatAnalysis: React.FC = () => {
 
         {/* Right Main Content Area */}
         <div className="flex-1 flex flex-col gap-4 min-w-0 h-full overflow-hidden">
-             
+             {/* Show loading/placeholder when no session is selected */}
+             {!currentSession ? (
+               <div className="flex-1 flex items-center justify-center">
+                 {buyersLoading ? (
+                   <LoadingSpinner size={24} text="加载买家数据中..." />
+                 ) : buyersError ? (
+                   <ErrorAlert message={buyersError} />
+                 ) : (
+                   <EmptyState
+                     title="暂无可显示的买家"
+                     description="请检查后端服务与买家数据接口是否正常"
+                   />
+                 )}
+               </div>
+             ) : !currentSession.profile ? (
+               <div className="flex-1 flex items-center justify-center">
+                 <LoadingSpinner size={24} text="加载中..." />
+               </div>
+             ) : (
+             <>
              {/* Sticky Header Card */}
              <div className="bg-notion-bg border border-notion-border rounded-sm shadow-sm flex-none">
                  {/* Top Row: Identity */}
@@ -1266,8 +1280,37 @@ const ChatAnalysis: React.FC = () => {
                                      </div>
                                 </div>
 
-                                {/* Full History Table */}
-                                <NotionCard icon={History} title="Full Order History">
+                                {/* Full History Table with Pagination */}
+                                <NotionCard
+                                  icon={History}
+                                  title="Full Order History"
+                                  subtitle={`${(enrichedProfile?.order_history || []).length} orders`}
+                                  action={
+                                    (enrichedProfile?.order_history || []).length > ORDERS_PER_PAGE && (
+                                      <div className="flex items-center gap-1">
+                                        <button
+                                          onClick={() => setOrderCurrentPage(p => Math.max(1, p - 1))}
+                                          disabled={orderCurrentPage === 1}
+                                          className="p-1 border border-notion-border rounded hover:bg-notion-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                          title="上一页"
+                                        >
+                                          <ChevronLeft size={14} />
+                                        </button>
+                                        <span className="text-xs text-notion-muted px-2">
+                                          {orderCurrentPage} / {Math.ceil((enrichedProfile?.order_history || []).length / ORDERS_PER_PAGE)}
+                                        </span>
+                                        <button
+                                          onClick={() => setOrderCurrentPage(p => Math.min(Math.ceil((enrichedProfile?.order_history || []).length / ORDERS_PER_PAGE), p + 1))}
+                                          disabled={orderCurrentPage >= Math.ceil((enrichedProfile?.order_history || []).length / ORDERS_PER_PAGE)}
+                                          className="p-1 border border-notion-border rounded hover:bg-notion-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                          title="下一页"
+                                        >
+                                          <ChevronRight size={14} />
+                                        </button>
+                                      </div>
+                                    )
+                                  }
+                                >
                                      <div className="overflow-x-auto">
                                          <table className="w-full text-left text-sm">
                                              <thead>
@@ -1284,7 +1327,9 @@ const ChatAnalysis: React.FC = () => {
                                                  </tr>
                                              </thead>
                                              <tbody className="divide-y divide-notion-border">
-                                                 {(enrichedProfile?.order_history || []).map((order: OrderRecord) => (
+                                                 {(enrichedProfile?.order_history || [])
+                                                   .slice((orderCurrentPage - 1) * ORDERS_PER_PAGE, orderCurrentPage * ORDERS_PER_PAGE)
+                                                   .map((order: OrderRecord) => (
                                                      <tr key={order.order_id} className="hover:bg-notion-hover transition-colors">
                                                          <td className="py-3 px-3 font-mono text-xs whitespace-nowrap">{order.date}</td>
                                                          <td className="py-3 px-3 font-mono text-xs text-notion-muted whitespace-nowrap">{order.order_id}</td>
@@ -1294,7 +1339,8 @@ const ChatAnalysis: React.FC = () => {
                                                                      <img
                                                                          src={order.image_url}
                                                                          alt={order.items[0]}
-                                                                         className="w-12 h-12 object-cover rounded border border-notion-border"
+                                                                         className="w-12 h-12 object-cover rounded border border-notion-border cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                                                                         onClick={() => setEnlargedImage({ url: order.image_url!, alt: order.items[0] })}
                                                                          onError={(e) => {
                                                                              const target = e.target as HTMLImageElement;
                                                                              target.style.display = 'none';
@@ -1441,8 +1487,32 @@ const ChatAnalysis: React.FC = () => {
                      </div>
                  )}
              </div>
+             </>
+             )}
         </div>
     </div>
+
+    {/* 图片放大遮罩层 */}
+    {enlargedImage && (
+        <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm cursor-pointer"
+            onClick={() => setEnlargedImage(null)}
+        >
+            <img
+                src={enlargedImage.url}
+                alt={enlargedImage.alt}
+                className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl cursor-default"
+                onClick={(e) => e.stopPropagation()}
+            />
+            <button
+                className="absolute top-4 right-4 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+                onClick={() => setEnlargedImage(null)}
+            >
+                <X size={24} />
+            </button>
+        </div>
+    )}
+    </>
   );
 };
 

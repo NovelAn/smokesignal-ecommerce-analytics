@@ -270,21 +270,23 @@ const ExternalInfoConfig: React.FC = () => {
                 <th className="px-4 py-3 text-left font-medium text-notion-muted">类型</th>
                 <th className="px-4 py-3 text-left font-medium text-notion-muted">日期</th>
                 <th className="px-4 py-3 text-left font-medium text-notion-muted">渠道/门店</th>
-                <th className="px-4 py-3 text-left font-medium text-notion-muted">内容/金额</th>
+                <th className="px-4 py-3 text-left font-medium text-notion-muted">内容</th>
+                <th className="px-4 py-3 text-left font-medium text-notion-muted">金额</th>
+                <th className="px-4 py-3 text-left font-medium text-notion-muted">备注</th>
                 <th className="px-4 py-3 text-left font-medium text-notion-muted">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-notion-border">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-notion-muted">
+                  <td colSpan={8} className="px-4 py-8 text-center text-notion-muted">
                     <RefreshCw size={20} className="animate-spin mx-auto mb-2" />
                     加载中...
                   </td>
                 </tr>
               ) : records.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-notion-muted">
+                  <td colSpan={8} className="px-4 py-8 text-center text-notion-muted">
                     暂无场外记录，点击"添加记录"开始录入
                   </td>
                 </tr>
@@ -301,29 +303,31 @@ const ExternalInfoConfig: React.FC = () => {
                         {record.record_type === 'communication' ? '沟通' : '消费'}
                       </NotionTag>
                     </td>
-                    <td className="px-4 py-3 text-notion-muted">
+                    <td className="px-4 py-3 text-notion-muted text-sm whitespace-nowrap">
                       {record.record_date}
                     </td>
-                    <td className="px-4 py-3 text-notion-muted">
+                    <td className="px-4 py-3 text-notion-muted text-sm">
                       {record.channel || '-'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-sm">
+                      <div className="max-w-[200px] truncate text-notion-text" title={record.content || ''}>
+                        {record.content || '-'}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm font-medium">
                       {record.record_type === 'purchase' ? (
-                        <div>
-                          <span className="font-medium text-green-600">
-                            ¥{(record.amount || 0).toLocaleString()}
-                          </span>
+                        <div className="flex flex-col">
+                          <span className="text-green-600">¥{(record.amount || 0).toLocaleString()}</span>
                           {record.category && (
-                            <span className="ml-2 text-xs text-notion-muted">
-                              ({record.category})
-                            </span>
+                            <span className="text-xs text-notion-muted">({record.category})</span>
                           )}
                         </div>
                       ) : (
-                        <div className="max-w-xs truncate text-notion-muted">
-                          {record.content || '-'}
-                        </div>
+                        <span className="text-notion-muted">-</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-notion-muted max-w-[150px] truncate" title={record.notes || ''}>
+                      {record.notes || '-'}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
@@ -497,7 +501,8 @@ const RecordModal: React.FC<RecordModalProps> = ({
         amount: formData.record_type === 'purchase' && formData.amount
           ? parseFloat(formData.amount)
           : null,
-        category: formData.record_type === 'purchase' ? formData.category || null : null
+        category: formData.record_type === 'purchase' ? formData.category || null : null,
+        created_by: 'system' // 添加必填字段
       };
 
       if (isEdit) {
