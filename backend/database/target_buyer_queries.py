@@ -403,3 +403,180 @@ class TargetBuyerQueries:
         result = self.db.execute_query(sql, tuple(params) if params else ())
 
         return result[0]['total'] if result else 0
+
+    def get_priority_customers(
+        self,
+        channel: Optional[Any] = None,
+        buyer_type: Optional[Any] = None,
+        follow_priority: Optional[Any] = None,
+        sentiment_label: Optional[Any] = None,
+        has_chat: Optional[str] = None,
+        use_default_filter: bool = True,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        获取优先关注客户列表(带AI画像)
+
+        Args:
+            channel: 渠道筛选 (DTC/PFS) 或 列表
+            buyer_type: 买家类型筛选 (SMOKER/VIC/BOTH) 或 列表
+            follow_priority: 跟进优先级筛选 (紧急/高/中/低) 或 列表
+            sentiment_label: 情感标签筛选 (Positive/Neutral/Negative) 或 列表
+            has_chat: 聊天状态筛选 ('yes'/'no')
+            use_default_filter: 是否使用默认筛选 (follow_priority IN 紧急/高 OR sentiment_label = Negative)
+            limit: 返回数量
+            offset: 偏移量
+
+        Returns:
+            优先关注客户列表(包含AI画像)
+        """
+        import re
+        sql = self._load_sql('get_priority_customers.sql')
+
+        # 构建动态WHERE子句
+        conditions_to_remove = []
+        params = {}
+
+        # 渠道筛选
+        if not channel:
+            conditions_to_remove.append('AND tb.channel IN %(channel)s')
+        else:
+            if isinstance(channel, (list, tuple)):
+                params['channel'] = tuple(channel)
+            else:
+                params['channel'] = (channel,)
+
+        # 买家类型筛选
+        if not buyer_type:
+            conditions_to_remove.append('AND tb.buyer_type IN %(buyer_type)s')
+        else:
+            if isinstance(buyer_type, (list, tuple)):
+                params['buyer_type'] = tuple(buyer_type)
+            else:
+                params['buyer_type'] = (buyer_type,)
+
+        # 跟进优先级筛选
+        if not follow_priority:
+            conditions_to_remove.append('AND tb.follow_priority IN %(follow_priority)s')
+        else:
+            if isinstance(follow_priority, (list, tuple)):
+                params['follow_priority'] = tuple(follow_priority)
+            else:
+                params['follow_priority'] = (follow_priority,)
+
+        # 情感标签筛选
+        if not sentiment_label:
+            conditions_to_remove.append('AND COALESCE(ai.sentiment_label, tb.sentiment_label) IN %(sentiment_label)s')
+        else:
+            if isinstance(sentiment_label, (list, tuple)):
+                params['sentiment_label'] = tuple(sentiment_label)
+            else:
+                params['sentiment_label'] = (sentiment_label,)
+
+        # 聊天状态筛选
+        if has_chat == 'yes':
+            params['has_chat'] = 'yes'
+            conditions_to_remove.append("AND tb.chat_frequency_days = 0 AND %(has_chat)s = 'no'")
+        elif has_chat == 'no':
+            params['has_chat'] = 'no'
+            conditions_to_remove.append("AND tb.chat_frequency_days > 0 AND %(has_chat)s = 'yes'")
+        else:
+            conditions_to_remove.append("AND tb.chat_frequency_days > 0 AND %(has_chat)s = 'yes'")
+            conditions_to_remove.append("AND tb.chat_frequency_days = 0 AND %(has_chat)s = 'no'")
+
+        # 默认筛选逻辑
+        if not use_default_filter:
+            conditions_to_remove.append("AND (tb.follow_priority IN ('紧急', '高') OR COALESCE(ai.sentiment_label, tb.sentiment_label) = 'Negative')")
+
+        # 移除不需要的WHERE条件
+        for condition in conditions_to_remove:
+            sql = sql.replace(f'[[{condition}]]', '')
+
+        # 清理剩余的[[ ]]标记
+        sql = re.sub(r'\[\[|\]\]', '', sql)
+
+        # 添加分页参数
+        params['limit'] = limit
+        params['offset'] = offset
+
+        return self.db.execute_query(sql, params)
+
+    def get_priority_customers_count(
+        self,
+        channel: Optional[Any] = None,
+        buyer_type: Optional[Any] = None,
+        follow_priority: Optional[Any] = None,
+        sentiment_label: Optional[Any] = None,
+        has_chat: Optional[str] = None,
+        use_default_filter: bool = True
+    ) -> int:
+        """
+        获取优先关注客户总数(用于分页)
+
+        Args:
+            同 get_priority_customers
+
+        Returns:
+            客户总数
+        """
+        import re
+        sql = self._load_sql('get_priority_customers_count.sql')
+
+        # 构建动态WHERE子句 (与 get_priority_customers 相同的逻辑)
+        conditions_to_remove = []
+        params = {}
+
+        if not channel:
+            conditions_to_remove.append('AND tb.channel IN %(channel)s')
+        else:
+            if isinstance(channel, (list, tuple)):
+                params['channel'] = tuple(channel)
+            else:
+                params['channel'] = (channel,)
+
+        if not buyer_type:
+            conditions_to_remove.append('AND tb.buyer_type IN %(buyer_type)s')
+        else:
+            if isinstance(buyer_type, (list, tuple)):
+                params['buyer_type'] = tuple(buyer_type)
+            else:
+                params['buyer_type'] = (buyer_type,)
+
+        if not follow_priority:
+            conditions_to_remove.append('AND tb.follow_priority IN %(follow_priority)s')
+        else:
+            if isinstance(follow_priority, (list, tuple)):
+                params['follow_priority'] = tuple(follow_priority)
+            else:
+                params['follow_priority'] = (follow_priority,)
+
+        if not sentiment_label:
+            conditions_to_remove.append('AND COALESCE(ai.sentiment_label, tb.sentiment_label) IN %(sentiment_label)s')
+        else:
+            if isinstance(sentiment_label, (list, tuple)):
+                params['sentiment_label'] = tuple(sentiment_label)
+            else:
+                params['sentiment_label'] = (sentiment_label,)
+
+        if has_chat == 'yes':
+            params['has_chat'] = 'yes'
+            conditions_to_remove.append("AND tb.chat_frequency_days = 0 AND %(has_chat)s = 'no'")
+        elif has_chat == 'no':
+            params['has_chat'] = 'no'
+            conditions_to_remove.append("AND tb.chat_frequency_days > 0 AND %(has_chat)s = 'yes'")
+        else:
+            conditions_to_remove.append("AND tb.chat_frequency_days > 0 AND %(has_chat)s = 'yes'")
+            conditions_to_remove.append("AND tb.chat_frequency_days = 0 AND %(has_chat)s = 'no'")
+
+        if not use_default_filter:
+            conditions_to_remove.append("AND (tb.follow_priority IN ('紧急', '高') OR COALESCE(ai.sentiment_label, tb.sentiment_label) = 'Negative')")
+
+        for condition in conditions_to_remove:
+            sql = sql.replace(f'[[{condition}]]', '')
+
+        sql = re.sub(r'\[\[|\]\]', '', sql)
+
+        result = self.db.execute_query(sql, params)
+
+        return result[0]['total'] if result else 0

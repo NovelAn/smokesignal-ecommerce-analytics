@@ -4,6 +4,7 @@
 -- 用途: 买家360°详情页
 -- 性能: < 0.1秒(主键查询)
 -- 更新: 2026-03-17 JOIN buyer_ai_analysis_cache获取intent_distribution
+-- 更新: 2026-03-19 AI分析结果优先从缓存表获取(实时更新)
 -- ============================================
 
 SELECT
@@ -73,10 +74,11 @@ SELECT
     tb.rfm_monetary_score,
     tb.rfm_segment,
 
-    -- 情绪与意图
-    tb.sentiment_label,
-    tb.sentiment_score,
-    tb.dominant_intent,
+    -- 情绪与意图 (优先从缓存表获取，缓存无数据则使用预计算表)
+    COALESCE(cache.sentiment_label, tb.sentiment_label) AS sentiment_label,
+    COALESCE(cache.sentiment_score, tb.sentiment_score) AS sentiment_score,
+    COALESCE(cache.dominant_intent, tb.dominant_intent) AS dominant_intent,
+    COALESCE(cache.dominant_intent, tb.dominant_intent) AS ai_dominant_intent,
     tb.pre_sale_score,
     tb.post_sale_score,
     tb.complaint_tendency,
@@ -87,11 +89,12 @@ SELECT
     -- 元数据
     tb.updated_at,
 
-    -- AI分析缓存字段
+    -- AI画像分析缓存字段 (仅缓存表有)
     cache.intent_distribution,
-    cache.dominant_intent as ai_dominant_intent,
-    cache.sentiment_score as ai_sentiment_score,
-    cache.sentiment_label as ai_sentiment_label
+    cache.persona_summary,
+    cache.persona_key_interests,
+    cache.persona_pain_points,
+    cache.persona_recommended_action
 
 FROM target_buyers_precomputed tb
 LEFT JOIN buyer_ai_analysis_cache cache ON tb.buyer_nick = cache.buyer_nick

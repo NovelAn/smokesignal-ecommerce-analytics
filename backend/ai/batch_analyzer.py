@@ -679,7 +679,10 @@ class BatchAnalyzer:
         }
 
     def get_sentiment_summary(self) -> Dict[str, Any]:
-        """Get overall sentiment distribution summary"""
+        """Get overall sentiment distribution summary
+
+        更新: 2026-03-19 优先使用缓存表实时数据
+        """
         from backend.database import Database
         from backend.config import settings
 
@@ -688,12 +691,13 @@ class BatchAnalyzer:
 
         query = """
             SELECT
-                sentiment_label,
+                COALESCE(cache.sentiment_label, tb.sentiment_label) AS sentiment_label,
                 COUNT(*) as count,
-                AVG(sentiment_score) as avg_score
-            FROM target_buyers_precomputed
-            WHERE sentiment_label IS NOT NULL
-            GROUP BY sentiment_label
+                AVG(COALESCE(cache.sentiment_score, tb.sentiment_score)) as avg_score
+            FROM target_buyers_precomputed tb
+            LEFT JOIN buyer_ai_analysis_cache cache ON tb.buyer_nick = cache.buyer_nick
+            WHERE COALESCE(cache.sentiment_label, tb.sentiment_label) IS NOT NULL
+            GROUP BY COALESCE(cache.sentiment_label, tb.sentiment_label)
         """
 
         results = db.execute_query(query)
@@ -722,7 +726,10 @@ class BatchAnalyzer:
         return summary
 
     def get_intent_summary(self) -> Dict[str, Any]:
-        """Get overall intent distribution summary"""
+        """Get overall intent distribution summary
+
+        更新: 2026-03-19 优先使用缓存表实时数据
+        """
         from backend.database import Database
         from backend.config import settings
 
@@ -731,11 +738,12 @@ class BatchAnalyzer:
 
         query = """
             SELECT
-                dominant_intent,
+                COALESCE(cache.dominant_intent, tb.dominant_intent) AS dominant_intent,
                 COUNT(*) as count
-            FROM target_buyers_precomputed
-            WHERE dominant_intent IS NOT NULL
-            GROUP BY dominant_intent
+            FROM target_buyers_precomputed tb
+            LEFT JOIN buyer_ai_analysis_cache cache ON tb.buyer_nick = cache.buyer_nick
+            WHERE COALESCE(cache.dominant_intent, tb.dominant_intent) IS NOT NULL
+            GROUP BY COALESCE(cache.dominant_intent, tb.dominant_intent)
             ORDER BY count DESC
         """
 

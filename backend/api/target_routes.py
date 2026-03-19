@@ -461,6 +461,175 @@ async def get_actionable_customers(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/priority-customers")
+async def get_priority_customers(
+    channel: Optional[List[str]] = Query(None, description="渠道筛选: DTC/PFS"),
+    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH"),
+    follow_priority: Optional[List[str]] = Query(None, description="跟进优先级: 紧急/高/中/低"),
+    sentiment_label: Optional[List[str]] = Query(None, description="情感标签: Positive/Neutral/Negative"),
+    has_chat: Optional[str] = Query(None, description="聊天状态: yes/no"),
+    use_default_filter: bool = Query(True, description="使用默认筛选(紧急/高优先级 OR 负面情感)"),
+    limit: int = Query(20, ge=1, le=100, description="每页数量"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    include_total: bool = Query(True, description="是否返回总数")
+) -> Dict[str, Any]:
+    """
+    获取优先关注客户列表(带AI画像)
+
+    默认筛选: follow_priority IN ('紧急', '高') OR sentiment_label = 'Negative'
+
+    支持的筛选条件:
+    - channel: 渠道 (DTC/PFS)
+    - buyer_type: 买家类型 (SMOKER/VIC/BOTH)
+    - follow_priority: 跟进优先级 (紧急/高/中/低)
+    - sentiment_label: 情感标签 (Positive/Neutral/Negative)
+    - has_chat: 聊天状态 (yes/no)
+
+    返回字段包含AI画像:
+    - persona_key_interests: 关键兴趣点
+    - persona_pain_points: 痛点
+    - persona_recommended_action: 推荐行动
+
+    性能: < 1秒 (JOIN + 索引查询)
+    """
+    try:
+        # 获取客户列表
+        customers = analyzer.get_priority_customers(
+            channel=channel,
+            buyer_type=buyer_type,
+            follow_priority=follow_priority,
+            sentiment_label=sentiment_label,
+            has_chat=has_chat,
+            use_default_filter=use_default_filter,
+            limit=limit,
+            offset=offset
+        )
+
+        # 获取总数
+        total = None
+        if include_total:
+            total = analyzer.get_priority_customers_count(
+                channel=channel,
+                buyer_type=buyer_type,
+                follow_priority=follow_priority,
+                sentiment_label=sentiment_label,
+                has_chat=has_chat,
+                use_default_filter=use_default_filter
+            )
+
+        return {
+            "customers": customers,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/priority-customers/export")
+async def export_priority_customers_csv(
+    channel: Optional[List[str]] = Query(None, description="渠道筛选: DTC/PFS"),
+    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH"),
+    follow_priority: Optional[List[str]] = Query(None, description="跟进优先级: 紧急/高/中/低"),
+    sentiment_label: Optional[List[str]] = Query(None, description="情感标签: Positive/Neutral/Negative"),
+    has_chat: Optional[str] = Query(None, description="聊天状态: yes/no"),
+    use_default_filter: bool = Query(True, description="使用默认筛选(紧急/高优先级 OR 负面情感)")
+):
+    """
+    导出优先关注客户为CSV文件(带AI画像)
+
+    导出字段:
+    - user_nick, buyer_type, follow_priority, sentiment_label, dominant_intent
+    - rfm_segment, l6m_netsales, l1y_netsales, l1y_refund_rate, last_purchase_date
+    - key_interests, pain_points, recommended_action (AI画像, 分号分隔)
+    """
+    try:
+        from fastapi.responses import StreamingResponse
+        from io import StringIO
+        import csv
+        from datetime import datetime
+
+        # 获取所有客户(不分页)
+        customers = analyzer.get_priority_customers(
+            channel=channel,
+            buyer_type=buyer_type,
+            follow_priority=follow_priority,
+            sentiment_label=sentiment_label,
+            has_chat=has_chat,
+            use_default_filter=use_default_filter,
+            limit=1000,  # 最多导出1000条
+            offset=0
+        )
+
+        # 创建CSV
+        output = StringIO()
+        writer = csv.writer(output)
+
+        # CSV表头
+        headers = [
+            'user_nick', 'channel', 'buyer_type', 'follow_priority',
+            'sentiment_label', 'dominant_intent', 'rfm_segment',
+            'l6m_netsales', 'l1y_netsales', 'l1y_refund_rate',
+            'last_purchase_date', 'has_chat',
+            'key_interests', 'pain_points', 'recommended_action'
+        ]
+        writer.writerow(headers)
+
+        # 写入数据
+        for customer in customers:
+            # 处理JSON数组字段 (转换为分号分隔的字符串)
+            key_interests = customer.get('persona_key_interests', [])
+            if isinstance(key_interests, list):
+                key_interests = '; '.join(key_interests) if key_interests else 'N/A'
+            elif key_interests is None:
+                key_interests = 'N/A'
+
+            pain_points = customer.get('persona_pain_points', [])
+            if isinstance(pain_points, list):
+                pain_points = '; '.join(pain_points) if pain_points else 'N/A'
+            elif pain_points is None:
+                pain_points = 'N/A'
+
+            recommended_action = customer.get('persona_recommended_action') or 'N/A'
+
+            row = [
+                customer.get('buyer_nick', ''),
+                customer.get('channel', ''),
+                customer.get('buyer_type', ''),
+                customer.get('follow_priority', ''),
+                customer.get('sentiment_label', ''),
+                customer.get('dominant_intent', ''),
+                customer.get('rfm_segment', ''),
+                customer.get('l6m_netsales', 0),
+                customer.get('l1y_netsales', 0),
+                f"{customer.get('l1y_refund_rate', 0) * 100:.1f}%",
+                customer.get('last_purchase_date', ''),
+                'Yes' if customer.get('has_chat') else 'No',
+                key_interests,
+                pain_points,
+                recommended_action
+            ]
+            writer.writerow(row)
+
+        # 生成文件名
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'priority_customers_{timestamp}.csv'
+
+        # 返回CSV响应 - 使用utf-8-sig编码自动添加BOM以支持Excel正确显示中文
+        output.seek(0)
+        csv_content = output.getvalue()
+        return StreamingResponse(
+            iter([csv_content.encode('utf-8-sig')]),  # utf-8-sig会自动添加BOM (EF BB BF)
+            media_type='text/csv; charset=utf-8',
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/buyers/{user_nick}/orders")
 async def get_buyer_orders(
     user_nick: str,
@@ -1480,6 +1649,7 @@ async def get_buyers_by_sentiment(
     按情绪标签筛选客户
 
     性能: < 0.1秒 (使用sentiment_label索引)
+    更新: 2026-03-19 优先使用缓存表实时数据
 
     Args:
         label: 情绪标签 (Positive/Neutral/Negative)
@@ -1500,13 +1670,16 @@ async def get_buyers_by_sentiment(
 
         query = """
             SELECT
-                buyer_nick, channel, buyer_type, vip_level,
-                historical_net_sales, total_orders, last_purchase_date,
-                sentiment_label, sentiment_score, dominant_intent,
-                rfm_segment, churn_risk
-            FROM target_buyers_precomputed
-            WHERE sentiment_label = %s
-            ORDER BY historical_net_sales DESC
+                tb.buyer_nick, tb.channel, tb.buyer_type, tb.vip_level,
+                tb.historical_net_sales, tb.total_orders, tb.last_purchase_date,
+                COALESCE(cache.sentiment_label, tb.sentiment_label) AS sentiment_label,
+                COALESCE(cache.sentiment_score, tb.sentiment_score) AS sentiment_score,
+                COALESCE(cache.dominant_intent, tb.dominant_intent) AS dominant_intent,
+                tb.rfm_segment, tb.churn_risk
+            FROM target_buyers_precomputed tb
+            LEFT JOIN buyer_ai_analysis_cache cache ON tb.buyer_nick = cache.buyer_nick
+            WHERE COALESCE(cache.sentiment_label, tb.sentiment_label) = %s
+            ORDER BY tb.historical_net_sales DESC
             LIMIT %s OFFSET %s
         """
 
@@ -1529,6 +1702,7 @@ async def get_buyers_by_intent(
     按主要意图筛选客户
 
     性能: < 0.1秒 (使用dominant_intent索引)
+    更新: 2026-03-19 优先使用缓存表实时数据
 
     Args:
         intent: 主要意图
@@ -1558,13 +1732,16 @@ async def get_buyers_by_intent(
 
         query = """
             SELECT
-                buyer_nick, channel, buyer_type, vip_level,
-                historical_net_sales, total_orders, last_purchase_date,
-                sentiment_label, sentiment_score, dominant_intent,
-                rfm_segment, churn_risk
-            FROM target_buyers_precomputed
-            WHERE dominant_intent = %s
-            ORDER BY historical_net_sales DESC
+                tb.buyer_nick, tb.channel, tb.buyer_type, tb.vip_level,
+                tb.historical_net_sales, tb.total_orders, tb.last_purchase_date,
+                COALESCE(cache.sentiment_label, tb.sentiment_label) AS sentiment_label,
+                COALESCE(cache.sentiment_score, tb.sentiment_score) AS sentiment_score,
+                COALESCE(cache.dominant_intent, tb.dominant_intent) AS dominant_intent,
+                tb.rfm_segment, tb.churn_risk
+            FROM target_buyers_precomputed tb
+            LEFT JOIN buyer_ai_analysis_cache cache ON tb.buyer_nick = cache.buyer_nick
+            WHERE COALESCE(cache.dominant_intent, tb.dominant_intent) = %s
+            ORDER BY tb.historical_net_sales DESC
             LIMIT %s OFFSET %s
         """
 
@@ -1587,6 +1764,7 @@ async def get_buyers_by_follow_priority(
     按跟进优先级筛选客户
 
     性能: < 0.1秒 (使用follow_priority索引)
+    更新: 2026-03-19 优先使用缓存表实时数据
 
     Args:
         priority: 跟进优先级 (紧急/高/中/低)
@@ -1606,21 +1784,24 @@ async def get_buyers_by_follow_priority(
 
         query = """
             SELECT
-                buyer_nick, channel, buyer_type, vip_level,
-                historical_net_sales, total_orders, last_purchase_date, last_chat_date,
-                sentiment_label, sentiment_score, dominant_intent,
-                rfm_segment, churn_risk, follow_priority
-            FROM target_buyers_precomputed
-            WHERE follow_priority = %s
+                tb.buyer_nick, tb.channel, tb.buyer_type, tb.vip_level,
+                tb.historical_net_sales, tb.total_orders, tb.last_purchase_date, tb.last_chat_date,
+                COALESCE(cache.sentiment_label, tb.sentiment_label) AS sentiment_label,
+                COALESCE(cache.sentiment_score, tb.sentiment_score) AS sentiment_score,
+                COALESCE(cache.dominant_intent, tb.dominant_intent) AS dominant_intent,
+                tb.rfm_segment, tb.churn_risk, tb.follow_priority
+            FROM target_buyers_precomputed tb
+            LEFT JOIN buyer_ai_analysis_cache cache ON tb.buyer_nick = cache.buyer_nick
+            WHERE tb.follow_priority = %s
             ORDER BY
-                CASE vip_level
+                CASE tb.vip_level
                     WHEN 'V3' THEN 1
                     WHEN 'V2' THEN 2
                     WHEN 'V1' THEN 3
                     WHEN 'V0' THEN 4
                     ELSE 5
                 END,
-                historical_net_sales DESC
+                tb.historical_net_sales DESC
             LIMIT %s OFFSET %s
         """
 
@@ -1727,21 +1908,23 @@ async def get_follow_up_list(
         for priority in ['紧急', '高', '中']:
             query = """
                 SELECT
-                    buyer_nick, vip_level, rfm_segment,
-                    historical_net_sales, total_orders,
-                    last_purchase_date, last_chat_date,
-                    sentiment_label, dominant_intent, churn_risk,
-                    follow_priority
-                FROM target_buyers_precomputed
-                WHERE follow_priority = %s
+                    tb.buyer_nick, tb.vip_level, tb.rfm_segment,
+                    tb.historical_net_sales, tb.total_orders,
+                    tb.last_purchase_date, tb.last_chat_date,
+                    COALESCE(cache.sentiment_label, tb.sentiment_label) AS sentiment_label,
+                    COALESCE(cache.dominant_intent, tb.dominant_intent) AS dominant_intent,
+                    tb.churn_risk, tb.follow_priority
+                FROM target_buyers_precomputed tb
+                LEFT JOIN buyer_ai_analysis_cache cache ON tb.buyer_nick = cache.buyer_nick
+                WHERE tb.follow_priority = %s
                 ORDER BY
-                    CASE vip_level
+                    CASE tb.vip_level
                         WHEN 'V3' THEN 1
                         WHEN 'V2' THEN 2
                         WHEN 'V1' THEN 3
                         ELSE 4
                     END,
-                    historical_net_sales DESC
+                    tb.historical_net_sales DESC
                 LIMIT %s
             """
 

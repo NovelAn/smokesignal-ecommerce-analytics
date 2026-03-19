@@ -9,6 +9,15 @@ from zhipuai import ZhipuAI
 from backend.config import settings
 
 
+def _safe_print(message: str):
+    """Safe print that handles Windows GBK encoding issues"""
+    try:
+        print(message, flush=True)
+    except UnicodeEncodeError:
+        # Fallback: encode to ASCII with replacement for unsupported chars
+        print(message.encode('ascii', errors='replace').decode('ascii'), flush=True)
+
+
 class ZhipuClient:
     """Zhipu AI client for intelligent buyer analysis"""
 
@@ -43,7 +52,7 @@ class ZhipuClient:
         prompt = self._build_persona_prompt(user_nick, profile_data, recent_chats, order_summary)
 
         try:
-            print(f"[ZhipuClient] Calling model: {self.model}", flush=True)
+            _safe_print(f"[ZhipuClient] Calling model: {self.model}")
 
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -62,8 +71,8 @@ class ZhipuClient:
             )
 
             response_text = response.choices[0].message.content
-            print(f"[ZhipuClient] Response length: {len(response_text) if response_text else 0}", flush=True)
-            print(f"[ZhipuClient] Response preview: {response_text[:300] if response_text else 'EMPTY'}", flush=True)
+            _safe_print(f"[ZhipuClient] Response length: {len(response_text) if response_text else 0}")
+            _safe_print(f"[ZhipuClient] Response preview: {response_text[:300] if response_text else 'EMPTY'}")
 
             return self._parse_ai_response(response_text)
 
@@ -71,9 +80,9 @@ class ZhipuClient:
             error_str = str(e).lower()
             # 检测429错误（余额不足）
             if "429" in error_str or "rate" in error_str or "insufficient" in error_str or "余额" in error_str:
-                print(f"[ZhipuClient] API余额不足(429): {e}", flush=True)
+                _safe_print(f"[ZhipuClient] API余额不足(429): {e}")
             else:
-                print(f"[ZhipuClient] Error calling Zhipu AI: {e}", flush=True)
+                _safe_print(f"[ZhipuClient] Error calling Zhipu AI: {e}")
             import traceback
             traceback.print_exc()
             return self._default_analysis()
@@ -170,7 +179,7 @@ class ZhipuClient:
         """Parse AI response and extract JSON"""
         try:
             if not response_text:
-                print("[ZhipuClient] Response is empty!", flush=True)
+                _safe_print("[ZhipuClient] Response is empty!")
                 return self._default_analysis()
 
             # 去除 markdown 代码块标记
@@ -185,7 +194,7 @@ class ZhipuClient:
                     cleaned = cleaned[:-3]
                 cleaned = cleaned.strip()
 
-            print(f"[ZhipuClient] Cleaned response: {cleaned[:300]}", flush=True)
+            _safe_print(f"[ZhipuClient] Cleaned response: {cleaned[:300]}")
 
             # Try to extract JSON from response
             start = cleaned.find('{')
@@ -194,10 +203,10 @@ class ZhipuClient:
             if start != -1 and end > start:
                 json_str = cleaned[start:end]
                 result = json.loads(json_str)
-                print(f"[ZhipuClient] Parsed JSON successfully", flush=True)
+                _safe_print("[ZhipuClient] Parsed JSON successfully")
                 return result
             else:
-                print(f"[ZhipuClient] No JSON found in response", flush=True)
+                _safe_print("[ZhipuClient] No JSON found in response")
                 # If no JSON found, return as summary
                 return {
                     "summary": cleaned[:500],
@@ -207,7 +216,7 @@ class ZhipuClient:
                 }
 
         except json.JSONDecodeError as e:
-            print(f"[ZhipuClient] JSON decode error: {e}", flush=True)
+            _safe_print(f"[ZhipuClient] JSON decode error: {e}")
             return {
                 "summary": response_text[:500] if response_text else "AI分析失败",
                 "key_interests": [],
@@ -270,7 +279,7 @@ class ZhipuClient:
             return self._parse_sentiment_response(response_text, len(messages))
 
         except Exception as e:
-            print(f"Error in sentiment analysis: {e}")
+            _safe_print(f"Error in sentiment analysis: {e}")
             return [{"score": 0.5, "sentiment": "Neutral"}] * len(messages)
 
     def _format_messages_for_sentiment(self, messages: List[str]) -> str:
@@ -320,6 +329,7 @@ class ZhipuClient:
 - 询问性问题："有没有货""还有吗""就一个吗""什么时候发货"
 - 表达疑惑："怎么买完就下架了""为什么没了""怎么回事"
 - 功能性请求："退款""退货""换货""催发货"（无负面情绪词）
+- 产品问题反馈（非负面）："小了""大了""不合适""发错货""颜色不对"
 - 带语气词的询问："到底有没有货啊""怎么这样啊"（语气词≠不满）
 - 物流咨询、库存咨询、价格咨询
 
@@ -330,6 +340,8 @@ class ZhipuClient:
 - "垃圾店铺，骗子" → Complaint（有负面评价）
 
 【不是投诉】：
+- "小了，我要退货" → Post-sale Support（正常尺码问题）
+- "发错货了，帮我换一下" → Post-sale Support（正常售后）
 - "有没有货啊到底" → Logistics/Pre-sale Inquiry（询问库存，语气词不算不满）
 - "怎么买完就下架啊" → Post-sale Support（表达疑惑，无负面词）
 - "我要退款" → Post-sale Support（功能性请求）
@@ -370,7 +382,7 @@ class ZhipuClient:
             return self._parse_intent_response(response_text)
 
         except Exception as e:
-            print(f"Error in intent analysis: {e}")
+            _safe_print(f"Error in intent analysis: {e}")
             return {
                 "Pre-sale Inquiry": 0,
                 "Post-sale Support": 0,

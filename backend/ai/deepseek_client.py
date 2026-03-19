@@ -3,10 +3,20 @@ DeepSeek AI Client - DeepSeek-R1推理模型集成
 用于客户画像深度分析
 """
 import json
+import sys
 from datetime import datetime
 from typing import Dict, List, Any
 from openai import OpenAI
 from backend.config import settings
+
+
+def _safe_print(message: str):
+    """Safe print that handles Windows GBK encoding issues"""
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        # Fallback: encode to ASCII with replacement for unsupported chars
+        print(message.encode('ascii', errors='replace').decode('ascii'))
 from backend.ai.prompts.evidence_extraction import EVIDENCE_EXTRACTION_PROMPT
 from backend.ai.prompts.persona_inference import PERSONA_INFERENCE_PROMPT
 from backend.ai.prompts.domain_knowledge import build_external_info_context
@@ -103,7 +113,7 @@ class DeepSeekClient:
             return persona
 
         except Exception as e:
-            print(f"[DeepSeek] 分析失败: {e}")
+            _safe_print(f"[DeepSeek] 分析失败: {e}")
             raise  # 让orchestrator处理降级
 
     def _extract_evidence(
@@ -165,7 +175,7 @@ class DeepSeekClient:
         )
 
         evidence_text = response.choices[0].message.content
-        print(f"[DeepSeek] 证据提取完成，token使用: {response.usage.total_tokens}")
+        _safe_print(f"[DeepSeek] 证据提取完成，token使用: {response.usage.total_tokens}")
 
         # 记录成本
         from backend.monitoring.cost_monitor import get_cost_monitor
@@ -213,7 +223,7 @@ class DeepSeekClient:
         )
 
         persona_text = response.choices[0].message.content
-        print(f"[DeepSeek] 画像推理完成，token使用: {response.usage.total_tokens}")
+        _safe_print(f"[DeepSeek] 画像推理完成，token使用: {response.usage.total_tokens}")
 
         # 记录成本
         from backend.monitoring.cost_monitor import get_cost_monitor
@@ -305,7 +315,7 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
             )
 
             result_text = response.choices[0].message.content
-            print(f"[DeepSeek-Chat] 快速分析完成，token使用: {response.usage.total_tokens}")
+            _safe_print(f"[DeepSeek-Chat] 快速分析完成，token使用: {response.usage.total_tokens}")
 
             # 记录成本
             from backend.monitoring.cost_monitor import get_cost_monitor
@@ -321,7 +331,7 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
             return self._parse_json_response(result_text)
 
         except Exception as e:
-            print(f"[DeepSeek-Chat] 快速分析失败: {e}")
+            _safe_print(f"[DeepSeek-Chat] 快速分析失败: {e}")
             raise
 
     # Alias for backward compatibility
@@ -353,8 +363,8 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
                 raise ValueError("未找到有效JSON")
 
         except Exception as e:
-            print(f"[DeepSeek] JSON解析失败: {e}")
-            print(f"[DeepSeek] 原始响应: {response_text[:500]}")
+            _safe_print(f"[DeepSeek] JSON解析失败: {e}")
+            _safe_print(f"[DeepSeek] 原始响应: {response_text[:500]}")
 
             # 返回默认结构
             return {
@@ -424,10 +434,12 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
 
 【重要】情感分数(sentiment_score)判断标准：
 
-一、Neutral（0.4-0.6）：正常的业务咨询
+一、Neutral（0.4-0.6）：正常的业务咨询（最常见）
 - 询问库存、价格、物流："有没有货""什么时候发货""多少钱"
 - 表达疑惑或好奇："怎么下架了""就一个吗""为什么"
 - 功能性请求："退款""退货""换货"
+- 产品问题反馈（非投诉）："小了""大了""不合适""颜色不对""发错货"
+- 正常售后沟通："好的""可以""收到"等礼貌回复
 - 带语气词的询问："到底有没有啊""怎么这样"（语气词≠负面情绪）
 
 二、Negative（< 0.4）：只有明确负面表达时才判为负面
@@ -445,12 +457,19 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
 1. 明确的投诉行为词汇：投诉/差评/举报/315/消费者协会/工商/找经理
 2. 明确的负面评价词：太差/质量差/很差/垃圾/骗子/假货/欺骗/失望/不满/态度差/服务差/恶心/坑人
 
+【注意】以下情况NOT Complaint：
+- 单纯的尺码问题反馈："小了""大了""不合适"
+- 正常的退换货请求
+- 产品咨询或使用问题
+
 【示例】：
 - "质量太差了" → Negative(0.2), Complaint
 - "我要投诉你们" → Negative(0.2), Complaint
+- "小了，我要退货" → Neutral(0.5), Post-sale Support（正常退货≠投诉）
+- "发错货了，帮我换一下" → Neutral(0.5), Post-sale Support（正常售后≠投诉）
 - "有没有货啊到底" → Neutral(0.5), Logistics（询问≠负面）
 - "怎么买完就下架啊" → Neutral(0.5), Post-sale Support（疑惑≠负面）
-- "就一个啊？" → Neutral(0.5), Pre-sale Inquiry
+- "好的👌" → Neutral(0.6), Post-sale Support（礼貌确认）
 
 只返回JSON，不要其他内容。"""
 
@@ -472,7 +491,7 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
             )
 
             result_text = response.choices[0].message.content
-            print(f"[DeepSeek] 情感分析完成，token使用: {response.usage.total_tokens}")
+            _safe_print(f"[DeepSeek] 情感分析完成，token使用: {response.usage.total_tokens}")
 
             # 记录成本
             from backend.monitoring.cost_monitor import get_cost_monitor
@@ -490,7 +509,7 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
             return result
 
         except Exception as e:
-            print(f"[DeepSeek] 情感分析失败: {e}")
+            _safe_print(f"[DeepSeek] 情感分析失败: {e}")
             raise
 
     def _parse_sentiment_response(self, response_text: str) -> Dict:
@@ -521,7 +540,7 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
                 raise ValueError("未找到有效JSON")
 
         except Exception as e:
-            print(f"[DeepSeek] 情感JSON解析失败: {e}")
+            _safe_print(f"[DeepSeek] 情感JSON解析失败: {e}")
             return {
                 "sentiment_score": 0.5,
                 "sentiment_label": "Neutral",
