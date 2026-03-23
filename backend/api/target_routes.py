@@ -1938,3 +1938,149 @@ async def get_follow_up_list(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# 关键词分析 API
+# ============================================================
+
+@router.get("/keyword-analysis")
+async def get_keyword_analysis(
+    buyer_types: str = Query("ALL", description="客户类型，逗号分隔，如 'SMOKER,BOTH'，或 'ALL'"),
+    category: str = Query(None, description="分类筛选，可选"),
+    limit: int = Query(20, description="返回关键词数量限制")
+) -> Dict[str, Any]:
+    """
+    获取关键词分析数据
+
+    Args:
+        buyer_types: 客户类型，支持多选（逗号分隔）或 'ALL'
+        category: 分类筛选（可选）
+        limit: 返回关键词数量限制
+
+    Returns:
+        {
+            "category_distribution": [
+                { "name": "赠品", "value": 112, "percentage": 10.1 },
+                ...
+            ],
+            "keywords": [
+                { "text": "赠品", "value": 45, "percentage": 23.1, "category": "赠品" },
+                ...
+            ],
+            "total_messages": 416,
+            "buyer_types": ["SMOKER", "BOTH"],
+            "selected_category": null
+        }
+    """
+    try:
+        from backend.database import Database
+        from backend.config import settings
+        from collections import defaultdict
+
+        db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
+        db = Database(db_name=db_name)
+
+        # 解析客户类型
+        buyer_type_list = [bt.strip().upper() for bt in buyer_types.split(',')]
+        if 'ALL' in buyer_type_list:
+            buyer_type_list = ['ALL']
+
+        # 获取元数据（总消息数）
+        total_messages = 0
+        for bt in buyer_type_list:
+            meta_query = """
+                SELECT total_messages FROM keyword_analysis_meta WHERE buyer_type = %s
+            """
+            meta_result = db.execute_query(meta_query, [bt])
+            if meta_result:
+                total_messages += meta_result[0]['total_messages']
+
+        # 获取分类分布
+        category_distribution = []
+        category_counts = defaultdict(int)
+
+        for bt in buyer_type_list:
+            cat_query = """
+                SELECT category, SUM(count) as count, SUM(percentage) as percentage
+                FROM category_distribution_cache
+                WHERE buyer_type = %s
+                GROUP BY category
+                ORDER BY count DESC
+            """
+            cat_results = db.execute_query(cat_query, [bt])
+            for row in cat_results:
+                # 转换 Decimal 为 int
+                category_counts[row['category']] += int(row['count'])
+
+        # 计算百分比
+        total_category_count = sum(category_counts.values())
+        for cat_name, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+            percentage = round(count / total_category_count * 100, 1) if total_category_count > 0 else 0
+            category_distribution.append({
+                "name": cat_name,
+                "value": count,
+                "percentage": percentage
+            })
+
+        # 获取关键词
+        keyword_query_parts = []
+        query_params = []
+
+        for bt in buyer_type_list:
+            if category:
+                keyword_query_parts.append("""
+                    SELECT keyword, category, SUM(count) as count, SUM(percentage) as percentage
+                    FROM keyword_analysis_cache
+                    WHERE buyer_type = %s AND category = %s
+                    GROUP BY keyword, category
+                """)
+                query_params.extend([bt, category])
+            else:
+                keyword_query_parts.append("""
+                    SELECT keyword, category, SUM(count) as count, SUM(percentage) as percentage
+                    FROM keyword_analysis_cache
+                    WHERE buyer_type = %s
+                    GROUP BY keyword, category
+                """)
+                query_params.append(bt)
+
+        # 合并查询
+        union_query = " UNION ALL ".join(keyword_query_parts)
+        final_query = f"""
+            SELECT keyword, category, SUM(count) as count, SUM(percentage) as percentage
+            FROM ({union_query}) as combined
+            GROUP BY keyword, category
+            ORDER BY count DESC
+            LIMIT %s
+        """
+        query_params.append(limit)
+
+        keyword_results = db.execute_query(final_query, query_params)
+
+        # 计算关键词总计数（用于重新计算百分比）
+        total_keyword_count = sum(int(row['count']) for row in keyword_results) if keyword_results else 0
+
+        keywords = []
+        for row in keyword_results:
+            # 转换 Decimal 为 int
+            count = int(row['count'])
+            # 重新计算百分比（基于合并后的数据）
+            percentage = round(count / total_keyword_count * 100, 1) if total_keyword_count > 0 else 0
+            keywords.append({
+                "text": row['keyword'],
+                "value": count,
+                "percentage": percentage,
+                "category": row['category']
+            })
+
+        return {
+            "category_distribution": category_distribution,
+            "keywords": keywords,
+            "total_messages": total_messages,
+            "buyer_types": buyer_type_list,
+            "selected_category": category
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

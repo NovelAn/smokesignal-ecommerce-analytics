@@ -378,6 +378,103 @@ export const apiClient = {
     const response = await fetch(`${API_BASE}/analytics/sentiment-summary`);
     return handleResponse<SentimentSummary>(response);
   },
+
+  // ========== Priority Customers 相关 ==========
+
+  /**
+   * 获取需优先关注的客户列表
+   * GET /api/v2/priority-customers
+   */
+  getPriorityCustomers: async (params: PriorityCustomersFilters & {
+    limit?: number;
+    offset?: number;
+    include_total?: boolean;
+  } = {}) => {
+    const queryParams = new URLSearchParams();
+
+    // 处理数组参数
+    if (params.channel) {
+      params.channel.forEach((c) => queryParams.append('channel', c));
+    }
+    if (params.buyer_type) {
+      params.buyer_type.forEach((t) => queryParams.append('buyer_type', t));
+    }
+    if (params.follow_priority) {
+      params.follow_priority.forEach((p) => queryParams.append('follow_priority', p));
+    }
+    if (params.sentiment_label) {
+      params.sentiment_label.forEach((s) => queryParams.append('sentiment_label', s));
+    }
+    if (params.has_chat) {
+      queryParams.append('has_chat', params.has_chat);
+    }
+
+    // 布尔参数
+    if (params.use_default_filter !== undefined) {
+      queryParams.append('use_default_filter', String(params.use_default_filter));
+    }
+
+    // 分页参数
+    queryParams.append('limit', String(params.limit || 20));
+    queryParams.append('offset', String(params.offset || 0));
+    if (params.include_total !== false) {
+      queryParams.append('include_total', 'true');
+    }
+
+    const response = await fetch(`${API_BASE}/priority-customers?${queryParams}`);
+    return handleResponse<PriorityCustomersResponse>(response);
+  },
+
+  /**
+   * 获取Priority Customers CSV导出URL
+   */
+  getPriorityCustomersCSVUrl: (params: PriorityCustomersFilters = {}) => {
+    const queryParams = new URLSearchParams();
+
+    if (params.channel) {
+      params.channel.forEach((c) => queryParams.append('channel', c));
+    }
+    if (params.buyer_type) {
+      params.buyer_type.forEach((t) => queryParams.append('buyer_type', t));
+    }
+    if (params.follow_priority) {
+      params.follow_priority.forEach((p) => queryParams.append('follow_priority', p));
+    }
+    if (params.sentiment_label) {
+      params.sentiment_label.forEach((s) => queryParams.append('sentiment_label', s));
+    }
+    if (params.has_chat) {
+      queryParams.append('has_chat', params.has_chat);
+    }
+    if (params.use_default_filter !== undefined) {
+      queryParams.append('use_default_filter', String(params.use_default_filter));
+    }
+
+    return `${API_BASE}/priority-customers/export?${queryParams}`;
+  },
+
+  // ========== 关键词分析相关 ==========
+
+  /**
+   * 获取关键词分析数据
+   * GET /api/v2/keyword-analysis
+   */
+  getKeywordAnalysis: async (params: KeywordAnalysisParams = {}) => {
+    const queryParams = new URLSearchParams();
+
+    if (params.buyer_types && params.buyer_types.length > 0) {
+      queryParams.append('buyer_types', params.buyer_types.join(','));
+    }
+    if (params.category) {
+      queryParams.append('category', params.category);
+    }
+    if (params.limit) {
+      queryParams.append('limit', String(params.limit));
+    }
+
+    const response = await fetch(`${API_BASE}/keyword-analysis?${queryParams}`);
+    return handleResponse<KeywordAnalysisResponse>(response);
+  },
 };
 
 // ========== TypeScript 类型定义 ==========
@@ -644,4 +741,73 @@ export interface SentimentSummary {
     neutral: number;
     negative: number;
   };
+}
+
+// ========== Priority Customers 类型定义 ==========
+
+export interface PriorityCustomer {
+  buyer_nick: string;
+  channel: 'DTC' | 'PFS';
+  buyer_type: 'SMOKER' | 'VIC' | 'BOTH';
+  vip_level: string;
+  rfm_segment: string;
+  follow_priority: '紧急' | '高' | '中' | '低';
+  sentiment_label: string;
+  dominant_intent: string;
+  last_purchase_date: string;
+  l6m_netsales: number;
+  l1y_netsales: number;
+  l1y_refund_rate: number;
+  has_chat: boolean;
+  // AI Persona fields
+  persona_key_interests: string[] | null;
+  persona_pain_points: string[] | null;
+  persona_recommended_action: string | null;
+}
+
+export interface PriorityCustomersFilters {
+  channel?: ('DTC' | 'PFS')[];
+  buyer_type?: ('SMOKER' | 'VIC' | 'BOTH')[];
+  follow_priority?: ('紧急' | '高' | '中' | '低')[];
+  sentiment_label?: ('Positive' | 'Neutral' | 'Negative')[];
+  has_chat?: 'true' | 'false' | 'all';
+  use_default_filter?: boolean;
+}
+
+export interface PriorityCustomersResponse {
+  customers: PriorityCustomer[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ========== 关键词分析类型定义 ==========
+
+export type BuyerTypeForKeyword = 'ALL' | 'SMOKER' | 'BOTH' | 'VIC';
+
+export interface KeywordAnalysisParams {
+  buyer_types?: BuyerTypeForKeyword[];
+  category?: string;
+  limit?: number;
+}
+
+export interface KeywordAnalysisCategory {
+  name: string;
+  value: number;
+  percentage: number;
+}
+
+export interface KeywordAnalysisKeyword {
+  text: string;
+  value: number;
+  percentage: number;
+  category: string;
+}
+
+export interface KeywordAnalysisResponse {
+  category_distribution: KeywordAnalysisCategory[];
+  keywords: KeywordAnalysisKeyword[];
+  total_messages: number;
+  buyer_types: string[];
+  selected_category: string | null;
 }
