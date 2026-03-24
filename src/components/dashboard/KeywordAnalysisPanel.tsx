@@ -397,21 +397,32 @@ export const KeywordAnalysisPanel: React.FC<KeywordAnalysisPanelProps> = () => {
       {/* 底部洞察 */}
       {!loading && !error && data && data.category_distribution.length > 0 && (
         <div className="mt-3 pt-3 border-t border-notion-border">
-          <p className="text-[11px] text-notion-muted leading-relaxed">
-            <span className="text-notion-text font-medium">Insight:</span>
-            {data.category_distribution[0] && (
-              <>
-                {' "'}{data.category_distribution[0].name}{'"'}
-                占比最高 ({data.category_distribution[0].percentage}%)
-              </>
-            )}
-            {data.category_distribution[1] && (
-              <>
-                ，其次是 "{data.category_distribution[1].name}"
-                ({data.category_distribution[1].percentage}%)
-              </>
-            )}
-          </p>
+          {/* TOP 3 分类 */}
+          <div className="mb-2">
+            <span className="text-[11px] text-notion-text font-medium">TOP 3 分类：</span>
+            <span className="text-[11px] text-notion-muted">
+              {data.category_distribution.slice(0, 3).map((cat, idx) => (
+                <span key={cat.name}>
+                  {idx > 0 && '、'}
+                  <span className="text-notion-text">{cat.name}</span>
+                  {' '}({cat.percentage}%)
+                </span>
+              ))}
+            </span>
+          </div>
+          {/* TOP 5 关键词 */}
+          <div>
+            <span className="text-[11px] text-notion-text font-medium">TOP 5 关键词：</span>
+            <span className="text-[11px] text-notion-muted">
+              {data.keywords.slice(0, 5).map((kw, idx) => (
+                <span key={kw.text}>
+                  {idx > 0 && '、'}
+                  <span className="text-notion-text">{kw.text}</span>
+                  {' '}({kw.percentage}%)
+                </span>
+              ))}
+            </span>
+          </div>
         </div>
       )}
     </NotionCard>

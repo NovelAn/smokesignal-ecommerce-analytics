@@ -80,6 +80,10 @@ def analyze_messages(messages: list, buyer_types_map: dict) -> dict:
     """
     分析消息，按客户类型聚合关键词
 
+    统计逻辑：
+    - 分类层级：每条消息每个分类只计1次（去重）
+    - 关键词层级：可分别计数（用于了解具体表达方式）
+
     Args:
         messages: 消息列表，每条消息包含 user_nick 和 content
         buyer_types_map: 客户类型映射，key 是 buyer_nick（需要与 user_nick 匹配）
@@ -118,18 +122,27 @@ def analyze_messages(messages: list, buyer_types_map: dict) -> dict:
         if not keywords:
             continue
 
+        # 获取这条消息匹配到的所有分类（去重）
+        matched_categories = set(category for category, _ in keywords)
+
         # 更新 ALL 统计
         analysis['ALL']['total'] += 1
+        # 分类层级：每个分类只计1次
+        for category in matched_categories:
+            analysis['ALL']['categories'][category] += 1
+        # 关键词层级：分别计数
         for category, keyword in keywords:
             analysis['ALL']['keywords'][(category, keyword)] += 1
-            analysis['ALL']['categories'][category] += 1
 
         # 更新具体客户类型统计（只统计已分类的客户）
         if buyer_type and buyer_type in analysis:
             analysis[buyer_type]['total'] += 1
+            # 分类层级：每个分类只计1次
+            for category in matched_categories:
+                analysis[buyer_type]['categories'][category] += 1
+            # 关键词层级：分别计数
             for category, keyword in keywords:
                 analysis[buyer_type]['keywords'][(category, keyword)] += 1
-                analysis[buyer_type]['categories'][category] += 1
 
     return analysis
 
