@@ -296,3 +296,56 @@ When adding new queries:
 - Notion风格UI优化
 
 使用方式：在开始前端视觉修改前，调用 `Skill` tool 并指定 `skill: "frontend-design"`，让skill指导设计实现。
+
+## Project Memory Management
+
+项目使用持久化 memory 文件来记录开发历史、技术决策和重要信息。
+
+### Memory 文件位置
+
+Memory 文件存储在项目目录下（参与版本控制）：
+```
+docs/memory/
+├── MEMORY.md          # 主记忆文件（开发历史、已完成功能、技术细节）
+└── *.md               # 专题记忆文件（按需创建）
+```
+
+**重要**：每次会话开始时，应主动读取 `docs/memory/MEMORY.md` 了解项目状态和历史决策。
+
+### 何时更新 Memory
+
+**必须更新的场景：**
+1. **完成重要功能**：记录功能概述、文件结构、技术细节
+2. **做出技术决策**：记录决策内容和理由
+3. **发现并解决重要问题**：记录问题和解决方案
+4. **用户明确要求记忆**：用户说"记住这个"、"以后都这样"等
+
+**不应记录的内容：**
+- 临时状态、未完成的任务细节
+- 一次性调试信息
+- 重复或矛盾的信息
+
+### Memory 更新规则
+
+1. **MEMORY.md**：保持在 200 行以内，超过 200 行时：
+   - 将详细内容拆分到专题文件（如 `keyword-analysis.md`）
+   - 在 MEMORY.md 中保留摘要和链接
+
+2. **专题文件命名**：使用小写字母和连字符，如 `keyword-analysis.md`
+
+3. **更新流程**：
+   ```
+   1. 使用 Read 工具读取现有 memory 文件
+   2. 使用 Edit 工具更新内容（不要完全覆盖）
+   3. 移除过时或错误的信息
+   4. 确保信息简洁、准确、有价值
+   ```
+
+4. **用户修正时**：如果用户指出 memory 中的错误，必须立即修正，不要等待多次确认
+
+### Memory 与 Git
+
+Memory 文件位于 `docs/memory/`，应参与版本控制：
+- 完成重要功能后，提交 memory 更新
+- 提交信息示例：`docs: update memory for keyword analysis optimization`
+
