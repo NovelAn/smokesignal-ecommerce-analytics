@@ -483,30 +483,27 @@ export const apiClient = {
  * Dashboard汇总指标
  */
 export interface DashboardMetrics {
+  // 基础统计
   total_target_buyers: number;
   total_smokers: number;
   total_vics: number;
   both_smoker_vic: number;
-  total_netsales: number;
-  avg_netsales: number;
-  total_l6m_netsales: number;
-  total_l1y_netsales: number;
-  total_orders: number;
-  avg_orders_per_buyer: number;
-  avg_refund_rate: number;
-  v3_count: number;
-  v2_count: number;
-  v1_count: number;
-  v0_count: number;
-  non_vip_count: number;
-  dtc_count: number;
-  pfs_count: number;
+  // 情感分布（客户健康度）
+  positive_sentiment_count: number;
+  neutral_sentiment_count: number;
+  negative_sentiment_count: number;
+  // 跟进优先级分布
+  urgent_priority_count: number;
+  high_priority_count: number;
+  medium_priority_count: number;
+  low_priority_count: number;
+  // 销售机会
+  repurchase_potential_count: number;
+  // 流失风险
   high_churn_count: number;
   medium_churn_count: number;
   low_churn_count: number;
-  high_discount_count: number;
-  medium_discount_count: number;
-  low_discount_count: number;
+  // 其他
   last_updated: string;
 }
 

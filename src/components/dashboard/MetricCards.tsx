@@ -1,56 +1,109 @@
 /**
- * Dashboard 指标卡片组件
+ * Dashboard 指标卡片组件 (v2.0 - 运营导向)
  *
- * 显示核心业务指标：
- * - 目标买家总数
- * - 历史总净销售额
- * - 总订单数
- * - 平均退款率
+ * 4个主题组：
+ * 1. 客户健康度（情感分布）
+ * 2. 跟进优先级（follow_priority）
+ * 3. 销售机会（复购潜力/VIC/SMOKER）
+ * 4. 服务质量（负面情绪/投诉反馈）
  */
 
 import React from 'react';
-import { Users, DollarSign, ShoppingBag, Percent, LucideIcon } from 'lucide-react';
+import { Heart, AlertCircle, TrendingUp, MessageCircle, LucideIcon } from 'lucide-react';
 import { NotionCard } from '../common/NotionCard';
-import { DashboardMetrics } from '../../../api/client';
+import { DashboardMetrics } from '../../api/client';
 import { MetricCardSkeleton } from '../common/LoadingState';
 import { ErrorAlert } from '../common/ErrorAlert';
 
-interface MetricCard {
+// ============================================================
+// 类型定义
+// ============================================================
+
+interface MetricItem {
   label: string;
-  value: string;
-  change: string;
+  value: number;
+  percentage?: number;
+  color?: string;
+}
+
+interface MetricGroupProps {
+  title: string;
   icon: LucideIcon;
+  iconColor: string;
+  metrics: MetricItem[];
+  onClick?: () => void;
 }
 
 interface MetricCardsProps {
-  metrics: DashboardMetrics;
+  metrics: DashboardMetrics | null;
   isLoading?: boolean;
   error?: string | null;
   onRetry?: () => void;
 }
 
-/**
- * 格式化数字
- */
-function formatNumber(num: number | string): string {
-  const n = Number(num);
-  if (n >= 10000) return (n / 10000).toFixed(1) + '万';
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-  return n.toLocaleString();
+// ============================================================
+// 格式化函数
+// ============================================================
+
+function formatNumber(num: number): string {
+  if (num >= 10000) return (num / 10000).toFixed(1) + '万';
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+  return num.toLocaleString();
 }
 
-/**
- * 格式化金额
- */
-function formatCurrency(num: number | string): string {
-  const n = Number(num);
-  if (n >= 10000) return '¥' + (n / 10000).toFixed(1) + '万';
-  return '¥' + formatNumber(n);
+function formatPercentage(value: number, total: number): string {
+  if (total === 0) return '0%';
+  return ((value / total) * 100).toFixed(1) + '%';
 }
 
-/**
- * 指标卡片组件
- */
+// ============================================================
+// 指标组卡片组件
+// ============================================================
+
+const MetricGroupCard: React.FC<MetricGroupProps> = ({ title, icon: Icon, iconColor, metrics, onClick }) => {
+  const total = metrics.reduce((sum, m) => sum + m.value, 0);
+
+  return (
+    <NotionCard
+      className={`hover:bg-notion-hover transition-all duration-200 cursor-pointer group ${onClick ? '' : 'pointer-events-none'}`}
+      onClick={onClick}
+    >
+      {/* 标题 */}
+      <div className="flex items-center gap-2 mb-3 pb-2 border-b border-notion-border">
+        <Icon size={14} style={{ color: iconColor }} />
+        <span className="text-xs font-medium text-notion-text uppercase tracking-wider">{title}</span>
+      </div>
+
+      {/* 指标列表 */}
+      <div className="space-y-2">
+        {metrics.map((metric, idx) => (
+          <div key={idx} className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {metric.color && (
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{ backgroundColor: metric.color }}
+                />
+              )}
+              <span className="text-[11px] text-notion-muted">{metric.label}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-notion-text">{formatNumber(metric.value)}</span>
+              {metric.percentage !== undefined && (
+                <span className="text-[10px] text-notion-muted">({metric.percentage}%)</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </NotionCard>
+  );
+};
+
+// ============================================================
+// 主组件
+// ============================================================
+
 export const MetricCards: React.FC<MetricCardsProps> = ({
   metrics,
   isLoading = false,
@@ -61,10 +114,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCardSkeleton />
-        <MetricCardSkeleton />
-        <MetricCardSkeleton />
-        <MetricCardSkeleton />
+        {[1, 2, 3, 4].map((i) => (
+          <MetricCardSkeleton key={i} />
+        ))}
       </div>
     );
   }
@@ -84,60 +136,122 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
     return null;
   }
 
-  // 计算指标卡片数据
-  const cards: MetricCard[] = [
+  const total = metrics.total_target_buyers || 1;
+
+  // 客户健康度数据
+  const healthMetrics: MetricItem[] = [
     {
-      label: '目标买家总数',
-      value: formatNumber(metrics.total_target_buyers),
-      change: `VIC: ${formatNumber(metrics.total_vics)} | Smoker: ${formatNumber(metrics.total_smokers)}`,
-      icon: Users,
+      label: '正面情感',
+      value: metrics.positive_sentiment_count || 0,
+      percentage: parseFloat(formatPercentage(metrics.positive_sentiment_count || 0, total)),
+      color: '#86EFAC', // 绿色
     },
     {
-      label: '历史总净销售额',
-      value: formatCurrency(metrics.total_netsales),
-      change: `近6月: ${formatCurrency(metrics.total_l6m_netsales)}`,
-      icon: DollarSign,
+      label: '中性情感',
+      value: metrics.neutral_sentiment_count || 0,
+      percentage: parseFloat(formatPercentage(metrics.neutral_sentiment_count || 0, total)),
+      color: '#FCD34D', // 黄色
     },
     {
-      label: '总订单数',
-      value: formatNumber(metrics.total_orders),
-      change: `人均: ${Number(metrics.avg_orders_per_buyer).toFixed(1)}单`,
-      icon: ShoppingBag,
+      label: '负面情感',
+      value: metrics.negative_sentiment_count || 0,
+      percentage: parseFloat(formatPercentage(metrics.negative_sentiment_count || 0, total)),
+      color: '#FCA5A5', // 红色
+    },
+  ];
+
+  // 跟进优先级数据
+  const priorityMetrics: MetricItem[] = [
+    {
+      label: '紧急',
+      value: metrics.urgent_priority_count || 0,
+      percentage: parseFloat(formatPercentage(metrics.urgent_priority_count || 0, total)),
+      color: '#EF4444', // 红色
     },
     {
-      label: '平均退款率',
-      value: (Number(metrics.avg_refund_rate) * 100).toFixed(1) + '%',
-      change: `高流失风险: ${formatNumber(metrics.high_churn_count)}人`,
-      icon: Percent,
+      label: '高',
+      value: metrics.high_priority_count || 0,
+      percentage: parseFloat(formatPercentage(metrics.high_priority_count || 0, total)),
+      color: '#F97316', // 橙色
+    },
+    {
+      label: '中/低',
+      value: (metrics.medium_priority_count || 0) + (metrics.low_priority_count || 0),
+      percentage: parseFloat(formatPercentage((metrics.medium_priority_count || 0) + (metrics.low_priority_count || 0), total)),
+      color: '#9CA3AF', // 灰色
+    },
+  ];
+
+  // 销售机会数据
+  const salesMetrics: MetricItem[] = [
+    {
+      label: '复购潜力',
+      value: metrics.repurchase_potential_count || 0,
+      percentage: parseFloat(formatPercentage(metrics.repurchase_potential_count || 0, total)),
+      color: '#22C55E', // 绿色
+    },
+    {
+      label: 'VIC客户',
+      value: metrics.total_vics || 0,
+      percentage: parseFloat(formatPercentage(metrics.total_vics || 0, total)),
+      color: '#8B5CF6', // 紫色
+    },
+    {
+      label: 'SMOKER',
+      value: metrics.total_smokers || 0,
+      percentage: parseFloat(formatPercentage(metrics.total_smokers || 0, total)),
+      color: '#3B82F6', // 蓝色
+    },
+  ];
+
+  // 服务质量数据（暂时用流失风险作为代理）
+  const serviceMetrics: MetricItem[] = [
+    {
+      label: '负面情绪',
+      value: metrics.negative_sentiment_count || 0,
+      percentage: parseFloat(formatPercentage(metrics.negative_sentiment_count || 0, total)),
+      color: '#EF4444', // 红色
+    },
+    {
+      label: '高流失风险',
+      value: metrics.high_churn_count || 0,
+      percentage: parseFloat(formatPercentage(metrics.high_churn_count || 0, total)),
+      color: '#F97316', // 橙色
+    },
+    {
+      label: '中流失风险',
+      value: metrics.medium_churn_count || 0,
+      percentage: parseFloat(formatPercentage(metrics.medium_churn_count || 0, total)),
+      color: '#FCD34D', // 黄色
     },
   ];
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      {cards.map((card, idx) => (
-        <MetricCard key={idx} card={card} />
-      ))}
+      <MetricGroupCard
+        title="客户健康度"
+        icon={Heart}
+        iconColor="#EC4899"
+        metrics={healthMetrics}
+      />
+      <MetricGroupCard
+        title="跟进优先级"
+        icon={AlertCircle}
+        iconColor="#F97316"
+        metrics={priorityMetrics}
+      />
+      <MetricGroupCard
+        title="销售机会"
+        icon={TrendingUp}
+        iconColor="#22C55E"
+        metrics={salesMetrics}
+      />
+      <MetricGroupCard
+        title="服务质量"
+        icon={MessageCircle}
+        iconColor="#3B82F6"
+        metrics={serviceMetrics}
+      />
     </div>
-  );
-};
-
-/**
- * 单个指标卡片
- */
-const MetricCard: React.FC<{ card: MetricCard }> = ({ card }) => {
-  const Icon = card.icon;
-
-  return (
-    <NotionCard className="hover:bg-notion-hover transition-colors cursor-pointer">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-notion-muted text-sm flex items-center gap-2">
-          <Icon size={14} /> {card.label}
-        </span>
-      </div>
-      <div className="flex items-end gap-2">
-        <h4 className="text-3xl font-serif text-notion-text">{card.value}</h4>
-      </div>
-      <div className="text-xs text-notion-muted mt-1">{card.change}</div>
-    </NotionCard>
   );
 };
