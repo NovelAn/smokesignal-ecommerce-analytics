@@ -39,6 +39,12 @@
   - 更新 Insight 显示 TOP3 分类和 TOP5 关键词
   - 文档归档到 `docs/plans/2026-03-23-keyword-analysis-*.md`
 
+- ✅ **MetricCards重构 - 运营导向4组指标**（进行中）
+  - 设计方向： 从销售数据转向运营决策支持
+  - 4个主题组： 客户健康度 / 跟进优先级 / 销售机会 / 服务质量
+  - 每组2-3个指标，带占比显示
+  - 文件: `src/components/dashboard/MetricCards.tsx`
+
 ### 2026-03-23
 - ✅ **SMOKER客户关键词词云分析** - Overview页面 Keyword & Issue Analysis 模块
   - 9个分类：赠品、包装、维修保养、退换货、产品推荐咨询、产品参数咨询、价格、物流、投诉反馈
