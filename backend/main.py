@@ -19,6 +19,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from backend.config import settings
 from backend.api import target_router, external_router
 
@@ -41,6 +42,12 @@ app.add_middleware(
 # Include API routes
 app.include_router(target_router)  # v2.0 routes with /api/v2 prefix
 app.include_router(external_router)  # External records routes with /api/v2/external prefix
+
+# Serve uploaded files
+import os
+uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 
 @app.get("/")

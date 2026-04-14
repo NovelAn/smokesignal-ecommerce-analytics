@@ -23,7 +23,9 @@ import {
   Download,
   ChevronLeft,
   ChevronRight,
-  RefreshCw
+  RefreshCw,
+  ImagePlus,
+  Paperclip
 } from 'lucide-react';
 import { NotionCard } from '../components/common/NotionCard';
 import { NotionTag } from '../components/common/NotionTag';
@@ -35,16 +37,26 @@ import {
   BatchImportResult
 } from '../types';
 
-// 预定义渠道选项
+// 预定义渠道选项（来源: https://www.dunhill.cn/storeLocator）
 const CHANNEL_OPTIONS = [
+  // 线上渠道
   '微信', '电话', '企业微信',
-  '北京SKP', '上海国金', '广州太古汇', '深圳万象城', '杭州大厦',
-  '成都IFS', '南京德基', '武汉国际', '西安赛格', '其他'
+  // 门店
+  '北京SKP', '北京东方', '上海国金中心', '上海中信泰富', '上海港汇',
+  '广州太古汇', '深圳万象城', '杭州大厦', '成都SKP', '成都国金',
+  '南京德基', '武汉SKP', '西安SKP', '沈阳万象城', '青岛海信',
+  '长沙国金中心', '宁波阪急', '哈尔滨卓展', '长春卓展',
+  // 奥特莱斯
+  '上海青浦奥特莱斯', '上海比斯特奥特莱斯', '北京八达岭奥特莱斯',
+  '重庆砂之船奥特莱斯', '苏州比斯特奥特莱斯',
+  // 其他
+  '其他'
 ];
 
 // 品类选项
 const CATEGORY_OPTIONS = [
-  'Pipes', 'Lighters', 'Cigars', 'Accessories', 'Apparel', 'Leather Goods', '其他'
+  'Pipes', 'Lighters', 'Cigars', 'Accessories', 'Apparel', 'Leather Goods',
+  'Ready-To-Wear', 'Bespoke', 'MTM', '其他'
 ];
 
 const ExternalInfoConfig: React.FC = () => {
@@ -126,17 +138,30 @@ const ExternalInfoConfig: React.FC = () => {
     loadData();
   };
 
-  // 删除记录
+  // 静默刷新统计（不触发表格 loading）
+  const refreshStats = () => {
+    apiClient.getExternalRecordsStats().then(setStats).catch(() => {});
+  };
+
+  // 删除记录（乐观更新，不闪 loading）
   const handleDelete = async () => {
     if (!deletingRecord) return;
 
+    const deletedId = deletingRecord.id;
+    setDeletingRecord(null);
+
+    // 乐观移除
+    setRecords(prev => prev.filter(r => r.id !== deletedId));
+    setTotal(prev => prev - 1);
+
     try {
-      await apiClient.deleteExternalRecord(deletingRecord.id);
-      setDeletingRecord(null);
-      loadData();
+      await apiClient.deleteExternalRecord(deletedId);
+      refreshStats();
     } catch (err) {
       console.error('Failed to delete record:', err);
       setError(err instanceof APIError ? err.message : '删除失败');
+      // 回滚
+      loadData();
     }
   };
 
@@ -272,6 +297,7 @@ const ExternalInfoConfig: React.FC = () => {
                 <th className="px-4 py-3 text-left font-medium text-notion-muted">渠道/门店</th>
                 <th className="px-4 py-3 text-left font-medium text-notion-muted">内容</th>
                 <th className="px-4 py-3 text-left font-medium text-notion-muted">金额</th>
+                <th className="px-4 py-3 text-left font-medium text-notion-muted">附件</th>
                 <th className="px-4 py-3 text-left font-medium text-notion-muted">备注</th>
                 <th className="px-4 py-3 text-left font-medium text-notion-muted">操作</th>
               </tr>
@@ -279,14 +305,14 @@ const ExternalInfoConfig: React.FC = () => {
             <tbody className="divide-y divide-notion-border">
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-notion-muted">
+                  <td colSpan={9} className="px-4 py-8 text-center text-notion-muted">
                     <RefreshCw size={20} className="animate-spin mx-auto mb-2" />
                     加载中...
                   </td>
                 </tr>
               ) : records.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-notion-muted">
+                  <td colSpan={9} className="px-4 py-8 text-center text-notion-muted">
                     暂无场外记录，点击"添加记录"开始录入
                   </td>
                 </tr>
@@ -298,13 +324,15 @@ const ExternalInfoConfig: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <NotionTag
-                        variant={record.record_type === 'communication' ? 'blue' : 'green'}
-                      >
-                        {record.record_type === 'communication' ? '沟通' : '消费'}
-                      </NotionTag>
+                        text={record.record_type === 'communication' ? '沟通' : '消费'}
+                        color={record.record_type === 'communication' ? 'blue' : 'green'}
+                      />
                     </td>
                     <td className="px-4 py-3 text-notion-muted text-sm whitespace-nowrap">
                       {record.record_date}
+                      {record.date_to && record.date_to !== record.record_date && (
+                        <span> ~ {record.date_to}</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-notion-muted text-sm">
                       {record.channel || '-'}
@@ -319,9 +347,25 @@ const ExternalInfoConfig: React.FC = () => {
                         <div className="flex flex-col">
                           <span className="text-green-600">¥{(record.amount || 0).toLocaleString()}</span>
                           {record.category && (
-                            <span className="text-xs text-notion-muted">({record.category})</span>
+                            <span className="text-xs text-notion-muted">
+                              ({record.category})
+                            </span>
                           )}
                         </div>
+                      ) : (
+                        <span className="text-notion-muted">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {record.attachment_url ? (
+                        <a href={record.attachment_url} target="_blank" rel="noopener noreferrer">
+                          <img
+                            src={record.attachment_url}
+                            alt="附件"
+                            className="w-8 h-8 object-cover rounded border border-notion-border
+                                     hover:opacity-80 transition-opacity"
+                          />
+                        </a>
                       ) : (
                         <span className="text-notion-muted">-</span>
                       )}
@@ -478,12 +522,15 @@ const RecordModal: React.FC<RecordModalProps> = ({
     user_nick: record?.user_nick || '',
     record_type: (record?.record_type || 'communication') as ExternalRecordType,
     record_date: record?.record_date || new Date().toISOString().split('T')[0],
+    date_to: record?.date_to || '',
     channel: record?.channel || '',
     content: record?.content || '',
     notes: record?.notes || '',
     amount: record?.amount?.toString() || '',
-    category: record?.category || ''
+    categories: record?.category ? record.category.split(',').filter(Boolean) : [] as string[],
+    attachment_url: record?.attachment_url || ''
   });
+  const [isUploading, setIsUploading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -495,14 +542,18 @@ const RecordModal: React.FC<RecordModalProps> = ({
         user_nick: formData.user_nick,
         record_type: formData.record_type,
         record_date: formData.record_date,
+        date_to: formData.date_to || null,
         channel: formData.channel || null,
         content: formData.content || null,
         notes: formData.notes || null,
         amount: formData.record_type === 'purchase' && formData.amount
           ? parseFloat(formData.amount)
           : null,
-        category: formData.record_type === 'purchase' ? formData.category || null : null,
-        created_by: 'system' // 添加必填字段
+        category: formData.record_type === 'purchase' && formData.categories.length > 0
+          ? formData.categories.join(',')
+          : null,
+        attachment_url: formData.attachment_url || null,
+        created_by: 'system'
       };
 
       if (isEdit) {
@@ -589,19 +640,33 @@ const RecordModal: React.FC<RecordModalProps> = ({
             </div>
           </div>
 
-          {/* 日期 */}
+          {/* 日期范围 */}
           <div>
             <label className="block text-sm font-medium text-notion-text mb-1">
               日期 <span className="text-red-500">*</span>
             </label>
-            <input
-              type="date"
-              required
-              value={formData.record_date}
-              onChange={(e) => setFormData({ ...formData, record_date: e.target.value })}
-              className="w-full px-3 py-2 border border-notion-border rounded-md
-                       focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                required
+                value={formData.record_date}
+                onChange={(e) => setFormData({ ...formData, record_date: e.target.value })}
+                className="flex-1 px-3 py-2 border border-notion-border rounded-md
+                         focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              />
+              <span className="text-notion-muted text-sm">~</span>
+              <input
+                type="date"
+                value={formData.date_to}
+                onChange={(e) => setFormData({ ...formData, date_to: e.target.value })}
+                className="flex-1 px-3 py-2 border border-notion-border rounded-md
+                         focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                placeholder="结束日期（可选）"
+              />
+            </div>
+            <p className="mt-1 text-xs text-notion-muted">
+              结束日期留空表示单日记录
+            </p>
           </div>
 
           {/* 渠道 */}
@@ -641,17 +706,35 @@ const RecordModal: React.FC<RecordModalProps> = ({
               </div>
               <div>
                 <label className="block text-sm font-medium text-notion-text mb-1">商品品类</label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  className="w-full px-3 py-2 border border-notion-border rounded-md
-                           focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value="">选择品类...</option>
-                  {categoryOptions.map(opt => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
+                <div className="flex flex-wrap gap-2">
+                  {categoryOptions.map(opt => {
+                    const isSelected = formData.categories.includes(opt);
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => {
+                          const next = isSelected
+                            ? formData.categories.filter(c => c !== opt)
+                            : [...formData.categories, opt];
+                          setFormData({ ...formData, categories: next });
+                        }}
+                        className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${
+                          isSelected
+                            ? 'bg-blue-50 border-blue-300 text-blue-700 font-medium'
+                            : 'bg-white border-notion-border text-notion-muted hover:bg-notion-hover'
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+                {formData.categories.length > 0 && (
+                  <p className="mt-1 text-xs text-notion-muted">
+                    已选: {formData.categories.join(', ')}
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -682,6 +765,56 @@ const RecordModal: React.FC<RecordModalProps> = ({
               rows={2}
               placeholder="添加备注..."
             />
+          </div>
+
+          {/* 附件图片 */}
+          <div>
+            <label className="block text-sm font-medium text-notion-text mb-1">附件图片</label>
+            {formData.attachment_url ? (
+              <div className="relative inline-block">
+                <img
+                  src={formData.attachment_url}
+                  alt="附件"
+                  className="w-24 h-24 object-cover rounded-md border border-notion-border"
+                />
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, attachment_url: '' })}
+                  className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full
+                           hover:bg-red-600 transition-colors"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ) : (
+              <label className="flex items-center gap-2 px-4 py-3 border border-dashed border-notion-border
+                               rounded-md cursor-pointer hover:bg-notion-hover/50 transition-colors">
+                <ImagePlus size={18} className="text-notion-muted" />
+                <span className="text-sm text-notion-muted">
+                  {isUploading ? '上传中...' : '点击上传图片'}
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={isUploading}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setIsUploading(true);
+                    try {
+                      const result = await apiClient.uploadExternalAttachment(file);
+                      setFormData({ ...formData, attachment_url: result.url });
+                    } catch (err) {
+                      setError(err instanceof APIError ? err.message : '图片上传失败');
+                    } finally {
+                      setIsUploading(false);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </label>
+            )}
           </div>
 
           {/* 按钮 */}

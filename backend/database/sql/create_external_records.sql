@@ -9,14 +9,16 @@ CREATE TABLE IF NOT EXISTS external_records (
   record_type ENUM('communication', 'purchase') NOT NULL COMMENT '类型：沟通/消费',
 
   -- 通用字段
-  record_date DATE NOT NULL COMMENT '日期',
+  record_date DATE NOT NULL COMMENT '起始日期',
+  date_to DATE COMMENT '结束日期（为空表示单日记录）',
   channel VARCHAR(100) COMMENT '渠道：微信/电话/门店名称',
   content TEXT COMMENT '内容描述',
   notes TEXT COMMENT '备注',
 
   -- 消费类型专用
   amount DECIMAL(10, 2) COMMENT '消费金额（仅消费类型）',
-  category VARCHAR(50) COMMENT '商品品类（仅消费类型）',
+  category VARCHAR(200) COMMENT '商品品类（仅消费类型，多选逗号分隔）',
+  attachment_url VARCHAR(500) COMMENT '附件图片路径',
 
   -- 元数据
   created_by VARCHAR(50) COMMENT '录入人',

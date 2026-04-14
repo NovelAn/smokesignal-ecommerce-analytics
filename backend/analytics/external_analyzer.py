@@ -28,12 +28,14 @@ class ExternalAnalyzer:
                   id INT AUTO_INCREMENT PRIMARY KEY,
                   user_nick VARCHAR(100) NOT NULL COMMENT '客户昵称',
                   record_type ENUM('communication', 'purchase') NOT NULL COMMENT '类型',
-                  record_date DATE NOT NULL COMMENT '日期',
+                  record_date DATE NOT NULL COMMENT '起始日期',
+                  date_to DATE COMMENT '结束日期',
                   channel VARCHAR(100) COMMENT '渠道',
                   content TEXT COMMENT '内容描述',
                   notes TEXT COMMENT '备注',
                   amount DECIMAL(10, 2) COMMENT '消费金额',
-                  category VARCHAR(50) COMMENT '商品品类',
+                  category VARCHAR(200) COMMENT '商品品类',
+                  attachment_url VARCHAR(500) COMMENT '附件图片路径',
                   created_by VARCHAR(50) COMMENT '录入人',
                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -46,6 +48,25 @@ class ExternalAnalyzer:
             logging.info("[ExternalAnalyzer] Table external_records verified/created")
         except Exception as e:
             logging.warning(f"[ExternalAnalyzer] Could not verify table: {e}")
+
+    def _format_record(self, r: Dict[str, Any]) -> Dict[str, Any]:
+        """格式化单条记录"""
+        return {
+            "id": str(r.get("id")),
+            "user_nick": r.get("user_nick"),
+            "record_type": r.get("record_type"),
+            "record_date": str(r.get("record_date")) if r.get("record_date") else None,
+            "date_to": str(r.get("date_to")) if r.get("date_to") else None,
+            "channel": r.get("channel"),
+            "content": r.get("content"),
+            "notes": r.get("notes"),
+            "amount": float(r.get("amount")) if r.get("amount") else None,
+            "category": r.get("category"),
+            "attachment_url": r.get("attachment_url"),
+            "created_by": r.get("created_by"),
+            "created_at": str(r.get("created_at")) if r.get("created_at") else None,
+            "updated_at": str(r.get("updated_at")) if r.get("updated_at") else None
+        }
 
     def get_records(
         self,
@@ -113,8 +134,8 @@ class ExternalAnalyzer:
         # 查询记录
         query = f"""
             SELECT
-                id, user_nick, record_type, record_date, channel,
-                content, notes, amount, category, created_by,
+                id, user_nick, record_type, record_date, date_to, channel,
+                content, notes, amount, category, attachment_url, created_by,
                 created_at, updated_at
             FROM external_records
             WHERE {where_clause}
@@ -124,23 +145,7 @@ class ExternalAnalyzer:
         params.extend([limit, offset])
         records = db.execute_query(query, params)
 
-        # 格式化日期和金额
-        formatted_records = []
-        for r in records:
-            formatted_records.append({
-                "id": str(r.get("id")),
-                "user_nick": r.get("user_nick"),
-                "record_type": r.get("record_type"),
-                "record_date": str(r.get("record_date")) if r.get("record_date") else None,
-                "channel": r.get("channel"),
-                "content": r.get("content"),
-                "notes": r.get("notes"),
-                "amount": float(r.get("amount")) if r.get("amount") else None,
-                "category": r.get("category"),
-                "created_by": r.get("created_by"),
-                "created_at": str(r.get("created_at")) if r.get("created_at") else None,
-                "updated_at": str(r.get("updated_at")) if r.get("updated_at") else None
-            })
+        formatted_records = [self._format_record(r) for r in records]
 
         return {
             "records": formatted_records,
@@ -155,8 +160,8 @@ class ExternalAnalyzer:
 
         query = """
             SELECT
-                id, user_nick, record_type, record_date, channel,
-                content, notes, amount, category, created_by,
+                id, user_nick, record_type, record_date, date_to, channel,
+                content, notes, amount, category, attachment_url, created_by,
                 created_at, updated_at
             FROM external_records
             WHERE id = %s
@@ -166,21 +171,7 @@ class ExternalAnalyzer:
         if not result:
             return None
 
-        r = result[0]
-        return {
-            "id": str(r.get("id")),
-            "user_nick": r.get("user_nick"),
-            "record_type": r.get("record_type"),
-            "record_date": str(r.get("record_date")) if r.get("record_date") else None,
-            "channel": r.get("channel"),
-            "content": r.get("content"),
-            "notes": r.get("notes"),
-            "amount": float(r.get("amount")) if r.get("amount") else None,
-            "category": r.get("category"),
-            "created_by": r.get("created_by"),
-            "created_at": str(r.get("created_at")) if r.get("created_at") else None,
-            "updated_at": str(r.get("updated_at")) if r.get("updated_at") else None
-        }
+        return self._format_record(result[0])
 
     def get_records_by_user(self, user_nick: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
@@ -192,8 +183,8 @@ class ExternalAnalyzer:
 
         query = """
             SELECT
-                id, user_nick, record_type, record_date, channel,
-                content, notes, amount, category, created_by,
+                id, user_nick, record_type, record_date, date_to, channel,
+                content, notes, amount, category, attachment_url, created_by,
                 created_at, updated_at
             FROM external_records
             WHERE user_nick = %s
@@ -202,22 +193,7 @@ class ExternalAnalyzer:
         """
         records = db.execute_query(query, [user_nick, limit])
 
-        formatted_records = []
-        for r in records:
-            formatted_records.append({
-                "id": str(r.get("id")),
-                "user_nick": r.get("user_nick"),
-                "record_type": r.get("record_type"),
-                "record_date": str(r.get("record_date")) if r.get("record_date") else None,
-                "channel": r.get("channel"),
-                "content": r.get("content"),
-                "notes": r.get("notes"),
-                "amount": float(r.get("amount")) if r.get("amount") else None,
-                "category": r.get("category"),
-                "created_by": r.get("created_by"),
-                "created_at": str(r.get("created_at")) if r.get("created_at") else None,
-                "updated_at": str(r.get("updated_at")) if r.get("updated_at") else None
-            })
+        return [self._format_record(r) for r in records]
 
         return formatted_records
 
@@ -231,35 +207,21 @@ class ExternalAnalyzer:
         notes: Optional[str] = None,
         amount: Optional[float] = None,
         category: Optional[str] = None,
+        date_to: Optional[str] = None,
+        attachment_url: Optional[str] = None,
         created_by: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        创建场外记录
-
-        Args:
-            user_nick: 客户昵称
-            record_type: 记录类型 (communication/purchase)
-            record_date: 日期 (YYYY-MM-DD)
-            channel: 渠道
-            content: 内容描述
-            notes: 备注
-            amount: 消费金额（仅消费类型）
-            category: 商品品类（仅消费类型）
-            created_by: 录入人
-
-        Returns:
-            创建的记录
-        """
+        """创建场外记录"""
         db = Database(db_name=self.db_name)
 
         query = """
             INSERT INTO external_records
-            (user_nick, record_type, record_date, channel, content, notes, amount, category, created_by)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (user_nick, record_type, record_date, date_to, channel, content, notes, amount, category, attachment_url, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         params = [
-            user_nick, record_type, record_date, channel, content,
-            notes, amount, category, created_by
+            user_nick, record_type, record_date, date_to, channel, content,
+            notes, amount, category, attachment_url, created_by
         ]
 
         record_id = db.execute_update(query, params)
@@ -273,52 +235,36 @@ class ExternalAnalyzer:
         user_nick: Optional[str] = None,
         record_type: Optional[str] = None,
         record_date: Optional[str] = None,
+        date_to: Optional[str] = None,
         channel: Optional[str] = None,
         content: Optional[str] = None,
         notes: Optional[str] = None,
         amount: Optional[float] = None,
-        category: Optional[str] = None
+        category: Optional[str] = None,
+        attachment_url: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """
-        更新场外记录
-        """
+        """更新场外记录"""
         db = Database(db_name=self.db_name)
 
-        # 构建更新字段
+        field_map = {
+            'user_nick': user_nick,
+            'record_type': record_type,
+            'record_date': record_date,
+            'date_to': date_to,
+            'channel': channel,
+            'content': content,
+            'notes': notes,
+            'amount': amount,
+            'category': category,
+            'attachment_url': attachment_url,
+        }
+
         updates = []
         params = []
-
-        if user_nick is not None:
-            updates.append("user_nick = %s")
-            params.append(user_nick)
-
-        if record_type is not None:
-            updates.append("record_type = %s")
-            params.append(record_type)
-
-        if record_date is not None:
-            updates.append("record_date = %s")
-            params.append(record_date)
-
-        if channel is not None:
-            updates.append("channel = %s")
-            params.append(channel)
-
-        if content is not None:
-            updates.append("content = %s")
-            params.append(content)
-
-        if notes is not None:
-            updates.append("notes = %s")
-            params.append(notes)
-
-        if amount is not None:
-            updates.append("amount = %s")
-            params.append(amount)
-
-        if category is not None:
-            updates.append("category = %s")
-            params.append(category)
+        for field, value in field_map.items():
+            if value is not None:
+                updates.append(f"{field} = %s")
+                params.append(value)
 
         if not updates:
             return self.get_record_by_id(record_id)

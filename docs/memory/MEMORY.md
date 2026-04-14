@@ -39,11 +39,13 @@
   - 更新 Insight 显示 TOP3 分类和 TOP5 关键词
   - 文档归档到 `docs/plans/2026-03-23-keyword-analysis-*.md`
 
-- ✅ **MetricCards重构 - 运营导向4组指标**（进行中）
+- ✅ **MetricCards重构 - 运营导向4组指标**
   - 设计方向： 从销售数据转向运营决策支持
   - 4个主题组： 客户健康度 / 跟进优先级 / 销售机会 / 服务质量
   - 每组2-3个指标，带占比显示
+  - 修复：API返回字符串类型导致的数值计算错误（添加 `toNumber()` 辅助函数）
   - 文件: `src/components/dashboard/MetricCards.tsx`
+  - SQL: `backend/database/sql/target_buyers/get_dashboard_metrics.sql`
 
 ### 2026-03-23
 - ✅ **SMOKER客户关键词词云分析** - Overview页面 Keyword & Issue Analysis 模块

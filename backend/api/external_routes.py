@@ -8,8 +8,14 @@ from typing import List, Dict, Any, Optional
 import logging
 import csv
 import io
+import uuid
+import os
 
 from backend.analytics.external_analyzer import get_external_analyzer
+
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads", "external")
+ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 router = APIRouter(prefix="/api/v2/external", tags=["external_records"])
 analyzer = get_external_analyzer()
@@ -114,11 +120,13 @@ async def create_record(record: Dict[str, Any]) -> Dict[str, Any]:
             user_nick=record.get('user_nick'),
             record_type=record.get('record_type'),
             record_date=record.get('record_date'),
+            date_to=record.get('date_to'),
             channel=record.get('channel'),
             content=record.get('content'),
             notes=record.get('notes'),
             amount=float(record.get('amount')) if record.get('amount') else None,
             category=record.get('category'),
+            attachment_url=record.get('attachment_url'),
             created_by=record.get('created_by')
         )
         return result
@@ -154,11 +162,13 @@ async def update_record(record_id: int, record: Dict[str, Any]) -> Dict[str, Any
             user_nick=record.get('user_nick'),
             record_type=record.get('record_type'),
             record_date=record.get('record_date'),
+            date_to=record.get('date_to'),
             channel=record.get('channel'),
             content=record.get('content'),
             notes=record.get('notes'),
             amount=float(record.get('amount')) if record.get('amount') else None,
-            category=record.get('category')
+            category=record.get('category'),
+            attachment_url=record.get('attachment_url')
         )
         return result
     except HTTPException:
@@ -339,4 +349,42 @@ async def get_user_records(
         return records
     except Exception as e:
         logging.error(f"[ExternalRoutes] get_user_records error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/upload")
+async def upload_attachment(file: UploadFile = File(...)) -> Dict[str, str]:
+    """
+    上传附件图片
+
+    支持 jpg/png/webp/gif，最大 5MB
+    """
+    try:
+        # 校验文件扩展名
+        ext = os.path.splitext(file.filename or '')[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的文件格式: {ext}，允许: {', '.join(ALLOWED_EXTENSIONS)}"
+            )
+
+        # 读取文件内容
+        content = await file.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="文件大小不能超过 5MB")
+
+        # 保存到磁盘
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}{ext}"
+        filepath = os.path.join(UPLOAD_DIR, filename)
+        with open(filepath, 'wb') as f:
+            f.write(content)
+
+        url = f"/uploads/external/{filename}"
+        logging.info(f"[ExternalRoutes] Uploaded attachment: {url}")
+        return {"url": url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"[ExternalRoutes] upload_attachment error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -70,9 +70,10 @@ class Database:
                 return cursor.fetchall()
 
     def execute_update(self, query: str, params: Optional[tuple] = None) -> int:
-        """Execute an INSERT/UPDATE/DELETE query and return affected rows"""
+        """Execute an INSERT/UPDATE/DELETE query and return lastrowid for INSERT, affected rows otherwise"""
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
                 affected_rows = cursor.execute(query, params)
                 conn.commit()
-                return affected_rows
+                lastrowid = cursor.lastrowid
+                return lastrowid if lastrowid else affected_rows
