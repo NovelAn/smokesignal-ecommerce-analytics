@@ -1,8 +1,10 @@
+import type { ComponentType } from 'react';
+
 export interface MetricCard {
   label: string;
   value: string;
   change: string;
-  icon: React.ComponentType<{ size?: number }>;
+  icon: ComponentType<{ size?: number }>;
 }
 
 export interface ActionableCustomer {

@@ -161,7 +161,7 @@ export const KeywordAnalysisPanel: React.FC<KeywordAnalysisPanelProps> = () => {
     <NotionCard
       title="Keyword & Issue Analysis"
       icon={Database}
-      className="h-[600px] flex flex-col"
+      className="h-[680px] flex flex-col"
       action={
         <div className="flex items-center gap-2">
           {selectedCategory && (
@@ -246,7 +246,7 @@ export const KeywordAnalysisPanel: React.FC<KeywordAnalysisPanelProps> = () => {
                     endAngle={-270}
                     onClick={(data) => data?.name && handleCategoryClick(data.name)}
                     className="cursor-pointer"
-                    label={({ name, value, percentage, cx, cy, midAngle, outerRadius, index }) => {
+                    label={({ name, value, cx, cy, midAngle, outerRadius, index, percent }: any) => {
                       // 只显示前6大分类的标签
                       if (index >= 6) return null;
                       const RADIAN = Math.PI / 180;
@@ -263,11 +263,11 @@ export const KeywordAnalysisPanel: React.FC<KeywordAnalysisPanelProps> = () => {
                           fontSize={9}
                           fontWeight={500}
                         >
-                          {name} {percentage}%
+                          {name} {(percent * 100).toFixed(0)}%
                         </text>
                       );
                     }}
-                    labelLine={({ index }) => index < 6}
+                    labelLine={((props: any) => props.index < 6) as any}
                   >
                     {categoryData.map((entry, index) => (
                       <Cell
@@ -307,7 +307,7 @@ export const KeywordAnalysisPanel: React.FC<KeywordAnalysisPanelProps> = () => {
             </div>
 
             {/* 分类图例 - 两列布局 */}
-            <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-1.5 overflow-y-auto scrollbar-thin">
+            <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-1.5 overflow-y-auto scrollbar-thin max-h-[100px]">
               {categoryData.map((item) => (
                 <button
                   key={item.name}

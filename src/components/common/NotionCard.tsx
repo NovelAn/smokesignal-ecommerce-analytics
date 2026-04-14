@@ -7,6 +7,7 @@ interface NotionCardProps {
   subtitle?: string;
   icon?: any;
   action?: React.ReactNode;
+  onClick?: () => void;
 }
 
 export const NotionCard: React.FC<NotionCardProps> = ({

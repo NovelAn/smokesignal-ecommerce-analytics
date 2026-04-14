@@ -25,6 +25,7 @@ interface LogConfig {
   level: LogLevel;
   enableTimestamp: boolean;
   enableStackTrace: boolean;
+  enableDebugMode?: boolean;
 }
 
 /**
@@ -35,7 +36,9 @@ export class Logger {
 
   constructor(config?: Partial<LogConfig>) {
     this.config = {
-      level: config?.level ?? (config.enableDebugMode ? LogLevel.DEBUG : LogLevel.INFO),
+      level: config?.level ?? (config.enableDebugMode !== undefined
+        ? (config.enableDebugMode ? LogLevel.DEBUG : LogLevel.INFO)
+        : LogLevel.INFO),
       enableTimestamp: config?.enableTimestamp ?? true,
       enableStackTrace: config?.enableStackTrace ?? true,
     };

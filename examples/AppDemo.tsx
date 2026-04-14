@@ -3,7 +3,7 @@
  * 简单的 API 集成演示页面
  */
 import React, { useState, useEffect } from 'react';
-import { api, BuyerListResponse, ActionableCustomer, DashboardMetrics } from './api';
+import { api, BuyerListResponse, ActionableCustomer, DashboardMetrics } from '../src/api';
 
 function AppDemo() {
   const [loading, setLoading] = useState(false);

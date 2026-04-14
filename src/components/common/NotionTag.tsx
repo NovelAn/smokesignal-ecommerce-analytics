@@ -5,6 +5,7 @@ type NotionTagColor = 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' 
 interface NotionTagProps {
   text: string;
   color?: NotionTagColor;
+  size?: 'xs' | 'sm' | 'md' | 'lg';
 }
 
 const colors: Record<NotionTagColor, string> = {

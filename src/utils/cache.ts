@@ -18,12 +18,12 @@ interface CacheEntry<T> {
  */
 export class APICache {
   private cache = new Map<string, CacheEntry<any>>();
-  private cleanupInterval: NodeJS.Timeout | null = null;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     // 每分钟清理一次过期缓存
     if (typeof window !== 'undefined') {
-      this.cleanupInterval = window.setInterval(() => {
+      this.cleanupInterval = setInterval(() => {
         this.cleanup();
       }, 60 * 1000);
     }

@@ -339,6 +339,20 @@ export const apiClient = {
   getExternalRecordsTemplate: () => `${API_BASE}/external/export/template`,
 
   /**
+   * 上传附件图片
+   * POST /api/v2/external/upload
+   */
+  uploadExternalAttachment: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`${API_BASE}/external/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    return handleResponse<{ url: string }>(response);
+  },
+
+  /**
    * 获取指定用户的场外记录
    * GET /api/v2/external/users/{user_nick}
    */
@@ -601,6 +615,7 @@ export interface BuyerProfile {
     key_interests: string[];
     pain_points: string[];
     recommended_action: string;
+    error?: string;
   };
 
   // Intent Distribution (from buyer_ai_analysis_cache)
@@ -671,11 +686,13 @@ export interface ExternalRecord {
   user_nick: string;
   record_type: ExternalRecordType;
   record_date: string;
+  date_to: string | null;
   channel: string | null;
   content: string | null;
   notes: string | null;
   amount: number | null;
   category: string | null;
+  attachment_url: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

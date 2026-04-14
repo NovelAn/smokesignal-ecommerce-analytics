@@ -294,7 +294,8 @@ const ChatAnalysis: React.FC = () => {
             summary: '',
             key_interests: [],
             pain_points: [],
-            recommended_action: ''
+            recommended_action: '',
+            error: undefined
           }
         },
         messages: [], // 空消息列表
@@ -330,11 +331,14 @@ const ChatAnalysis: React.FC = () => {
     setOrderCurrentPage(1);
   }, [currentSession?.user_nick]);
 
-  // 当选中的用户改变时，按需获取其详细信息（AI默认关闭，仅激活后获取）
+  // ========== Hook A: 基础数据（始终快速加载，< 0.5s）==========
+  // 包含：profile基本信息 + 订单历史 + 聊天记录
+  // 不包含AI画像分析，因此不会被AI分析阻塞
   const { data: buyerProfile, isLoading: profileLoading, error: profileError, refetch: refetchProfile } = useDataFetchingWithRetry(
     async () => {
       if (!currentSession?.user_nick) return null;
-      const profile = await apiClient.getBuyerProfile(currentSession.user_nick, hasActivatedAI);
+      // 始终使用 includeAI=false，确保快速返回
+      const profile = await apiClient.getBuyerProfile(currentSession.user_nick, false);
 
       // 同时获取订单历史和聊天记录
       try {
@@ -344,7 +348,6 @@ const ChatAnalysis: React.FC = () => {
         ]);
 
         // 转换订单数据：将后端格式转换为前端期望的OrderRecord格式
-        // 后端每个产品一行，前端保持独立，不合并
         const orders = ordersRaw.map((item: any) => {
           const gmv = Number(item['成交总金额']) || 0;
           const refundAmount = Number(item['退款金额']) || 0;
@@ -375,7 +378,6 @@ const ChatAnalysis: React.FC = () => {
           };
         });
 
-        // 将订单历史和聊天记录添加到profile中
         return {
           ...profile,
           order_history: orders,
@@ -383,7 +385,6 @@ const ChatAnalysis: React.FC = () => {
         } as APIBuyerProfile & { order_history: OrderRecord[], chat_history: ChatMessage[] };
       } catch (error) {
         console.error('Failed to fetch orders/chats:', error);
-        // 即使orders/chats失败，也返回基本profile
         return {
           ...profile,
           order_history: [],
@@ -392,7 +393,18 @@ const ChatAnalysis: React.FC = () => {
       }
     },
     2,
-    [currentSession?.user_nick, hasActivatedAI]
+    [currentSession?.user_nick] // 仅依赖 user_nick，不依赖 AI 开关
+  );
+
+  // ========== Hook B: AI画像分析（独立加载，非阻塞）==========
+  // 仅在 enableAI=true 时触发，有自己的 loading 状态
+  const { data: aiAnalysisData, isLoading: aiLoading, error: aiError, refetch: refetchAI } = useDataFetchingWithRetry(
+    async () => {
+      if (!enableAI || !currentSession?.user_nick) return null;
+      return await apiClient.getBuyerProfile(currentSession.user_nick, true);
+    },
+    2,
+    [currentSession?.user_nick, enableAI]
   );
 
   const handleSelectUser = (session: BuyerSession) => {
@@ -417,21 +429,12 @@ const ChatAnalysis: React.FC = () => {
     const newEnableAI = !enableAI;
     setEnableAI(newEnableAI);
 
-    // 当从OFF切换到ON时，激活AI分析
-    // 注意：不再调用forceRefreshAnalysis，避免清除缓存
-    // 后端会自动检查缓存，只有数据变化时才重新分析
-    if (newEnableAI && currentSession?.user_nick) {
+    // 当从OFF切换到ON时，Hook B 会自动触发 AI 分析加载
+    // 无需手动调用 refetch，useDataFetchingWithRetry 的依赖项 [enableAI] 会自动触发
+    if (newEnableAI) {
       setHasActivatedAI(true);
-      // 直接触发重新获取profile，后端会使用缓存或重新分析
-      setIsRefreshingAI(true);
-      try {
-        refetchProfile();
-      } finally {
-        // 延迟关闭loading状态，等待数据加载
-        setTimeout(() => setIsRefreshingAI(false), 500);
-      }
     }
-    // 当从ON切换到OFF时，不做任何操作，保持显示已有结果
+    // 当从ON切换到OFF时，Hook B 返回 null，但已加载的 AI 结果会保留显示
   };
 
   // 强制重新分析AI画像
@@ -442,8 +445,8 @@ const ChatAnalysis: React.FC = () => {
     try {
       // 1. 调用force-refresh API清除缓存并重新分析
       await apiClient.forceRefreshAnalysis(currentSession.user_nick, 'persona');
-      // 2. 重新获取profile数据
-      refetchProfile();
+      // 2. 仅重新获取 AI 分析数据（Hook B），不影响基础数据
+      refetchAI();
     } catch (error) {
       console.error('Force refresh failed:', error);
     } finally {
@@ -453,13 +456,15 @@ const ChatAnalysis: React.FC = () => {
   };
 
   // 合并基本信息和AI分析结果
+  // Hook A (buyerProfile) 提供基础数据，Hook B (aiAnalysisData) 提供AI画像
   const enrichedProfile = useMemo(() => {
     if (!currentSession || !buyerProfile) return currentSession?.profile;
 
+    // AI画像分析：优先使用 Hook B 的结果，回退到 Hook A 的缓存
+    const aiAnalysis = aiAnalysisData?.ai_analysis || buyerProfile.ai_analysis || currentSession.profile.analysis;
+
     return {
       ...currentSession.profile,
-      // 如果有AI分析结果，使用它；否则使用默认值
-      analysis: buyerProfile.ai_analysis || currentSession.profile.analysis,
       // 使用真实数据更新字段
       historical_ltv: Number((buyerProfile as any).historical_gmv ?? currentSession.profile.historical_ltv),
       historical_gmv: Number((buyerProfile as any).historical_gmv ?? currentSession.profile.historical_gmv),
@@ -502,11 +507,13 @@ const ChatAnalysis: React.FC = () => {
         (buyerProfile as any).follow_priority ?? (currentSession.profile as any).follow_priority,
         (buyerProfile as any).sentiment_label ?? (currentSession.profile as any).sentiment_label
       ].filter(Boolean),
+      // AI画像分析结果
+      analysis: aiAnalysis,
       // 包含订单历史和聊天记录
       order_history: (buyerProfile as any).order_history || currentSession.profile.order_history || [],
       chat_history: (buyerProfile as any).chat_history || currentSession.profile.chat_history || [],
     };
-  }, [currentSession, buyerProfile]);
+  }, [currentSession, buyerProfile, aiAnalysisData]);
 
   const hasChatRecord = ((enrichedProfile as any)?.chat_history?.length || 0) > 0
     || !!buyerProfile?.last_chat_date
@@ -991,7 +998,11 @@ const ChatAnalysis: React.FC = () => {
                          >
                             {profileLoading ? (
                               <div className="py-8">
-                                <LoadingSpinner size={24} text={enableAI ? "AI正在分析买家画像..." : "加载买家信息..."} />
+                                <LoadingSpinner size={24} text="加载买家信息..." />
+                              </div>
+                            ) : aiLoading || isRefreshingAI ? (
+                              <div className="py-8">
+                                <LoadingSpinner size={24} text="AI正在分析买家画像..." />
                               </div>
                             ) : profileError ? (
                               <ErrorAlert message={profileError} onRetry={() => refetchProfile()} />

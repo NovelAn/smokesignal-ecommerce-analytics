@@ -1,7 +1,7 @@
 """
 Zhipu AI Client - 备选模型 (Fallback Model)
 当DeepSeek API余额不足(429)或超时时，自动降级到此模型
-当前使用: GLM-4.7 (glm-4-plus)
+当前使用: GLM-4 Plus (glm-4-plus)
 """
 import json
 from typing import Dict, List, Any

@@ -27,6 +27,7 @@ export interface CustomerAnalysis {
   key_interests: string[];   // What they care about (Price, Quality, etc.)
   pain_points: string[];     // Reported issues
   recommended_action: string; // Sales suggestion
+  error?: string;            // Error message if analysis failed
 }
 
 export interface OrderRecord {
@@ -86,6 +87,12 @@ export interface CustomerProfile {
   avg_reply_interval_days: number; // Average days between sessions
   last_interaction_date: string;
   last_chat_date?: string;
+
+  // Chat frequency metrics (from precomputed table)
+  l30d_chat_frequency_days?: number;
+  l3m_chat_frequency_days?: number;
+  avg_chat_interval_days?: number;
+
   tags: string[];
 
   // Individual Intent Distribution (Radar Chart Data)
@@ -151,11 +158,13 @@ export interface ExternalRecord {
   user_nick: string;
   record_type: ExternalRecordType;
   record_date: string;
+  date_to: string | null;       // 结束日期（为空表示单日记录）
   channel: string | null;      // 微信/电话/门店名称
   content: string | null;      // 内容描述
   notes: string | null;        // 备注
   amount: number | null;       // 消费金额（仅消费类型）
-  category: string | null;     // 商品品类（仅消费类型）
+  category: string | null;     // 商品品类（仅消费类型，多选逗号分隔）
+  attachment_url: string | null; // 附件图片路径
   created_by: string | null;   // 录入人
   created_at: string;
   updated_at: string;

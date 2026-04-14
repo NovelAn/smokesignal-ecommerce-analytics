@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Component } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 
 /**
@@ -57,11 +57,11 @@ export const EmptyState: React.FC<{
 /**
  * API错误边界
  */
-export class APIErrorBoundary extends React.Component<
+export class APIErrorBoundary extends Component<
   { children: React.ReactNode; fallback?: React.ReactNode },
   { hasError: boolean; error?: Error }
 > {
-  constructor(props: any) {
+  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
     super(props);
     this.state = { hasError: false };
   }

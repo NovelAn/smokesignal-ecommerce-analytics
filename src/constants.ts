@@ -109,10 +109,10 @@ const PROFILE_1: CustomerProfile = {
     { subject: IntentType.COMPLAINT, A: 10, fullMark: 150 },
   ],
   order_history: [
-    { order_id: 'ORD-20260115', date: '2026-01-15', amount: 1200.00, status: 'Completed', items: ['Hand-Carved Briar Pipe', 'Filter Pack x50'] },
-    { order_id: 'ORD-20251120', date: '2025-11-20', amount: 850.50, status: 'Completed', items: ['Borosilicate Glass Stem', 'Cleaning Kit'] },
-    { order_id: 'ORD-20250910', date: '2025-09-10', amount: 10450.00, status: 'Completed', items: ['Limited Edition Meerschaum Set', 'Premium Stand'] },
-    { order_id: 'ORD-20250601', date: '2025-06-01', amount: 450.00, status: 'Completed', items: ['Beginner Pipe Kit'] }
+    { order_id: 'ORD-20260115', date: '2026-01-15', gmv: 1200.00, netsales: 1200.00, refund_amount: 0, fp_md: 'FP', items: ['Hand-Carved Briar Pipe', 'Filter Pack x50'] },
+    { order_id: 'ORD-20251120', date: '2025-11-20', gmv: 850.50, netsales: 850.50, refund_amount: 0, fp_md: 'FP', items: ['Borosilicate Glass Stem', 'Cleaning Kit'] },
+    { order_id: 'ORD-20250910', date: '2025-09-10', gmv: 10450.00, netsales: 10450.00, refund_amount: 0, fp_md: 'FP', items: ['Limited Edition Meerschaum Set', 'Premium Stand'] },
+    { order_id: 'ORD-20250601', date: '2025-06-01', gmv: 450.00, netsales: 450.00, refund_amount: 0, fp_md: 'FP', items: ['Beginner Pipe Kit'] }
   ],
   analysis: {
     summary: "Experienced buyer with specific product knowledge. Frequently negotiates for stock that is offline/sold out. Shows high price sensitivity but purchases high-ticket items when available.",
@@ -145,8 +145,8 @@ const PROFILE_2: CustomerProfile = {
     { subject: IntentType.COMPLAINT, A: 120, fullMark: 150 },
   ],
   order_history: [
-    { order_id: 'ORD-20250210', date: '2025-02-10', amount: 225.00, status: 'Completed', items: ['Standard Pipe - Black'] },
-    { order_id: 'ORD-20250105', date: '2025-01-05', amount: 225.00, status: 'Shipped', items: ['Standard Pipe - Brown'] }
+    { order_id: 'ORD-20250210', date: '2025-02-10', gmv: 225.00, netsales: 225.00, refund_amount: 0, fp_md: 'FP', items: ['Standard Pipe - Black'] },
+    { order_id: 'ORD-20250105', date: '2025-01-05', gmv: 225.00, netsales: 225.00, refund_amount: 0, fp_md: 'FP', items: ['Standard Pipe - Brown'] }
   ],
   analysis: {
     summary: "Transactional customer focused solely on delivery speed. Frustrated by lack of tracking updates. Low engagement with product features.",
