@@ -160,13 +160,13 @@ const ChatAnalysis: React.FC = () => {
 
   // Filter states - pending (user selected but not applied)
   const [pendingChannelFilter, setPendingChannelFilter] = useState<('DTC' | 'PFS')[]>([]);
-  const [pendingBuyerTypeFilter, setPendingBuyerTypeFilter] = useState<('SMOKER' | 'VIC' | 'BOTH')[]>([]);
+  const [pendingBuyerTypeFilter, setPendingBuyerTypeFilter] = useState<('SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK')[]>([]);
   const [pendingDateRangeFilter, setPendingDateRangeFilter] = useState<DateRangeFilter>('LAST_1_YEAR');
   const [showFilters, setShowFilters] = useState(false);
 
   // Applied filter states (actually used for API calls)
   const [appliedChannelFilter, setAppliedChannelFilter] = useState<('DTC' | 'PFS')[]>([]);
-  const [appliedBuyerTypeFilter, setAppliedBuyerTypeFilter] = useState<('SMOKER' | 'VIC' | 'BOTH')[]>([]);
+  const [appliedBuyerTypeFilter, setAppliedBuyerTypeFilter] = useState<('SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK')[]>([]);
   const [appliedDateRangeFilter, setAppliedDateRangeFilter] = useState<DateRangeFilter>('LAST_1_YEAR');
 
   // Order history pagination
@@ -764,7 +764,7 @@ const ChatAnalysis: React.FC = () => {
                       <select
                         value={pendingBuyerTypeFilter.length > 0 ? pendingBuyerTypeFilter[0] : ''}
                         onChange={(e) => {
-                          const value = e.target.value as 'SMOKER' | 'VIC' | 'BOTH' | '';
+                          const value = e.target.value as 'SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK' | '';
                           if (value === '') {
                             setPendingBuyerTypeFilter([]);
                           } else {
@@ -777,6 +777,8 @@ const ChatAnalysis: React.FC = () => {
                         <option value="SMOKER">SMOKER (烟斗/打火机)</option>
                         <option value="VIC">VIC (高价值)</option>
                         <option value="BOTH">BOTH (双重身份)</option>
+                        <option value="SEASON">SEASON (当季主推)</option>
+                        <option value="BULK">BULK (大单买家)</option>
                       </select>
                     </div>
 

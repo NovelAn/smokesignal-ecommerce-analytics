@@ -29,7 +29,7 @@ async def root():
 @router.get("/buyers")
 async def get_all_buyers(
     search: Optional[str] = Query(None, description="昵称模糊搜索"),
-    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH"),
+    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH/SEASON/BULK"),
     vip_level: Optional[List[str]] = Query(None, description="VIP等级: V3/V2/V1/V0/Non-VIP"),
     channel: Optional[List[str]] = Query(None, description="渠道: DTC/PFS"),
     last_purchase_after: Optional[str] = Query(None, description="最后购买日期筛选 (YYYY-MM-DD)"),
@@ -46,7 +46,7 @@ async def get_all_buyers(
 
     支持的筛选条件:
     - search: 昵称模糊搜索
-    - buyer_type: 买家类型 (SMOKER/VIC/BOTH)
+    - buyer_type: 买家类型 (SMOKER/VIC/BOTH/SEASON/BULK)
     - vip_level: VIP等级 (V3/V2/V1/V0/Non-VIP)
     - channel: 渠道 (DTC/PFS)
     - last_purchase_after: 最后购买日期筛选
@@ -73,7 +73,7 @@ async def get_all_buyers(
 
 @router.get("/buyers/count")
 async def get_buyers_count(
-    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH"),
+    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH/SEASON/BULK"),
     vip_level: Optional[List[str]] = Query(None, description="VIP等级: V3/V2/V1/V0/Non-VIP"),
     channel: Optional[List[str]] = Query(None, description="渠道: DTC/PFS"),
     last_purchase_after: Optional[str] = Query(None, description="最后购买日期筛选 (YYYY-MM-DD)"),
@@ -157,10 +157,10 @@ async def get_buyers_by_type(
         buyer_type: 买家类型 (SMOKER/VIC/BOTH)
     """
     try:
-        if buyer_type not in ['SMOKER', 'VIC', 'BOTH']:
+        if buyer_type not in ['SMOKER', 'VIC', 'BOTH', 'SEASON', 'BULK']:
             raise HTTPException(
                 status_code=400,
-                detail=f"无效的buyer_type: {buyer_type}. 必须是 SMOKER, VIC 或 BOTH"
+                detail=f"无效的buyer_type: {buyer_type}. 必须是 SMOKER, VIC, BOTH, SEASON 或 BULK"
             )
 
         buyers = analyzer.get_buyers_by_type(buyer_type, limit, offset)
@@ -464,7 +464,7 @@ async def get_actionable_customers(
 @router.get("/priority-customers")
 async def get_priority_customers(
     channel: Optional[List[str]] = Query(None, description="渠道筛选: DTC/PFS"),
-    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH"),
+    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH/SEASON/BULK"),
     follow_priority: Optional[List[str]] = Query(None, description="跟进优先级: 紧急/高/中/低"),
     sentiment_label: Optional[List[str]] = Query(None, description="情感标签: Positive/Neutral/Negative"),
     has_chat: Optional[str] = Query(None, description="聊天状态: yes/no"),
@@ -480,7 +480,7 @@ async def get_priority_customers(
 
     支持的筛选条件:
     - channel: 渠道 (DTC/PFS)
-    - buyer_type: 买家类型 (SMOKER/VIC/BOTH)
+    - buyer_type: 买家类型 (SMOKER/VIC/BOTH/SEASON/BULK)
     - follow_priority: 跟进优先级 (紧急/高/中/低)
     - sentiment_label: 情感标签 (Positive/Neutral/Negative)
     - has_chat: 聊天状态 (yes/no)
@@ -530,7 +530,7 @@ async def get_priority_customers(
 @router.get("/priority-customers/export")
 async def export_priority_customers_csv(
     channel: Optional[List[str]] = Query(None, description="渠道筛选: DTC/PFS"),
-    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH"),
+    buyer_type: Optional[List[str]] = Query(None, description="买家类型: SMOKER/VIC/BOTH/SEASON/BULK"),
     follow_priority: Optional[List[str]] = Query(None, description="跟进优先级: 紧急/高/中/低"),
     sentiment_label: Optional[List[str]] = Query(None, description="情感标签: Positive/Neutral/Negative"),
     has_chat: Optional[str] = Query(None, description="聊天状态: yes/no"),

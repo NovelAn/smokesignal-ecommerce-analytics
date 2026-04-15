@@ -8,7 +8,7 @@ const BUYERS_TIMEOUT_MS = 15000;
 
 type BuyersQueryParams = {
   search?: string;
-  buyer_type?: 'SMOKER' | 'VIC' | 'BOTH' | ('SMOKER' | 'VIC' | 'BOTH')[];
+  buyer_type?: 'SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK' | ('SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK')[];
   vip_level?: 'V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP' | ('V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP')[];
   channel?: 'DTC' | 'PFS' | ('DTC' | 'PFS')[];
   last_purchase_after?: string;
@@ -542,7 +542,7 @@ export interface BuyerInfo {
   buyer_nick: string;
   vip_level: string;
   city: string;
-  buyer_type: 'SMOKER' | 'VIC' | 'BOTH';
+  buyer_type: 'SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK';
   channel: 'DTC' | 'PFS';
   historical_net_sales: number;
   l6m_netsales: number;
@@ -562,7 +562,7 @@ export interface BuyerProfile {
   vip_level: string;
   city: string;
   client_monthly_tag: 'new' | 'old';
-  buyer_type: 'SMOKER' | 'VIC' | 'BOTH';
+  buyer_type: 'SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK';
   channel: 'DTC' | 'PFS';
 
   // 历史数据
@@ -762,7 +762,7 @@ export interface SentimentSummary {
 export interface PriorityCustomer {
   buyer_nick: string;
   channel: 'DTC' | 'PFS';
-  buyer_type: 'SMOKER' | 'VIC' | 'BOTH';
+  buyer_type: 'SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK';
   vip_level: string;
   rfm_segment: string;
   follow_priority: '紧急' | '高' | '中' | '低';
@@ -781,7 +781,7 @@ export interface PriorityCustomer {
 
 export interface PriorityCustomersFilters {
   channel?: ('DTC' | 'PFS')[];
-  buyer_type?: ('SMOKER' | 'VIC' | 'BOTH')[];
+  buyer_type?: ('SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK')[];
   follow_priority?: ('紧急' | '高' | '中' | '低')[];
   sentiment_label?: ('Positive' | 'Neutral' | 'Negative')[];
   has_chat?: 'true' | 'false' | 'all';
@@ -797,7 +797,7 @@ export interface PriorityCustomersResponse {
 
 // ========== 关键词分析类型定义 ==========
 
-export type BuyerTypeForKeyword = 'ALL' | 'SMOKER' | 'BOTH' | 'VIC';
+export type BuyerTypeForKeyword = 'ALL' | 'SMOKER' | 'BOTH' | 'VIC' | 'SEASON' | 'BULK';
 
 export interface KeywordAnalysisParams {
   buyer_types?: BuyerTypeForKeyword[];

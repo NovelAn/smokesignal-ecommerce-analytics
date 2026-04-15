@@ -62,6 +62,8 @@ const BUYER_TYPE_OPTIONS: { value: BuyerTypeForKeyword; label: string }[] = [
   { value: 'SMOKER', label: 'SMOKER' },
   { value: 'BOTH', label: 'BOTH' },
   { value: 'VIC', label: 'VIC' },
+  { value: 'SEASON', label: 'SEASON' },
+  { value: 'BULK', label: 'BULK' },
 ];
 
 interface KeywordAnalysisPanelProps {

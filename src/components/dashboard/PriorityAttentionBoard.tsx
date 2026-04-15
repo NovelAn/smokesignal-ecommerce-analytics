@@ -40,6 +40,8 @@ const BUYER_TYPE_OPTIONS = [
   { value: 'SMOKER', label: 'Smoker' },
   { value: 'VIC', label: 'VIC' },
   { value: 'BOTH', label: 'Both' },
+  { value: 'SEASON', label: 'Season' },
+  { value: 'BULK', label: 'Bulk' },
 ];
 
 const FOLLOW_PRIORITY_OPTIONS = [
@@ -341,7 +343,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                         />
                         <NotionTag
                           text={customer.buyer_type}
-                          color={customer.buyer_type === 'SMOKER' ? 'orange' : customer.buyer_type === 'BOTH' ? 'red' : 'blue'}
+                          color={customer.buyer_type === 'SMOKER' ? 'orange' : customer.buyer_type === 'BOTH' ? 'red' : customer.buyer_type === 'SEASON' ? 'green' : customer.buyer_type === 'BULK' ? 'purple' : 'blue'}
                           size="xs"
                         />
                       </div>
