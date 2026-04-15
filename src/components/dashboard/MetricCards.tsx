@@ -56,6 +56,11 @@ function formatPercentage(value: number, total: number): string {
   return ((value / total) * 100).toFixed(1) + '%';
 }
 
+// 辅助函数：确保值为数字（API 返回的是字符串）
+function toNumber(val: any): number {
+  return Number(val) || 0;
+}
+
 // ============================================================
 // 指标组卡片组件
 // ============================================================
@@ -136,26 +141,26 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
     return null;
   }
 
-  const total = metrics.total_target_buyers || 1;
+  const total = toNumber(metrics.total_target_buyers) || 1;
 
   // 客户健康度数据
   const healthMetrics: MetricItem[] = [
     {
       label: '正面情感',
-      value: metrics.positive_sentiment_count || 0,
-      percentage: parseFloat(formatPercentage(metrics.positive_sentiment_count || 0, total)),
+      value: toNumber(metrics.positive_sentiment_count),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.positive_sentiment_count), total)),
       color: '#86EFAC', // 绿色
     },
     {
       label: '中性情感',
-      value: metrics.neutral_sentiment_count || 0,
-      percentage: parseFloat(formatPercentage(metrics.neutral_sentiment_count || 0, total)),
+      value: toNumber(metrics.neutral_sentiment_count),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.neutral_sentiment_count), total)),
       color: '#FCD34D', // 黄色
     },
     {
       label: '负面情感',
-      value: metrics.negative_sentiment_count || 0,
-      percentage: parseFloat(formatPercentage(metrics.negative_sentiment_count || 0, total)),
+      value: toNumber(metrics.negative_sentiment_count),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.negative_sentiment_count), total)),
       color: '#FCA5A5', // 红色
     },
   ];
@@ -164,20 +169,23 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   const priorityMetrics: MetricItem[] = [
     {
       label: '紧急',
-      value: metrics.urgent_priority_count || 0,
-      percentage: parseFloat(formatPercentage(metrics.urgent_priority_count || 0, total)),
+      value: toNumber(metrics.urgent_priority_count),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.urgent_priority_count), total)),
       color: '#EF4444', // 红色
     },
     {
       label: '高',
-      value: metrics.high_priority_count || 0,
-      percentage: parseFloat(formatPercentage(metrics.high_priority_count || 0, total)),
+      value: toNumber(metrics.high_priority_count),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.high_priority_count), total)),
       color: '#F97316', // 橙色
     },
     {
       label: '中/低',
-      value: (metrics.medium_priority_count || 0) + (metrics.low_priority_count || 0),
-      percentage: parseFloat(formatPercentage((metrics.medium_priority_count || 0) + (metrics.low_priority_count || 0), total)),
+      value: toNumber(metrics.medium_priority_count) + toNumber(metrics.low_priority_count),
+      percentage: parseFloat(formatPercentage(
+        toNumber(metrics.medium_priority_count) + toNumber(metrics.low_priority_count),
+        total
+      )),
       color: '#9CA3AF', // 灰色
     },
   ];
@@ -186,20 +194,20 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   const salesMetrics: MetricItem[] = [
     {
       label: '复购潜力',
-      value: metrics.repurchase_potential_count || 0,
-      percentage: parseFloat(formatPercentage(metrics.repurchase_potential_count || 0, total)),
+      value: toNumber(metrics.repurchase_potential_count),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.repurchase_potential_count), total)),
       color: '#22C55E', // 绿色
     },
     {
       label: 'VIC客户',
-      value: metrics.total_vics || 0,
-      percentage: parseFloat(formatPercentage(metrics.total_vics || 0, total)),
+      value: toNumber(metrics.total_vics),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.total_vics), total)),
       color: '#8B5CF6', // 紫色
     },
     {
       label: 'SMOKER',
-      value: metrics.total_smokers || 0,
-      percentage: parseFloat(formatPercentage(metrics.total_smokers || 0, total)),
+      value: toNumber(metrics.total_smokers),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.total_smokers), total)),
       color: '#3B82F6', // 蓝色
     },
   ];
@@ -208,20 +216,20 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   const serviceMetrics: MetricItem[] = [
     {
       label: '负面情绪',
-      value: metrics.negative_sentiment_count || 0,
-      percentage: parseFloat(formatPercentage(metrics.negative_sentiment_count || 0, total)),
+      value: toNumber(metrics.negative_sentiment_count),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.negative_sentiment_count), total)),
       color: '#EF4444', // 红色
     },
     {
       label: '高流失风险',
-      value: metrics.high_churn_count || 0,
-      percentage: parseFloat(formatPercentage(metrics.high_churn_count || 0, total)),
+      value: toNumber(metrics.high_churn_count),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.high_churn_count), total)),
       color: '#F97316', // 橙色
     },
     {
       label: '中流失风险',
-      value: metrics.medium_churn_count || 0,
-      percentage: parseFloat(formatPercentage(metrics.medium_churn_count || 0, total)),
+      value: toNumber(metrics.medium_churn_count),
+      percentage: parseFloat(formatPercentage(toNumber(metrics.medium_churn_count), total)),
       color: '#FCD34D', // 黄色
     },
   ];

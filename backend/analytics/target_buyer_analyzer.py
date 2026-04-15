@@ -338,3 +338,70 @@ class TargetBuyerAnalyzer:
         """
 
         return self.db.execute_query(query, [rfm_segment, limit, offset])
+
+    def get_priority_customers(
+        self,
+        channel: Optional[Any] = None,
+        buyer_type: Optional[Any] = None,
+        follow_priority: Optional[Any] = None,
+        sentiment_label: Optional[Any] = None,
+        has_chat: Optional[str] = None,
+        use_default_filter: bool = True,
+        limit: int = 20,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        获取优先关注客户列表(带AI画像)
+
+        性能: < 1秒 (JOIN + 索引查询)
+
+        Args:
+            channel: 渠道筛选 (DTC/PFS) 或 列表
+            buyer_type: 买家类型筛选 (SMOKER/VIC/BOTH) 或 列表
+            follow_priority: 跟进优先级筛选 (紧急/高/中/低) 或 列表
+            sentiment_label: 情感标签筛选 (Positive/Neutral/Negative) 或 列表
+            has_chat: 聊天状态筛选 ('yes'/'no')
+            use_default_filter: 是否使用默认筛选 (follow_priority IN 紧急/高 OR sentiment_label = Negative)
+            limit: 返回数量
+            offset: 偏移量
+
+        Returns:
+            优先关注客户列表(包含AI画像)
+        """
+        return self.queries.get_priority_customers(
+            channel=channel,
+            buyer_type=buyer_type,
+            follow_priority=follow_priority,
+            sentiment_label=sentiment_label,
+            has_chat=has_chat,
+            use_default_filter=use_default_filter,
+            limit=limit,
+            offset=offset
+        )
+
+    def get_priority_customers_count(
+        self,
+        channel: Optional[Any] = None,
+        buyer_type: Optional[Any] = None,
+        follow_priority: Optional[Any] = None,
+        sentiment_label: Optional[Any] = None,
+        has_chat: Optional[str] = None,
+        use_default_filter: bool = True
+    ) -> int:
+        """
+        获取优先关注客户总数(用于分页)
+
+        Args:
+            同 get_priority_customers
+
+        Returns:
+            客户总数
+        """
+        return self.queries.get_priority_customers_count(
+            channel=channel,
+            buyer_type=buyer_type,
+            follow_priority=follow_priority,
+            sentiment_label=sentiment_label,
+            has_chat=has_chat,
+            use_default_filter=use_default_filter
+        )

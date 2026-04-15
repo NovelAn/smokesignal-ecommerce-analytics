@@ -18,7 +18,6 @@ import { MetricCards } from '../components/dashboard/MetricCards';
 import { KeywordAnalysisPanel } from '../components/dashboard/KeywordAnalysisPanel';
 import { PriorityAttentionBoard } from '../components/dashboard/PriorityAttentionBoard';
 import { SentimentCharts } from '../components/dashboard/SentimentCharts';
-import { ActionableCustomersResponse } from '../api/client';
 
 type TimeRange = '7d' | '15d' | '30d' | '90d' | '1y';
 
@@ -37,16 +36,6 @@ export const DashboardOverview: React.FC = () => {
   } = useDataFetchingWithRetry<DashboardMetrics>(
     () => apiClient.getDashboardMetrics(),
     2 // 重试2次
-  );
-
-  // ========== 获取可操作客户数据 ==========
-  const {
-    data: actionableCustomers,
-    isLoading: actionableLoading,
-    error: actionableError,
-  } = useDataFetchingWithRetry<ActionableCustomersResponse>(
-    () => apiClient.getActionableCustomers(50),
-    2
   );
 
   // ========== 事件处理 ==========
@@ -83,10 +72,6 @@ export const DashboardOverview: React.FC = () => {
 
       {/* Row 3: 重点关注客户看板 */}
       <PriorityAttentionBoard
-        actionableCustomers={actionableCustomers!}
-        isLoading={actionableLoading}
-        error={actionableError}
-        onRetry={() => window.location.reload()}
         onRowAction={handleRowAction}
       />
 
