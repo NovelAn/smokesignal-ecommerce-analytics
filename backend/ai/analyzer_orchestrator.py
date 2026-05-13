@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 from backend.ai.deepseek_client import DeepSeekClient
-from backend.ai.zhipu_client import ZhipuClient
+from backend.ai.minimax_client import MiniMaxClient
 from backend.ai.rule_based_analyzer import RuleBasedAnalyzer
 from backend.config import settings
 
@@ -175,10 +175,10 @@ class AnalyzerOrchestrator:
     分析器编排器 - 实现多级降级策略
 
     L1: DeepSeek-V3.2（主模型）
-        - 有聊天记录 → deepseek-reasoner（深度推理）
-        - 无聊天记录 → deepseek-chat（快速分析）
+        - 有聊天记录 → deepseek-v4-pro（深度推理）
+        - 无聊天记录 → deepseek-v4-flash（快速分析）
 
-    L2: Zhipu GLM-4.7（备选模型 - DeepSeek失败时降级）
+    L2: MiniMax M2.7（备选模型 - DeepSeek失败时降级）
         - 429错误（余额不足）时触发
         - Timeout时触发
         - 其他API异常时触发
@@ -193,7 +193,7 @@ class AnalyzerOrchestrator:
     def __init__(self):
         """初始化所有分析器"""
         self.deepseek = None
-        self.zhipu = None
+        self.minimax = None
         self.rule_based = RuleBasedAnalyzer()
         self.cache_manager = None
 
@@ -206,11 +206,11 @@ class AnalyzerOrchestrator:
             print(f"[Orchestrator] DeepSeek初始化失败: {e}")
 
         try:
-            if settings.zhipu_api_key:
-                self.zhipu = ZhipuClient()
-                print("[Orchestrator] Zhipu客户端初始化成功")
+            if settings.minimax_api_key:
+                self.minimax = MiniMaxClient()
+                print("[Orchestrator] MiniMax客户端初始化成功")
         except Exception as e:
-            print(f"[Orchestrator] Zhipu初始化失败: {e}")
+            print(f"[Orchestrator] MiniMax初始化失败: {e}")
 
         # 初始化缓存管理器
         try:
@@ -347,38 +347,38 @@ class AnalyzerOrchestrator:
                 if self._is_valid_analysis(result):
                     return self._cache_and_return(buyer_nick, profile, result)
                 else:
-                    print(f"[L1→L2] DeepSeek返回无效结果，降级到Zhipu GLM-4.7")
+                    print(f"[L1→L2] DeepSeek返回无效结果，降级到MiniMax M2.7")
                     result = None  # 重置result以便继续降级
 
             except TimeoutError:
-                print(f"[L1→L2] DeepSeek超时，降级到Zhipu GLM-4.7")
+                print(f"[L1→L2] DeepSeek超时，降级到MiniMax M2.7")
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "rate" in error_str or "quota" in error_str or "insufficient" in error_str or "余额" in error_str:
-                    print(f"[L1→L2] DeepSeek API余额不足(429)，降级到Zhipu GLM-4.7")
+                    print(f"[L1→L2] DeepSeek API余额不足(429)，降级到MiniMax M2.7")
                 else:
-                    print(f"[L1→L2] DeepSeek失败: {e}，降级到Zhipu GLM-4.7")
+                    print(f"[L1→L2] DeepSeek失败: {e}，降级到MiniMax M2.7")
 
-        # 策略2: Zhipu GLM-4.7（DeepSeek失败时降级）
-        if self.zhipu:
+        # 策略2: MiniMax M2.7（DeepSeek失败时降级）
+        if self.minimax:
             try:
                 if has_chats:
-                    print(f"[L2-Zhipu-GLM4.7] 使用Zhipu分析 {buyer_nick} (Fallback)")
+                    print(f"[L2-MiniMax-M2.7] 使用MiniMax分析 {buyer_nick} (Fallback)")
                 else:
-                    print(f"[L2-Zhipu-GLM4.7] 使用Zhipu分析 {buyer_nick} (Fallback，基于消费数据)")
+                    print(f"[L2-MiniMax-M2.7] 使用MiniMax分析 {buyer_nick} (Fallback，基于消费数据)")
 
-                result = self.zhipu.analyze_buyer_persona(
+                result = self.minimax.analyze_buyer_persona(
                     buyer_nick,
                     profile,
                     chats,
                     self._format_order_summary(orders)
                 )
-                result["analysis_method"] = "Zhipu-GLM"
+                result["analysis_method"] = "MiniMax-M2.7"
                 result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据(降级)"
                 return self._cache_and_return(buyer_nick, profile, result)
 
             except Exception as e:
-                print(f"[L2→L3] Zhipu失败: {e}，使用规则引擎")
+                print(f"[L2→L3] MiniMax失败: {e}，使用规则引擎")
 
         # 策略3: 规则引擎兜底
         print(f"[L3-Rule] 使用规则引擎分析 {buyer_nick}")

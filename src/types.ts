@@ -54,7 +54,7 @@ export interface CustomerProfile {
   // Demographics
   city: string;
   is_new_customer: boolean; // Deprecated: use client_monthly_tag
-  client_monthly_tag?: string; // Directly from DB: 'new' or 'old'
+  client_monthly_tag?: string; // Directly from DB: 'new' | 'active_old' | 'recall_old'
 
   // Lifetime Data
   historical_ltv: number;       // Total spend

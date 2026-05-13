@@ -34,6 +34,7 @@ async def get_all_buyers(
     channel: Optional[List[str]] = Query(None, description="渠道: DTC/PFS"),
     last_purchase_after: Optional[str] = Query(None, description="最后购买日期筛选 (YYYY-MM-DD)"),
     chat_status: Optional[str] = Query(None, description="聊天状态: chatted/no_chat"),
+    client_monthly_tag: Optional[List[str]] = Query(None, description="新老客标识: new/active_old/recall_old"),
     sort_by: str = Query('last_purchase', description="排序字段: last_purchase/l6m_netsales/vip_level"),
     limit: int = Query(100, ge=1, le=1000, description="返回数量"),
     offset: int = Query(0, ge=0, description="偏移量"),
@@ -51,6 +52,7 @@ async def get_all_buyers(
     - channel: 渠道 (DTC/PFS)
     - last_purchase_after: 最后购买日期筛选
     - chat_status: 聊天状态 (chatted/no_chat)
+    - client_monthly_tag: 新老客标识 (new/active_old/recall_old)
     - sort_by: 排序字段 (last_purchase/l6m_netsales/vip_level)
     """
     try:
@@ -61,6 +63,7 @@ async def get_all_buyers(
             channel=channel,
             last_purchase_after=last_purchase_after,
             chat_status=chat_status,
+            client_monthly_tag=client_monthly_tag,
             sort_by=sort_by,
             limit=limit,
             offset=offset,
@@ -77,7 +80,8 @@ async def get_buyers_count(
     vip_level: Optional[List[str]] = Query(None, description="VIP等级: V3/V2/V1/V0/Non-VIP"),
     channel: Optional[List[str]] = Query(None, description="渠道: DTC/PFS"),
     last_purchase_after: Optional[str] = Query(None, description="最后购买日期筛选 (YYYY-MM-DD)"),
-    chat_status: Optional[str] = Query(None, description="聊天状态: chatted/no_chat")
+    chat_status: Optional[str] = Query(None, description="聊天状态: chatted/no_chat"),
+    client_monthly_tag: Optional[List[str]] = Query(None, description="新老客标识: new/active_old/recall_old")
 ) -> Dict[str, Any]:
     try:
         total = analyzer.get_buyers_count(
@@ -85,7 +89,8 @@ async def get_buyers_count(
             vip_level=vip_level,
             channel=channel,
             last_purchase_after=last_purchase_after,
-            chat_status=chat_status
+            chat_status=chat_status,
+            client_monthly_tag=client_monthly_tag
         )
         return {"total": total}
     except Exception as e:
@@ -322,7 +327,7 @@ async def get_ai_system_status() -> Dict[str, Any]:
         # 检查模型可用性
         models = {
             "deepseek_available": bool(settings.deepseek_api_key),
-            "zhipu_available": bool(settings.zhipu_api_key)
+            "minimax_available": bool(settings.minimax_api_key)
         }
 
         return {
@@ -634,12 +639,14 @@ async def export_priority_customers_csv(
 async def get_buyer_orders(
     user_nick: str,
     time_range: str = Query('1y', description="时间范围: 7d/15d/30d/90d/1y/all"),
-    limit: int = Query(50, ge=1, le=1000)
+    limit: int = Query(50, ge=1, le=5000)
 ) -> List[Dict[str, Any]]:
     """
-    获取买家订单历史(使用订单明细预计算表 - 超快!)
+    获取买家订单历史
 
-    性能: < 0.5秒 (使用索引查询)
+    策略:
+    - time_range='all': 直接查询VIEW确保数据完整性
+    - 其他时间范围: 使用预计算表(更快)
 
     支持的时间范围:
     - 7d: 近7天
@@ -647,14 +654,13 @@ async def get_buyer_orders(
     - 30d: 近30天
     - 90d: 近90天
     - 1y: 近1年(默认)
-    - all: 全部历史
+    - all: 全部历史(从VIEW查询，确保数据完整)
     """
     try:
         from backend.database import Database
         from backend.config import settings
         import pymysql
 
-        # 默认使用aliyunDB数据库
         db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
         db = Database(db_name=db_name)
 
@@ -670,19 +676,34 @@ async def get_buyer_orders(
 
         time_condition = time_conditions.get(time_range, time_conditions['1y'])
 
-        # 使用订单明细预计算表查询
-        query = f"""
-            SELECT
-                订单号, 子订单号, 商品名称, category as category,
-                成交总金额, 退款金额, 退款类型,
-                FP_MD, 图片地址, 最后付款时间, 件数,
-                (成交总金额 - IFNULL(退款金额, 0)) as netsales
-            FROM target_buyer_orders
-            WHERE 买家昵称 = %s
-              {time_condition}
-            ORDER BY 最后付款时间 DESC
-            LIMIT %s
-        """
+        if time_range == 'all':
+            # 查询VIEW确保完整的历史数据
+            query = f"""
+                SELECT
+                    订单号, 子订单号, 商品名称, category,
+                    成交总金额, 退款金额, 退款类型,
+                    FP_MD, 图片地址, 最后付款时间, 件数,
+                    (成交总金额 - IFNULL(退款金额, 0)) as netsales
+                FROM dunhill_t01_trade_line
+                WHERE 买家昵称 = %s
+                  AND 买家昵称 IS NOT NULL AND 买家昵称 != ''
+                ORDER BY 最后付款时间 DESC, 子订单号 ASC
+                LIMIT %s
+            """
+        else:
+            # 使用预计算表查询(更快)
+            query = f"""
+                SELECT
+                    订单号, 子订单号, 商品名称, category as category,
+                    成交总金额, 退款金额, 退款类型,
+                    FP_MD, 图片地址, 最后付款时间, 件数,
+                    (成交总金额 - IFNULL(退款金额, 0)) as netsales
+                FROM target_buyer_orders
+                WHERE 买家昵称 = %s
+                  {time_condition}
+                ORDER BY 最后付款时间 DESC, 子订单号 ASC
+                LIMIT %s
+            """
 
         params = [user_nick, limit]
         orders = db.execute_query(query, params)
@@ -1151,13 +1172,13 @@ async def analyze_buyer_async(
         query, params = BuyerQueries.get_chat_messages(user_nick, limit=30)
         chats = db.execute_query(query, params)
 
-        # 3. 获取订单记录
+        # 3. 获取订单记录(从VIEW获取完整数据)
         orders_query = """
             SELECT
                 订单号, 商品名称 as commodity_name, category,
                 成交总金额 as payment, 退款金额, 退款类型 as refund_status,
                 最后付款时间 as pay_time
-            FROM target_buyer_orders
+            FROM dunhill_t01_trade_line
             WHERE 买家昵称 = %s
             ORDER BY 最后付款时间 DESC
             LIMIT 50
@@ -1341,16 +1362,21 @@ async def export_buyer_orders_excel(
 
         time_condition = time_conditions.get(time_range, time_conditions['all'])
 
+        if time_range == 'all':
+            table = 'dunhill_t01_trade_line'
+        else:
+            table = 'target_buyer_orders'
+
         query = f"""
             SELECT
                 订单号, 子订单号, 商品名称, category as 品类,
                 成交总金额, 退款金额, 退款类型,
                 FP_MD, 最后付款时间, 件数,
                 (成交总金额 - IFNULL(退款金额, 0)) as 净销售额
-            FROM target_buyer_orders
+            FROM {table}
             WHERE 买家昵称 = %s
               {time_condition}
-            ORDER BY 最后付款时间 DESC
+            ORDER BY 最后付款时间 DESC, 子订单号 ASC
         """
 
         orders = db.execute_query(query, [user_nick])

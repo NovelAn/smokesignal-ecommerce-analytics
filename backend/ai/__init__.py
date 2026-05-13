@@ -1,6 +1,6 @@
 """
-Zhipu AI integration for buyer analysis
+MiniMax AI integration for buyer analysis (fallback model)
 """
-from .zhipu_client import ZhipuClient
+from .minimax_client import MiniMaxClient
 
-__all__ = ["ZhipuClient"]
+__all__ = ["MiniMaxClient"]

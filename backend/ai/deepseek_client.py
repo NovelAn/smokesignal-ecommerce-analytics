@@ -70,9 +70,9 @@ class DeepSeekClient:
             http_client=http_client
         )
         # DeepSeek-V3.2 统一模型，分场景使用 chat 和 reasoner
-        self.base_model = getattr(settings, 'deepseek_model', 'DeepSeek-V3.2')
-        self.model_reasoner = 'deepseek-reasoner'  # 有聊天记录时使用（深度推理）
-        self.model_chat = 'deepseek-chat'  # 无聊天记录时使用（快速分析）
+        self.base_model = getattr(settings, 'deepseek_model', 'DeepSeek-V4')
+        self.model_reasoner = 'deepseek-v4-pro'  # 有聊天记录时使用（深度推理）
+        self.model_chat = 'deepseek-v4-flash'  # 无聊天记录时使用（快速分析）
 
     def analyze_buyer_persona(
         self,

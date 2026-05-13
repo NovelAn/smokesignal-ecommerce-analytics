@@ -37,6 +37,7 @@ class TargetBuyerAnalyzer:
         channel: Optional[Any] = None,
         last_purchase_after: Optional[str] = None,
         chat_status: Optional[str] = None,
+        client_monthly_tag: Optional[Any] = None,
         sort_by: str = 'last_purchase',
         limit: int = 100,
         offset: int = 0,
@@ -49,11 +50,12 @@ class TargetBuyerAnalyzer:
 
         Args:
             search: 昵称模糊搜索
-            buyer_type: 买家类型筛选 (SMOKER/VIC/BOTH) 或 列表
+            buyer_type: 买家类型筛选 (SMOKER/VIC/BOTH/SEASON/BULK) 或 列表
             vip_level: VIP等级筛选 (V3/V2/V1/V0/Non-VIP) 或 列表
             channel: 渠道筛选 (DTC/PFS) 或 列表
             last_purchase_after: 最后购买日期筛选 (YYYY-MM-DD)
             chat_status: 聊天状态筛选 ('chatted'/'no_chat')
+            client_monthly_tag: 新老客标识筛选 ('new'/'active_old'/'recall_old') 或 列表
             sort_by: 排序字段 (last_purchase/l6m_netsales/vip_level)
             limit: 返回数量
             offset: 偏移量
@@ -69,6 +71,7 @@ class TargetBuyerAnalyzer:
             channel=channel,
             last_purchase_after=last_purchase_after,
             chat_status=chat_status,
+            client_monthly_tag=client_monthly_tag,
             sort_by=sort_by,
             limit=limit,
             offset=offset
@@ -82,7 +85,8 @@ class TargetBuyerAnalyzer:
                 vip_level=vip_level,
                 channel=channel,
                 last_purchase_after=last_purchase_after,
-                chat_status=chat_status
+                chat_status=chat_status,
+                client_monthly_tag=client_monthly_tag
             )
 
         return {
@@ -112,14 +116,16 @@ class TargetBuyerAnalyzer:
         vip_level: Optional[Any] = None,
         channel: Optional[Any] = None,
         last_purchase_after: Optional[str] = None,
-        chat_status: Optional[str] = None
+        chat_status: Optional[str] = None,
+        client_monthly_tag: Optional[Any] = None
     ) -> int:
         return self.queries.get_target_buyers_count(
             buyer_type=buyer_type,
             vip_level=vip_level,
             channel=channel,
             last_purchase_after=last_purchase_after,
-            chat_status=chat_status
+            chat_status=chat_status,
+            client_monthly_tag=client_monthly_tag
         )
 
     def get_dashboard_metrics(self) -> Dict[str, Any]:

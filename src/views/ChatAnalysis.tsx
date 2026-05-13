@@ -162,12 +162,16 @@ const ChatAnalysis: React.FC = () => {
   const [pendingChannelFilter, setPendingChannelFilter] = useState<('DTC' | 'PFS')[]>([]);
   const [pendingBuyerTypeFilter, setPendingBuyerTypeFilter] = useState<('SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK')[]>([]);
   const [pendingDateRangeFilter, setPendingDateRangeFilter] = useState<DateRangeFilter>('LAST_1_YEAR');
+  const [pendingClientTagFilter, setPendingClientTagFilter] = useState<'new' | 'active_old' | 'recall_old' | ''>('');
+  const [pendingChatStatusFilter, setPendingChatStatusFilter] = useState<'chatted' | 'no_chat' | ''>('');
   const [showFilters, setShowFilters] = useState(false);
 
   // Applied filter states (actually used for API calls)
   const [appliedChannelFilter, setAppliedChannelFilter] = useState<('DTC' | 'PFS')[]>([]);
   const [appliedBuyerTypeFilter, setAppliedBuyerTypeFilter] = useState<('SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK')[]>([]);
   const [appliedDateRangeFilter, setAppliedDateRangeFilter] = useState<DateRangeFilter>('LAST_1_YEAR');
+  const [appliedClientTagFilter, setAppliedClientTagFilter] = useState<'new' | 'active_old' | 'recall_old' | ''>('');
+  const [appliedChatStatusFilter, setAppliedChatStatusFilter] = useState<'chatted' | 'no_chat' | ''>('');
 
   // Order history pagination
   const [orderCurrentPage, setOrderCurrentPage] = useState(1);
@@ -182,17 +186,21 @@ const ChatAnalysis: React.FC = () => {
     if (pendingChannelFilter.length > 0) count++;
     if (pendingBuyerTypeFilter.length > 0) count++;
     if (pendingDateRangeFilter !== 'LAST_1_YEAR') count++;
+    if (pendingClientTagFilter !== '') count++;
+    if (pendingChatStatusFilter !== '') count++;
     return count;
-  }, [pendingChannelFilter, pendingBuyerTypeFilter, pendingDateRangeFilter]);
+  }, [pendingChannelFilter, pendingBuyerTypeFilter, pendingDateRangeFilter, pendingClientTagFilter, pendingChatStatusFilter]);
 
   // Calculate active filter count for badge (actually applied filters)
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (appliedChannelFilter.length > 0) count++;
     if (appliedBuyerTypeFilter.length > 0) count++;
-    if (appliedDateRangeFilter !== 'LAST_1_YEAR') count++; // Only count non-default date range
+    if (appliedDateRangeFilter !== 'LAST_1_YEAR') count++;
+    if (appliedClientTagFilter !== '') count++;
+    if (appliedChatStatusFilter !== '') count++;
     return count;
-  }, [appliedChannelFilter, appliedBuyerTypeFilter, appliedDateRangeFilter]);
+  }, [appliedChannelFilter, appliedBuyerTypeFilter, appliedDateRangeFilter, appliedClientTagFilter, appliedChatStatusFilter]);
 
   // Check if pending filters differ from applied filters
   const hasPendingChanges = useMemo(() => {
@@ -202,14 +210,18 @@ const ChatAnalysis: React.FC = () => {
     const appliedBuyerStr = JSON.stringify(appliedBuyerTypeFilter.sort());
     return pendingChannelStr !== appliedChannelStr
       || pendingBuyerStr !== appliedBuyerStr
-      || pendingDateRangeFilter !== appliedDateRangeFilter;
-  }, [pendingChannelFilter, appliedChannelFilter, pendingBuyerTypeFilter, appliedBuyerTypeFilter, pendingDateRangeFilter, appliedDateRangeFilter]);
+      || pendingDateRangeFilter !== appliedDateRangeFilter
+      || pendingClientTagFilter !== appliedClientTagFilter
+      || pendingChatStatusFilter !== appliedChatStatusFilter;
+  }, [pendingChannelFilter, appliedChannelFilter, pendingBuyerTypeFilter, appliedBuyerTypeFilter, pendingDateRangeFilter, appliedDateRangeFilter, pendingClientTagFilter, appliedClientTagFilter, pendingChatStatusFilter, appliedChatStatusFilter]);
 
   // Apply pending filters
   const handleApplyFilters = () => {
     setAppliedChannelFilter([...pendingChannelFilter]);
     setAppliedBuyerTypeFilter([...pendingBuyerTypeFilter]);
     setAppliedDateRangeFilter(pendingDateRangeFilter);
+    setAppliedClientTagFilter(pendingClientTagFilter);
+    setAppliedChatStatusFilter(pendingChatStatusFilter);
   };
 
   // Clear all filters (both pending and applied)
@@ -217,9 +229,13 @@ const ChatAnalysis: React.FC = () => {
     setPendingChannelFilter([]);
     setPendingBuyerTypeFilter([]);
     setPendingDateRangeFilter('LAST_1_YEAR');
+    setPendingClientTagFilter('');
+    setPendingChatStatusFilter('');
     setAppliedChannelFilter([]);
     setAppliedBuyerTypeFilter([]);
     setAppliedDateRangeFilter('LAST_1_YEAR');
+    setAppliedClientTagFilter('');
+    setAppliedChatStatusFilter('');
   };
 
   // Track open states for chat dates. Default empty.
@@ -230,13 +246,15 @@ const ChatAnalysis: React.FC = () => {
     () => apiClient.getBuyers({
       limit: 100,
       sort_by: 'last_purchase',
-      search: searchTerm || undefined, // 添加搜索参数，由后端进行搜索
+      search: searchTerm || undefined,
       channel: appliedChannelFilter.length > 0 ? appliedChannelFilter : undefined,
       buyer_type: appliedBuyerTypeFilter.length > 0 ? appliedBuyerTypeFilter : undefined,
       last_purchase_after: calculateLastPurchaseAfter(appliedDateRangeFilter),
+      chat_status: appliedChatStatusFilter || undefined,
+      client_monthly_tag: appliedClientTagFilter ? [appliedClientTagFilter] : undefined,
     }),
     2,
-    [appliedChannelFilter, appliedBuyerTypeFilter, appliedDateRangeFilter, searchTerm] // 添加searchTerm依赖
+    [appliedChannelFilter, appliedBuyerTypeFilter, appliedDateRangeFilter, appliedClientTagFilter, appliedChatStatusFilter, searchTerm]
   );
 
   const { data: buyersCountData, isLoading: buyersCountLoading } = useDataFetchingWithRetry(
@@ -244,9 +262,11 @@ const ChatAnalysis: React.FC = () => {
       channel: appliedChannelFilter.length > 0 ? appliedChannelFilter : undefined,
       buyer_type: appliedBuyerTypeFilter.length > 0 ? appliedBuyerTypeFilter : undefined,
       last_purchase_after: calculateLastPurchaseAfter(appliedDateRangeFilter),
+      chat_status: appliedChatStatusFilter || undefined,
+      client_monthly_tag: appliedClientTagFilter ? [appliedClientTagFilter] : undefined,
     }),
     1,
-    [appliedChannelFilter, appliedBuyerTypeFilter, appliedDateRangeFilter]
+    [appliedChannelFilter, appliedBuyerTypeFilter, appliedDateRangeFilter, appliedClientTagFilter, appliedChatStatusFilter]
   );
 
   // 转换API数据为Session格式
@@ -261,7 +281,7 @@ const ChatAnalysis: React.FC = () => {
           user_nick: userNick,
           avatar_color: `bg-${['blue', 'green', 'orange', 'purple'][Math.floor(Math.random() * 4)]}-200 text-${['blue', 'green', 'orange', 'purple'][Math.floor(Math.random() * 4)]}-800`,
           city: buyer.city || 'Unknown',
-          is_new_customer: buyer.buyer_type === 'SMOKER', // 简化判断
+          is_new_customer: buyer.client_monthly_tag === 'new',
           historical_ltv: Number(buyer.historical_gmv || buyer.historical_net_sales || 0),
           historical_gmv: Number(buyer.historical_gmv || 0),
           historical_refund: Number(buyer.historical_refund || 0),
@@ -343,7 +363,7 @@ const ChatAnalysis: React.FC = () => {
       // 同时获取订单历史和聊天记录
       try {
         const [ordersRaw, chatsRaw] = await Promise.all([
-          apiClient.getBuyerOrders(currentSession.user_nick, 50),
+          apiClient.getBuyerOrders(currentSession.user_nick, 500),
           apiClient.getBuyerChats(currentSession.user_nick, 100)
         ]);
 
@@ -794,6 +814,35 @@ const ChatAnalysis: React.FC = () => {
                         <option value="LAST_6_MONTH">近6个月</option>
                         <option value="LAST_2_YEAR">近2年</option>
                         <option value="ALL">全部时间</option>
+                      </select>
+                    </div>
+
+                    {/* Customer Type Filter (New/Old) */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-notion-muted uppercase tracking-wider block mb-1">客户类型</label>
+                      <select
+                        value={pendingClientTagFilter}
+                        onChange={(e) => setPendingClientTagFilter(e.target.value as 'new' | 'active_old' | 'recall_old' | '')}
+                        className="w-full bg-notion-gray_bg border border-notion-border text-notion-text text-xs rounded px-2 py-1.5 focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                      >
+                        <option value="">全部</option>
+                        <option value="new">新客户</option>
+                        <option value="active_old">活跃老客户</option>
+                        <option value="recall_old">唤醒老客户</option>
+                      </select>
+                    </div>
+
+                    {/* Chat Status Filter */}
+                    <div>
+                      <label className="text-[10px] font-semibold text-notion-muted uppercase tracking-wider block mb-1">聊天记录</label>
+                      <select
+                        value={pendingChatStatusFilter}
+                        onChange={(e) => setPendingChatStatusFilter(e.target.value as 'chatted' | 'no_chat' | '')}
+                        className="w-full bg-notion-gray_bg border border-notion-border text-notion-text text-xs rounded px-2 py-1.5 focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                      >
+                        <option value="">全部</option>
+                        <option value="chatted">有聊天记录</option>
+                        <option value="no_chat">无聊天记录</option>
                       </select>
                     </div>
 

@@ -68,6 +68,7 @@ class TargetBuyerQueries:
         channel: Optional[Any] = None,
         last_purchase_after: Optional[str] = None,
         chat_status: Optional[str] = None,
+        client_monthly_tag: Optional[Any] = None,
         sort_by: str = 'last_purchase',
         limit: int = 100,
         offset: int = 0
@@ -147,6 +148,15 @@ class TargetBuyerQueries:
             # 移除所有聊天相关的条件
             conditions_to_remove.append("AND last_chat_date IS NOT NULL AND %(chat_status)s = 'chatted'")
             conditions_to_remove.append("AND last_chat_date IS NULL AND %(chat_status)s = 'no_chat'")
+
+        # 处理新老客标识筛选
+        if not client_monthly_tag:
+            conditions_to_remove.append('AND client_monthly_tag IN %(client_monthly_tag)s')
+        else:
+            if isinstance(client_monthly_tag, (list, tuple)):
+                params['client_monthly_tag'] = tuple(client_monthly_tag)
+            else:
+                params['client_monthly_tag'] = (client_monthly_tag,)
 
         # 移除不需要的WHERE条件
         for condition in conditions_to_remove:
@@ -331,7 +341,8 @@ class TargetBuyerQueries:
         vip_level: Optional[Any] = None,
         channel: Optional[Any] = None,
         last_purchase_after: Optional[str] = None,
-        chat_status: Optional[str] = None
+        chat_status: Optional[str] = None,
+        client_monthly_tag: Optional[Any] = None
     ) -> int:
         """
         获取目标买家总数(用于分页)
@@ -342,6 +353,7 @@ class TargetBuyerQueries:
             channel: 渠道筛选
             last_purchase_after: 最后购买日期筛选
             chat_status: 聊天状态筛选
+            client_monthly_tag: 新老客标识筛选
 
         Returns:
             买家总数
@@ -353,9 +365,9 @@ class TargetBuyerQueries:
         # 始终排除 SC/FF Flag 客户
         where_clauses.append("""
             NOT EXISTS (
-                SELECT 1 
-                FROM target_buyer_orders tbo 
-                WHERE tbo.买家昵称 = target_buyers_precomputed.buyer_nick 
+                SELECT 1
+                FROM target_buyer_orders tbo
+                WHERE tbo.买家昵称 = target_buyers_precomputed.buyer_nick
                 AND (tbo.sc_flag = 1 OR tbo.ff_flag = 1)
             )
         """)
@@ -395,6 +407,15 @@ class TargetBuyerQueries:
             where_clauses.append("last_chat_date IS NOT NULL")
         elif chat_status == 'no_chat':
             where_clauses.append("last_chat_date IS NULL")
+
+        if client_monthly_tag:
+            if isinstance(client_monthly_tag, (list, tuple)):
+                placeholders = ', '.join(['%s'] * len(client_monthly_tag))
+                where_clauses.append(f"client_monthly_tag IN ({placeholders})")
+                params.extend(client_monthly_tag)
+            else:
+                where_clauses.append("client_monthly_tag = %s")
+                params.append(client_monthly_tag)
 
         where_sql = "WHERE " + " AND ".join(where_clauses)
 

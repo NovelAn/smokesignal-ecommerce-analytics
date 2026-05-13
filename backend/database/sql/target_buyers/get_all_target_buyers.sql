@@ -35,6 +35,7 @@ WHERE 1=1
     [[AND last_purchase_date >= %(last_purchase_after)s]]
     [[AND last_chat_date IS NOT NULL AND %(chat_status)s = 'chatted']]
     [[AND last_chat_date IS NULL AND %(chat_status)s = 'no_chat']]
+    [[AND client_monthly_tag IN %(client_monthly_tag)s]]
     AND NOT EXISTS (
         SELECT 1 
         FROM target_buyer_orders tbo 

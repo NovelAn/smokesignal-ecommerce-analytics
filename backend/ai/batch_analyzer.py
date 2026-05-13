@@ -9,7 +9,7 @@ Batch Analyzer - 批量AI情绪/意图分析
 功能:
 1. 增量更新: 只分析有新增聊天记录的客户
 2. 智能限流: 每分钟最多20次API调用
-3. 多级降级: 智谱GLM-4.7 → DeepSeek → 规则引擎
+3. 多级降级: MiniMax M2.7 → DeepSeek → 规则引擎
 4. 批量处理: 每批20个客户
 """
 import json
@@ -112,12 +112,12 @@ class BatchAnalyzer:
     def _init_ai_clients(self):
         """Initialize AI clients with fallback chain"""
         try:
-            from backend.ai.zhipu_client import ZhipuClient
-            self.zhipu_client = ZhipuClient()
-            logger.info("[BatchAnalyzer] ZhipuClient initialized")
+            from backend.ai.minimax_client import MiniMaxClient
+            self.minimax_client = MiniMaxClient()
+            logger.info("[BatchAnalyzer] MiniMaxClient initialized")
         except Exception as e:
-            logger.warning(f"[BatchAnalyzer] Failed to init ZhipuClient: {e}")
-            self.zhipu_client = None
+            logger.warning(f"[BatchAnalyzer] Failed to init MiniMaxClient: {e}")
+            self.minimax_client = None
 
         try:
             from backend.ai.deepseek_client import DeepSeekClient
@@ -238,21 +238,21 @@ class BatchAnalyzer:
             "analyzed_at": datetime.now()
         }
 
-        # Try Zhipu first (preferred)
-        if self.zhipu_client:
+        # Try MiniMax first (preferred)
+        if self.minimax_client:
             try:
                 self.rate_limiter.wait()
-                logger.debug(f"[BatchAnalyzer] Analyzing {buyer_nick} with Zhipu")
+                logger.debug(f"[BatchAnalyzer] Analyzing {buyer_nick} with MiniMax")
 
                 # Sentiment analysis
-                sentiment_results = self.zhipu_client.analyze_sentiment_batch(buyer_messages[:20])
+                sentiment_results = self.minimax_client.analyze_sentiment_batch(buyer_messages[:20])
 
                 # Check if all results are neutral (indicates API fallback)
                 all_neutral = all(r.get('sentiment') == 'Neutral' and r.get('score') == 0.5 for r in sentiment_results)
 
                 if all_neutral:
-                    logger.info(f"[BatchAnalyzer] Zhipu returned defaults for {buyer_nick}, falling through to DeepSeek")
-                    raise Exception("Zhipu returned default values, trying DeepSeek fallback")
+                    logger.info(f"[BatchAnalyzer] MiniMax returned defaults for {buyer_nick}, falling through to DeepSeek")
+                    raise Exception("MiniMax returned default values, trying DeepSeek fallback")
 
                 # Calculate average sentiment
                 if sentiment_results:
@@ -275,12 +275,12 @@ class BatchAnalyzer:
 
                 # Intent analysis
                 self.rate_limiter.wait()
-                intent_dist = self.zhipu_client.extract_intent_distribution(buyer_messages)
+                intent_dist = self.minimax_client.extract_intent_distribution(buyer_messages)
 
                 # Check if intent distribution is all zeros (indicates API fallback)
                 if all(v == 0 for v in intent_dist.values()):
-                    logger.info(f"[BatchAnalyzer] Zhipu intent failed for {buyer_nick}, falling through to DeepSeek")
-                    raise Exception("Zhipu intent analysis failed, trying DeepSeek fallback")
+                    logger.info(f"[BatchAnalyzer] MiniMax intent failed for {buyer_nick}, falling through to DeepSeek")
+                    raise Exception("MiniMax intent analysis failed, trying DeepSeek fallback")
 
                 result['intent_distribution'] = intent_dist
 
@@ -290,7 +290,7 @@ class BatchAnalyzer:
                 else:
                     result['dominant_intent'] = 'Unknown'
 
-                result['sentiment_method'] = 'zhipu_glm4'
+                result['sentiment_method'] = 'minimax_m27'
                 result['complaint_count'] = intent_dist.get('Complaint', 0)
 
                 # Calculate pre_sale_score and post_sale_score from intent_distribution
@@ -305,7 +305,7 @@ class BatchAnalyzer:
                 return result
 
             except Exception as e:
-                logger.warning(f"[BatchAnalyzer] Zhipu failed for {buyer_nick}: {e}")
+                logger.warning(f"[BatchAnalyzer] MiniMax failed for {buyer_nick}: {e}")
 
         # Fallback to DeepSeek
         if self.deepseek_client:

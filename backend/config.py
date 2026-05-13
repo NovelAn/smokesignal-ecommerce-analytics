@@ -15,14 +15,15 @@ class Settings(BaseSettings):
     # Specify which database name to use from the config
     db_name_to_use: str = os.getenv("DB_NAME_TO_USE", "")
 
-    # Zhipu AI
-    zhipu_api_key: str = os.getenv("ZHIPU_API_KEY", "")
-    zhipu_model: str = os.getenv("ZHIPU_MODEL", "glm-4-plus")
+    # MiniMax AI (Fallback)
+    minimax_api_key: str = os.getenv("MINIMAX_API_KEY", "")
+    minimax_model: str = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
+    minimax_base_url: str = os.getenv("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
 
     # DeepSeek AI
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
-    deepseek_model_r1: str = os.getenv("DEEPSEEK_MODEL_R1", "deepseek-reasoner")
-    deepseek_model_chat: str = os.getenv("DEEPSEEK_MODEL_CHAT", "deepseek-chat")
+    deepseek_model_r1: str = os.getenv("DEEPSEEK_MODEL_R1", "deepseek-v4-pro")
+    deepseek_model_chat: str = os.getenv("DEEPSEEK_MODEL_CHAT", "deepseek-v4-flash")
     deepseek_temperature_evidence: float = float(os.getenv("DEEPSEEK_TEMP_EVIDENCE", "0.3"))
     deepseek_temperature_inference: float = float(os.getenv("DEEPSEEK_TEMP_INFERENCE", "0.7"))
 

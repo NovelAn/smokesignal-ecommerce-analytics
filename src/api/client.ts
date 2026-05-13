@@ -12,6 +12,8 @@ type BuyersQueryParams = {
   vip_level?: 'V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP' | ('V3' | 'V2' | 'V1' | 'V0' | 'Non-VIP')[];
   channel?: 'DTC' | 'PFS' | ('DTC' | 'PFS')[];
   last_purchase_after?: string;
+  chat_status?: 'chatted' | 'no_chat';
+  client_monthly_tag?: 'new' | 'active_old' | 'recall_old' | ('new' | 'active_old' | 'recall_old')[];
 };
 
 /**
@@ -77,6 +79,11 @@ export const apiClient = {
       channels.forEach((item) => queryParams.append('channel', item));
     }
     if (params.last_purchase_after) queryParams.append('last_purchase_after', params.last_purchase_after);
+    if (params.chat_status) queryParams.append('chat_status', params.chat_status);
+    if (params.client_monthly_tag) {
+      const tags = Array.isArray(params.client_monthly_tag) ? params.client_monthly_tag : [params.client_monthly_tag];
+      tags.forEach((item) => queryParams.append('client_monthly_tag', item));
+    }
     queryParams.append('sort_by', params.sort_by || 'last_purchase');
     queryParams.append('limit', String(params.limit || 100));
     queryParams.append('offset', String(params.offset || 0));
@@ -111,6 +118,11 @@ export const apiClient = {
     }
     if (params.last_purchase_after) queryParams.append('last_purchase_after', params.last_purchase_after);
     if (params.search) queryParams.append('search', params.search);
+    if (params.chat_status) queryParams.append('chat_status', params.chat_status);
+    if (params.client_monthly_tag) {
+      const tags = Array.isArray(params.client_monthly_tag) ? params.client_monthly_tag : [params.client_monthly_tag];
+      tags.forEach((item) => queryParams.append('client_monthly_tag', item));
+    }
     const response = await fetch(`${API_BASE}/buyers/count?${queryParams}`);
     return handleResponse<BuyersCountResponse>(response);
   },
@@ -132,7 +144,7 @@ export const apiClient = {
    * @param limit 返回数量限制
    * @param timeRange 时间范围: 7d/15d/30d/90d/1y/all (默认 'all' 获取全部历史)
    */
-  getBuyerOrders: async (userNick: string, limit = 50, timeRange = 'all') => {
+  getBuyerOrders: async (userNick: string, limit = 500, timeRange = 'all') => {
     const response = await fetch(`${API_BASE}/buyers/${encodeURIComponent(userNick)}/orders?limit=${limit}&time_range=${timeRange}`);
     return handleResponse<OrderRecord[]>(response);
   },
@@ -561,7 +573,7 @@ export interface BuyerProfile {
   buyer_nick: string;
   vip_level: string;
   city: string;
-  client_monthly_tag: 'new' | 'old';
+  client_monthly_tag: 'new' | 'active_old' | 'recall_old';
   buyer_type: 'SMOKER' | 'VIC' | 'BOTH' | 'SEASON' | 'BULK';
   channel: 'DTC' | 'PFS';
 

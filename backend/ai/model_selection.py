@@ -12,13 +12,13 @@ def select_ai_model(
     vip_level: str,
     budget_remaining: float,
     has_orders: bool = True
-) -> Literal["deepseek-r1", "deepseek-chat", "zhipu"]:
+) -> Literal["deepseek-r1", "deepseek-chat", "minimax"]:
     """
     智能选择AI模型 - 基于复杂度和成本
 
     策略:
-    1. 无聊天记录 → Zhipu (免费, 基于消费数据)
-    2. 低复杂度 (< 10条聊天) → Zhipu (免费)
+    1. 无聊天记录 → MiniMax (低成本, 基于消费数据)
+    2. 低复杂度 (< 10条聊天) → MiniMax (低成本)
     3. 中等复杂度 (10-20条聊天) → DeepSeek-Chat (¥3)
     4. 高复杂度 (> 20条聊天) → DeepSeek-R1 (¥7)
     5. VIC客户 → 始终使用DeepSeek-R1 (最高质量)
@@ -31,31 +31,31 @@ def select_ai_model(
         has_orders: 是否有订单记录
 
     Returns:
-        模型名称: "deepseek-r1", "deepseek-chat", "zhipu"
+        模型名称: "deepseek-r1", "deepseek-chat", "minimax"
     """
     # VIC客户（V3/V2）始终使用R1，除非预算不足
     if is_vic and vip_level in ["V3", "V2"]:
         if budget_remaining < 7:
-            print(f"[Model Selection] VIC客户但预算不足 (¥{budget_remaining:.2f})，降级到Zhipu")
-            return "zhipu"
+            print(f"[Model Selection] VIC客户但预算不足 (¥{budget_remaining:.2f})，降级到MiniMax")
+            return "minimax"
         print(f"[Model Selection] VIC客户 ({vip_level})，使用DeepSeek-R1")
         return "deepseek-r1"
 
     # 无聊天记录 → Zhipu（免费，基于消费数据即可）
     if chat_count == 0:
-        print(f"[Model Selection] 无聊天记录，使用Zhipu (免费)")
-        return "zhipu"
+        print(f"[Model Selection] 无聊天记录，使用MiniMax (低成本)")
+        return "minimax"
 
-    # 低复杂度 (< 10条聊天) → Zhipu
+    # 低复杂度 (< 10条聊天) → MiniMax
     if chat_count < 10:
-        print(f"[Model Selection] 低复杂度 ({chat_count}条聊天)，使用Zhipu (免费)")
-        return "zhipu"
+        print(f"[Model Selection] 低复杂度 ({chat_count}条聊天)，使用MiniMax (低成本)")
+        return "minimax"
 
     # 中等复杂度 (10-20条聊天) → DeepSeek-Chat (¥3)
     if chat_count <= 20:
         if budget_remaining < 3:
-            print(f"[Model Selection] 预算不足 (¥{budget_remaining:.2f})，降级到Zhipu")
-            return "zhipu"
+            print(f"[Model Selection] 预算不足 (¥{budget_remaining:.2f})，降级到MiniMax")
+            return "minimax"
         print(f"[Model Selection] 中等复杂度 ({chat_count}条聊天)，使用DeepSeek-Chat (¥3)")
         return "deepseek-chat"
 
@@ -88,7 +88,7 @@ def estimate_cost(
     pricing = {
         "deepseek-r1": {"input": 1.0, "output": 2.0},
         "deepseek-chat": {"input": 1.0, "output": 2.0},
-        "zhipu": {"input": 0.0, "output": 0.0}  # Zhipu免费（有月度套餐）
+        "minimax": {"input": 0.0, "output": 0.0}  # MiniMax低成本
     }
 
     if model not in pricing:
@@ -122,7 +122,7 @@ def get_model_selection_reason(
     reasons = {
         "deepseek-r1": "VIC客户或高复杂度分析（>20条聊天），需要深度推理",
         "deepseek-chat": "中等复杂度分析（10-20条聊天），平衡成本与质量",
-        "zhipu": "低复杂度或无聊天记录，基于消费数据分析（免费）"
+        "minimax": "低复杂度或无聊天记录，基于消费数据分析（低成本）"
     }
 
     return reasons.get(selected_model, "未知原因")
