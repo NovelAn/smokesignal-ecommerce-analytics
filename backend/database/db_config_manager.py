@@ -13,6 +13,7 @@ class DBConfigManager:
 
     # 系统级配置文件路径（用户主目录）
     SYSTEM_DB_CONFIG_PATH = os.path.join(os.path.expanduser("~"), "database_config.json")
+    _cached_config = None
 
     @classmethod
     def load_db_config(cls):
@@ -20,6 +21,9 @@ class DBConfigManager:
         加载数据库配置
         返回: databases 列表，格式: [{"name": "...", "host": "...", ...}, ...]
         """
+        if cls._cached_config is not None:
+            return cls._cached_config
+
         if not os.path.exists(cls.SYSTEM_DB_CONFIG_PATH):
             raise FileNotFoundError(
                 f"数据库配置文件不存在: {cls.SYSTEM_DB_CONFIG_PATH}\n"
@@ -42,7 +46,8 @@ class DBConfigManager:
             # If parsing fails, try to give a helpful error
             raise json.JSONDecodeError(f"解析配置文件失败: {e.msg}", e.doc, e.pos)
 
-        return config.get('databases', [])
+        cls._cached_config = config.get('databases', [])
+        return cls._cached_config
 
     @classmethod
     def get_db_config_for_pymysql(cls):

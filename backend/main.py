@@ -78,9 +78,11 @@ if __name__ == "__main__":
     print(f"📍 Server: http://{settings.api_host}:{settings.api_port}")
     print(f"📚 API Docs: http://{settings.api_host}:{settings.api_port}/docs")
 
+    reload_enabled = os.getenv("API_RELOAD", "false").lower() == "true"
+
     uvicorn.run(
         "backend.main:app",
         host=settings.api_host,
         port=settings.api_port,
-        reload=True
+        reload=reload_enabled
     )

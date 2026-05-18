@@ -6,6 +6,8 @@ eliminating the ~3s connection overhead to remote Alibaba Cloud database.
 """
 import pymysql
 import threading
+import logging
+import time
 from queue import Queue, Empty, Full
 from contextlib import contextmanager
 from typing import List, Dict, Any, Optional
@@ -25,6 +27,7 @@ class ConnectionPool:
         self._created = 0
         self._lock = threading.Lock()
         self._key = f"{config.get('host')}:{config.get('port', 3306)}/{config.get('database')}"
+        self._wait_count = 0
 
     @classmethod
     def get_pool(cls, config: dict, **kwargs) -> 'ConnectionPool':
@@ -41,14 +44,32 @@ class ConnectionPool:
                 conn.ping(reconnect=True)
                 return conn
             except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
                 with self._lock:
-                    self._created -= 1
-                return self._new_conn()
+                    self._created = max(0, self._created - 1)
+                return self.acquire(timeout=timeout)
         except Empty:
+            should_create = False
             with self._lock:
                 if self._created < self._max_size:
+                    self._created += 1
+                    should_create = True
+            if should_create:
+                try:
                     return self._new_conn()
-            return self._pool.get(block=True, timeout=timeout)
+                except Exception:
+                    with self._lock:
+                        self._created = max(0, self._created - 1)
+                    raise
+            try:
+                with self._lock:
+                    self._wait_count += 1
+                return self._pool.get(block=True, timeout=timeout)
+            except Empty as exc:
+                raise TimeoutError(f"MySQL connection pool exhausted after {timeout}s: {self._key}") from exc
 
     def release(self, conn: pymysql.Connection) -> None:
         try:
@@ -59,13 +80,34 @@ class ConnectionPool:
             except Exception:
                 pass
             with self._lock:
-                self._created -= 1
+                self._created = max(0, self._created - 1)
 
     def _new_conn(self) -> pymysql.Connection:
+        start = time.time()
+        logging.info("[DB] Opening new MySQL connection to %s", self._key)
         conn = pymysql.connect(**self._config)
-        with self._lock:
-            self._created += 1
+        logging.info("[DB] MySQL connection opened in %.2fs: %s", time.time() - start, self._key)
         return conn
+
+    def stats(self) -> Dict[str, Any]:
+        with self._lock:
+            created = self._created
+            wait_count = self._wait_count
+        idle = self._pool.qsize()
+        return {
+            "key": self._key,
+            "created": created,
+            "idle": idle,
+            "in_use": max(0, created - idle),
+            "max_size": self._max_size,
+            "wait_count": wait_count,
+        }
+
+    @classmethod
+    def all_stats(cls) -> List[Dict[str, Any]]:
+        with cls._pools_lock:
+            pools = list(cls._pools.values())
+        return [pool.stats() for pool in pools]
 
 
 class Database:
@@ -87,6 +129,10 @@ class Database:
                 "port": db.get("port"),
                 "charset": db.get("charset", "utf8mb4"),
                 "cursorclass": pymysql.cursors.DictCursor,
+                "connect_timeout": int(db.get("connect_timeout", 5)),
+                "read_timeout": int(db.get("read_timeout", 20)),
+                "write_timeout": int(db.get("write_timeout", 20)),
+                "autocommit": True,
             }
             config["_name"] = db.get("name")
             pymysql_configs.append(config)
@@ -111,15 +157,28 @@ class Database:
             self._pool.release(conn)
 
     def execute_query(self, query: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
+        start = time.time()
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(query, params)
-                return cursor.fetchall()
+                rows = cursor.fetchall()
+                elapsed = time.time() - start
+                if elapsed > 1:
+                    logging.warning("[DB] Slow query completed in %.2fs, rows=%s", elapsed, len(rows))
+                else:
+                    logging.debug("[DB] Query completed in %.2fs, rows=%s", elapsed, len(rows))
+                return rows
 
     def execute_update(self, query: str, params: Optional[tuple] = None) -> int:
+        start = time.time()
         with self.get_connection() as conn:
             with conn.cursor() as cursor:
                 affected_rows = cursor.execute(query, params)
                 conn.commit()
                 lastrowid = cursor.lastrowid
+                elapsed = time.time() - start
+                if elapsed > 1:
+                    logging.warning("[DB] Slow update completed in %.2fs, affected=%s", elapsed, affected_rows)
+                else:
+                    logging.debug("[DB] Update completed in %.2fs, affected=%s", elapsed, affected_rows)
                 return lastrowid if lastrowid else affected_rows

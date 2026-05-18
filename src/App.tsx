@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   LineChart,
   Line,
@@ -106,10 +106,33 @@ const formatShortDate = (dateStr: string | undefined | null): string => {
 // --- App Layout ---
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'analysis' | 'external' | 'settings'>('overview');
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  type AppTab = 'overview' | 'analysis' | 'external' | 'settings';
 
-  const NavTab = ({ id, icon: Icon, label }: { id: typeof activeTab, icon: any, label: string }) => (
+  const [activeTab, setActiveTab] = useState<AppTab>('overview');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [crmTargetBuyer, setCrmTargetBuyer] = useState<string | null>(null);
+  const [crmNavigationToken, setCrmNavigationToken] = useState(0);
+  const [mountedTabs, setMountedTabs] = useState<Record<AppTab, boolean>>({
+    overview: true,
+    analysis: false,
+    external: false,
+    settings: false,
+  });
+
+  useEffect(() => {
+    setMountedTabs(prev => (
+      prev[activeTab] ? prev : { ...prev, [activeTab]: true }
+    ));
+  }, [activeTab]);
+
+  const openBuyerInCrm = (buyerNick: string) => {
+    setCrmTargetBuyer(buyerNick);
+    setCrmNavigationToken(prev => prev + 1);
+    setActiveTab('analysis');
+    setIsMobileMenuOpen(false);
+  };
+
+  const NavTab = ({ id, icon: Icon, label }: { id: AppTab, icon: any, label: string }) => (
     <button
       onClick={() => setActiveTab(id)}
       className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${
@@ -175,10 +198,31 @@ export default function App() {
       <main className="flex-1 overflow-hidden bg-white relative">
         <div className="h-full overflow-y-auto p-4 lg:p-6 scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
           <div className="max-w-[1600px] mx-auto h-full flex flex-col">
-            {activeTab === 'overview' && <DashboardOverview />}
-            {activeTab === 'analysis' && <ChatAnalysis />}
-            {activeTab === 'external' && <ExternalInfoConfig />}
-            {activeTab === 'settings' && <SettingsView />}
+            {mountedTabs.overview && (
+              <div className={activeTab === 'overview' ? 'contents' : 'hidden'}>
+                <DashboardOverview onOpenBuyerInCrm={openBuyerInCrm} />
+              </div>
+            )}
+            {mountedTabs.analysis && (
+              <div className={activeTab === 'analysis' ? 'contents' : 'hidden'}>
+                <ChatAnalysis
+                  initialBuyerNick={crmTargetBuyer}
+                  initialSubTab={crmTargetBuyer ? 'chat' : undefined}
+                  navigationToken={crmNavigationToken}
+                  onBackToOverview={() => setActiveTab('overview')}
+                />
+              </div>
+            )}
+            {mountedTabs.external && (
+              <div className={activeTab === 'external' ? 'contents' : 'hidden'}>
+                <ExternalInfoConfig />
+              </div>
+            )}
+            {mountedTabs.settings && (
+              <div className={activeTab === 'settings' ? 'contents' : 'hidden'}>
+                <SettingsView />
+              </div>
+            )}
           </div>
         </div>
       </main>

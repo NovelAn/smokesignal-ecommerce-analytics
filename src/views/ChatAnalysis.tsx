@@ -150,7 +150,19 @@ const calculateLastPurchaseAfter = (range: DateRangeFilter): string | undefined 
   }
 };
 
-const ChatAnalysis: React.FC = () => {
+interface ChatAnalysisProps {
+  initialBuyerNick?: string | null;
+  initialSubTab?: 'profile' | 'orders' | 'chat';
+  navigationToken?: number;
+  onBackToOverview?: () => void;
+}
+
+const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
+  initialBuyerNick,
+  initialSubTab,
+  navigationToken,
+  onBackToOverview
+}) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSession, setSelectedSession] = useState<BuyerSession | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<'profile' | 'orders' | 'chat'>('profile');
@@ -332,6 +344,15 @@ const ChatAnalysis: React.FC = () => {
   // 当买家列表变化时（比如应用新筛选条件），检查当前选中是否仍在列表中
   // 如果不在，自动选择第一个
   useEffect(() => {
+    if (initialBuyerNick) {
+      const targetSession = filteredSessions.find(s => s.user_nick === initialBuyerNick);
+      if (targetSession) {
+        setSelectedSession(targetSession);
+        setActiveSubTab(initialSubTab || 'profile');
+        return;
+      }
+    }
+
     if (filteredSessions.length > 0) {
       const isSelectedInList = selectedSession &&
         filteredSessions.some(s => s.user_nick === selectedSession.user_nick);
@@ -341,15 +362,23 @@ const ChatAnalysis: React.FC = () => {
     } else {
       setSelectedSession(null);
     }
-  }, [filteredSessions]);
+  }, [filteredSessions, initialBuyerNick, initialSubTab, navigationToken]);
 
   // 当前选中的会话（如果没有选中，默认选择第一个）
   const currentSession = selectedSession || (filteredSessions.length > 0 ? filteredSessions[0] : null);
 
-  // Reset order pagination when user changes
+  // Reset order pagination and chat collapse state when user changes.
   useEffect(() => {
     setOrderCurrentPage(1);
+    setOpenDates({});
   }, [currentSession?.user_nick]);
+
+  // Each time the Communication tab is opened, start from a collapsed-by-date view.
+  useEffect(() => {
+    if (activeSubTab === 'chat') {
+      setOpenDates({});
+    }
+  }, [activeSubTab, currentSession?.user_nick]);
 
   // ========== Hook A: 基础数据（始终快速加载，< 0.5s）==========
   // 包含：profile基本信息 + 订单历史 + 聊天记录
@@ -689,16 +718,18 @@ const ChatAnalysis: React.FC = () => {
      return Object.keys(groupedMessages).sort((a, b) => a.localeCompare(b));
   }, [groupedMessages]);
 
-  // Auto-expand all dates when chat history changes
+  const sortedDatesKey = sortedDates.join('|');
+
+  // Keep chat dates collapsed by default when entering a customer's Communication view.
   React.useEffect(() => {
-    if (sortedDates.length > 0 && Object.keys(openDates).length === 0) {
-      const newOpenDates: Record<string, boolean> = {};
-      sortedDates.forEach(date => {
-        newOpenDates[date] = true;
-      });
-      setOpenDates(newOpenDates);
-    }
-  }, [sortedDates]);
+    if (activeSubTab !== 'chat' || sortedDates.length === 0) return;
+
+    const newOpenDates: Record<string, boolean> = {};
+    sortedDates.forEach(date => {
+      newOpenDates[date] = false;
+    });
+    setOpenDates(newOpenDates);
+  }, [activeSubTab, currentSession?.user_nick, sortedDatesKey]);
 
   const toggleDate = (date: string) => {
      setOpenDates(prev => ({ ...prev, [date]: !prev[date] }));
@@ -709,7 +740,21 @@ const ChatAnalysis: React.FC = () => {
 
   return (
     <>
-    <div className="h-[calc(100vh-120px)] flex gap-6">
+    <div className="mb-3 flex items-center justify-between">
+      <div className="text-xs text-notion-muted">
+        {currentSession?.user_nick ? `Current customer: ${currentSession.user_nick}` : 'Chat & CRM'}
+      </div>
+      {onBackToOverview && (
+        <button
+          onClick={onBackToOverview}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-notion-border rounded-md bg-white hover:bg-notion-hover text-notion-text transition-colors"
+        >
+          <LayoutDashboard size={14} />
+          Back to Overview
+        </button>
+      )}
+    </div>
+    <div className="h-[calc(100vh-160px)] flex gap-6">
         {/* Left Sidebar: Search & User List */}
         <div className="w-64 flex-none border border-notion-border bg-notion-sidebar rounded-sm flex flex-col shadow-sm">
              <div className="p-3 border-b border-notion-border bg-white rounded-t-sm">

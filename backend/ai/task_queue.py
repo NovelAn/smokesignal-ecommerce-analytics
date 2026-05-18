@@ -40,6 +40,7 @@ class InMemoryTaskQueue:
         self.processing_count = 0
         self._queue = asyncio.Queue()
         self._worker_task = None
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
     async def enqueue(
         self,
@@ -102,11 +103,6 @@ class InMemoryTaskQueue:
                 # 等待任务
                 task_id = await self._queue.get()
 
-                # 等待并发槽位
-                while self.processing_count >= self.max_concurrent:
-                    await asyncio.sleep(0.1)
-
-                # 处理任务
                 asyncio.create_task(self._process_task(task_id))
 
             except asyncio.CancelledError:
@@ -121,43 +117,43 @@ class InMemoryTaskQueue:
         if not task:
             return
 
-        self.processing_count += 1
-        task["status"] = TaskStatus.PROCESSING.value
-        task["started_at"] = datetime.now().isoformat()
+        async with self._semaphore:
+            self.processing_count += 1
+            task["status"] = TaskStatus.PROCESSING.value
+            task["started_at"] = datetime.now().isoformat()
 
-        buyer_nick = task["buyer_nick"]
-        analyzer = task["analyzer"]
+            buyer_nick = task["buyer_nick"]
+            analyzer = task["analyzer"]
 
-        try:
-            print(f"[Task Queue] 开始处理: {task_id} ({buyer_nick})")
+            try:
+                print(f"[Task Queue] 开始处理: {task_id} ({buyer_nick})")
 
-            # 在线程池中运行同步AI分析，避免阻塞事件循环
-            result = await asyncio.to_thread(
-                analyzer.analyze_buyer_persona,
-                buyer_nick=buyer_nick,
-                profile=task["input"]["profile"],
-                chats=task["input"]["chats"],
-                orders=task["input"]["orders"]
-            )
+                # 在线程池中运行同步AI分析，避免阻塞事件循环
+                result = await asyncio.to_thread(
+                    analyzer.analyze_buyer_persona,
+                    buyer_nick=buyer_nick,
+                    profile=task["input"]["profile"],
+                    chats=task["input"]["chats"],
+                    orders=task["input"]["orders"]
+                )
 
-            # 保存结果
-            task["result"] = result
-            task["status"] = TaskStatus.COMPLETED.value
-            task["completed_at"] = datetime.now().isoformat()
+                task["result"] = result
+                task["status"] = TaskStatus.COMPLETED.value
+                task["completed_at"] = datetime.now().isoformat()
 
-            print(f"[Task Queue] 任务完成: {task_id} ({buyer_nick})")
+                print(f"[Task Queue] 任务完成: {task_id} ({buyer_nick})")
 
-        except Exception as e:
-            error_msg = f"{str(e)[:200]}"
-            task["error"] = error_msg
-            task["status"] = TaskStatus.FAILED.value
-            task["completed_at"] = datetime.now().isoformat()
+            except Exception as e:
+                error_msg = f"{str(e)[:200]}"
+                task["error"] = error_msg
+                task["status"] = TaskStatus.FAILED.value
+                task["completed_at"] = datetime.now().isoformat()
 
-            print(f"[Task Queue] 任务失败: {task_id} ({buyer_nick}) - {error_msg}")
-            print(traceback.format_exc())
+                print(f"[Task Queue] 任务失败: {task_id} ({buyer_nick}) - {error_msg}")
+                print(traceback.format_exc())
 
-        finally:
-            self.processing_count -= 1
+            finally:
+                self.processing_count -= 1
 
     def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """

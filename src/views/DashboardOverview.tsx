@@ -24,7 +24,13 @@ type TimeRange = '7d' | '15d' | '30d' | '90d' | '1y';
 /**
  * Dashboard Overview 主视图
  */
-export const DashboardOverview: React.FC = () => {
+interface DashboardOverviewProps {
+  onOpenBuyerInCrm?: (buyerNick: string) => void;
+}
+
+export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
+  onOpenBuyerInCrm
+}) => {
   // 全局时间范围筛选器
   const [timeRange, setTimeRange] = useState<TimeRange>('1y');
 
@@ -44,9 +50,9 @@ export const DashboardOverview: React.FC = () => {
    * 处理客户行操作
    */
   const handleRowAction = (buyer: any, actionType: string) => {
-    console.log('Action:', actionType, 'Buyer:', buyer);
-    // TODO: 实现具体的操作逻辑
-    // 例如：跳转到客户详情页、打开弹窗等
+    if (actionType === 'view_details' && buyer?.buyer_nick) {
+      onOpenBuyerInCrm?.(buyer.buyer_nick);
+    }
   };
 
   // ========== 渲染 ==========

@@ -7,12 +7,27 @@ AI分析: 使用DeepSeek-R1 + 多级降级策略
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Dict, Any, Optional
 from backend.analytics.target_buyer_analyzer import TargetBuyerAnalyzer
-from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
 from backend.database import BuyerQueries
 
 router = APIRouter(prefix="/api/v2", tags=["target_buyers"])
 analyzer = TargetBuyerAnalyzer()
-ai_orchestrator = get_analyzer_orchestrator()
+
+
+def _get_ai_orchestrator():
+    from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
+    return get_analyzer_orchestrator()
+
+
+async def _run_blocking(func, *args, timeout: float = 20, **kwargs):
+    import asyncio
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(func, *args, **kwargs),
+            timeout=timeout,
+        )
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail=f"Operation timed out after {timeout}s")
 
 
 @router.get("/")
@@ -56,7 +71,8 @@ async def get_all_buyers(
     - sort_by: 排序字段 (last_purchase/l6m_netsales/vip_level)
     """
     try:
-        result = analyzer.get_all_buyers(
+        result = await _run_blocking(
+            analyzer.get_all_buyers,
             search=search,
             buyer_type=buyer_type,
             vip_level=vip_level,
@@ -67,7 +83,8 @@ async def get_all_buyers(
             sort_by=sort_by,
             limit=limit,
             offset=offset,
-            include_total=include_total
+            include_total=include_total,
+            timeout=20,
         )
         return result
     except Exception as e:
@@ -84,13 +101,15 @@ async def get_buyers_count(
     client_monthly_tag: Optional[List[str]] = Query(None, description="新老客标识: new/active_old/recall_old")
 ) -> Dict[str, Any]:
     try:
-        total = analyzer.get_buyers_count(
+        total = await _run_blocking(
+            analyzer.get_buyers_count,
             buyer_type=buyer_type,
             vip_level=vip_level,
             channel=channel,
             last_purchase_after=last_purchase_after,
             chat_status=chat_status,
-            client_monthly_tag=client_monthly_tag
+            client_monthly_tag=client_monthly_tag,
+            timeout=20,
         )
         return {"total": total}
     except Exception as e:
@@ -114,7 +133,7 @@ async def get_buyer_profile(
     try:
         import logging
         # 从预计算表获取基本信息(超快)
-        profile = analyzer.get_buyer_profile(user_nick)
+        profile = await _run_blocking(analyzer.get_buyer_profile, user_nick, timeout=20)
         logging.info(f"[DEBUG] get_buyer_profile: user_nick={user_nick}, include_ai={include_ai}")
 
         if not profile:
@@ -140,11 +159,29 @@ async def get_dashboard_metrics() -> Dict[str, Any]:
 
     性能: < 0.1秒 (优化前: 5-15秒)
     """
+    import asyncio
+    import logging
+
     try:
-        metrics = analyzer.get_dashboard_metrics()
+        metrics = await _run_blocking(analyzer.get_dashboard_metrics, timeout=20)
         return metrics
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail="Dashboard metrics query timed out after 20s")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.exception("[Dashboard] get_dashboard_metrics failed")
+        detail = str(e) or e.__class__.__name__
+        raise HTTPException(status_code=500, detail=detail)
+
+
+@router.get("/debug/db-pools")
+async def get_db_pool_stats() -> Dict[str, Any]:
+    """Return database connection pool stats for troubleshooting."""
+    try:
+        from backend.database.connection import ConnectionPool
+
+        return {"pools": ConnectionPool.all_stats()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
 
 
 @router.get("/buyers/type/{buyer_type}")
@@ -499,7 +536,8 @@ async def get_priority_customers(
     """
     try:
         # 获取客户列表
-        customers = analyzer.get_priority_customers(
+        customers = await _run_blocking(
+            analyzer.get_priority_customers,
             channel=channel,
             buyer_type=buyer_type,
             follow_priority=follow_priority,
@@ -507,19 +545,22 @@ async def get_priority_customers(
             has_chat=has_chat,
             use_default_filter=use_default_filter,
             limit=limit,
-            offset=offset
+            offset=offset,
+            timeout=20,
         )
 
         # 获取总数
         total = None
         if include_total:
-            total = analyzer.get_priority_customers_count(
+            total = await _run_blocking(
+                analyzer.get_priority_customers_count,
                 channel=channel,
                 buyer_type=buyer_type,
                 follow_priority=follow_priority,
                 sentiment_label=sentiment_label,
                 has_chat=has_chat,
-                use_default_filter=use_default_filter
+                use_default_filter=use_default_filter,
+                timeout=20,
             )
 
         return {
@@ -691,7 +732,7 @@ async def get_buyer_orders(
         """
 
         params = [user_nick, limit]
-        orders = db.execute_query(query, params)
+        orders = await _run_blocking(db.execute_query, query, params, timeout=20)
 
         return orders
     except Exception as e:
@@ -717,7 +758,7 @@ async def get_buyer_chats(
         db = Database(db_name=db_name)
 
         query, params = BuyerQueries.get_chat_messages(user_nick, limit)
-        chats = db.execute_query(query, params)
+        chats = await _run_blocking(db.execute_query, query, params, timeout=20)
 
         return chats
     except Exception as e:
@@ -897,6 +938,8 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
         # 4. 调用增强版AI分析器（自动选择最优模型和降级策略）
         import logging
         logging.info(f"[AI] 开始分析客户 {user_nick}, VIP等级: {profile_data['vip_level']}")
+
+        ai_orchestrator = _get_ai_orchestrator()
 
         # 检查是否应该使用缓存
         should_update = ai_orchestrator.should_update_persona(user_nick, profile_data)
@@ -1230,6 +1273,7 @@ async def analyze_buyer_async(
 
         # 5. 加入任务队列
         task_queue = get_task_queue()
+        ai_orchestrator = _get_ai_orchestrator()
         task_id = await task_queue.enqueue(
             buyer_nick=user_nick,
             profile=profile_data,

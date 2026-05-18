@@ -18,7 +18,10 @@ ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 router = APIRouter(prefix="/api/v2/external", tags=["external_records"])
-analyzer = get_external_analyzer()
+
+
+def _get_analyzer():
+    return get_external_analyzer()
 
 
 @router.get("/records")
@@ -49,6 +52,7 @@ async def get_records(
                 detail=f"无效的record_type: {record_type}. 必须是 communication 或 purchase"
             )
 
+        analyzer = _get_analyzer()
         result = analyzer.get_records(
             search=search,
             record_type=record_type,
@@ -70,6 +74,7 @@ async def get_records(
 async def get_record(record_id: int) -> Dict[str, Any]:
     """获取单条场外记录"""
     try:
+        analyzer = _get_analyzer()
         record = analyzer.get_record_by_id(record_id)
         if not record:
             raise HTTPException(status_code=404, detail=f"记录 {record_id} 不存在")
@@ -116,6 +121,7 @@ async def create_record(record: Dict[str, Any]) -> Dict[str, Any]:
                 detail=f"无效的record_type: {record.get('record_type')}"
             )
 
+        analyzer = _get_analyzer()
         result = analyzer.create_record(
             user_nick=record.get('user_nick'),
             record_type=record.get('record_type'),
@@ -146,6 +152,7 @@ async def update_record(record_id: int, record: Dict[str, Any]) -> Dict[str, Any
     """
     try:
         # 检查记录是否存在
+        analyzer = _get_analyzer()
         existing = analyzer.get_record_by_id(record_id)
         if not existing:
             raise HTTPException(status_code=404, detail=f"记录 {record_id} 不存在")
@@ -182,6 +189,7 @@ async def update_record(record_id: int, record: Dict[str, Any]) -> Dict[str, Any
 async def delete_record(record_id: int) -> Dict[str, Any]:
     """删除场外记录"""
     try:
+        analyzer = _get_analyzer()
         success = analyzer.delete_record(record_id)
         if not success:
             raise HTTPException(status_code=404, detail=f"记录 {record_id} 不存在")
@@ -269,6 +277,7 @@ async def import_records(
             )
 
         # 批量导入
+        analyzer = _get_analyzer()
         result = analyzer.batch_import(records, created_by)
         result["parse_errors"] = errors[:10]
 
@@ -327,6 +336,7 @@ async def get_statistics() -> Dict[str, Any]:
         }
     """
     try:
+        analyzer = _get_analyzer()
         stats = analyzer.get_statistics()
         return stats
     except Exception as e:
@@ -345,6 +355,7 @@ async def get_user_records(
     用于 AI 分析时获取补充上下文
     """
     try:
+        analyzer = _get_analyzer()
         records = analyzer.get_records_by_user(user_nick, limit)
         return records
     except Exception as e:
