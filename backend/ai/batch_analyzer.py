@@ -247,12 +247,13 @@ class BatchAnalyzer:
                 # Sentiment analysis
                 sentiment_results = self.minimax_client.analyze_sentiment_batch(buyer_messages[:20])
 
-                # Check if all results are neutral (indicates API fallback)
-                all_neutral = all(r.get('sentiment') == 'Neutral' and r.get('score') == 0.5 for r in sentiment_results)
+                parse_failed = bool(sentiment_results) and all(
+                    r.get('_parse_failed') for r in sentiment_results
+                )
 
-                if all_neutral:
-                    logger.info(f"[BatchAnalyzer] MiniMax returned defaults for {buyer_nick}, falling through to DeepSeek")
-                    raise Exception("MiniMax returned default values, trying DeepSeek fallback")
+                if parse_failed:
+                    logger.info(f"[BatchAnalyzer] MiniMax sentiment parse failed for {buyer_nick}, falling through to DeepSeek")
+                    raise Exception("MiniMax sentiment parse failed, trying DeepSeek fallback")
 
                 # Calculate average sentiment
                 if sentiment_results:
@@ -277,9 +278,10 @@ class BatchAnalyzer:
                 self.rate_limiter.wait()
                 intent_dist = self.minimax_client.extract_intent_distribution(buyer_messages)
 
-                # Check if intent distribution is all zeros (indicates API fallback)
-                if all(v == 0 for v in intent_dist.values()):
-                    logger.info(f"[BatchAnalyzer] MiniMax intent failed for {buyer_nick}, falling through to DeepSeek")
+                intent_parse_failed = intent_dist.pop('_parse_failed', False)
+
+                if intent_parse_failed:
+                    logger.info(f"[BatchAnalyzer] MiniMax intent parse failed for {buyer_nick}, falling through to DeepSeek")
                     raise Exception("MiniMax intent analysis failed, trying DeepSeek fallback")
 
                 result['intent_distribution'] = intent_dist

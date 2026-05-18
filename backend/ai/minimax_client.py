@@ -4,6 +4,7 @@ MiniMax AI Client - 备选模型 (Fallback Model)
 当前使用: MiniMax-M2.7 (OpenAI兼容接口)
 """
 import json
+import re
 from typing import Dict, List, Any
 from openai import OpenAI
 from backend.config import settings
@@ -152,22 +153,13 @@ class MiniMaxClient:
                 _safe_print("[MiniMaxClient] Response is empty!")
                 return self._default_analysis()
 
-            cleaned = response_text.strip()
-            if cleaned.startswith('```'):
-                first_newline = cleaned.find('\n')
-                if first_newline != -1:
-                    cleaned = cleaned[first_newline + 1:]
-                if cleaned.endswith('```'):
-                    cleaned = cleaned[:-3]
-                cleaned = cleaned.strip()
+            cleaned = self._clean_model_response(response_text)
 
             _safe_print(f"[MiniMaxClient] Cleaned response: {cleaned[:300]}")
 
-            start = cleaned.find('{')
-            end = cleaned.rfind('}') + 1
+            json_str = self._extract_json_value(cleaned, expected_type=dict)
 
-            if start != -1 and end > start:
-                json_str = cleaned[start:end]
+            if json_str:
                 result = json.loads(json_str)
                 _safe_print("[MiniMaxClient] Parsed JSON successfully")
                 return result
@@ -215,6 +207,8 @@ class MiniMaxClient:
   {{"score": 0.3, "sentiment": "Negative"}},
   ...
 ]
+
+只返回合法JSON数组，不要输出解释、Markdown代码块或思考过程。
 """
 
         try:
@@ -239,7 +233,7 @@ class MiniMaxClient:
 
         except Exception as e:
             _safe_print(f"[MiniMaxClient] Error in sentiment analysis: {e}")
-            return [{"score": 0.5, "sentiment": "Neutral"}] * len(messages)
+            return self._default_sentiment_results(len(messages), parse_failed=True)
 
     def _format_messages_for_sentiment(self, messages: List[str]) -> str:
         formatted = []
@@ -249,17 +243,52 @@ class MiniMaxClient:
 
     def _parse_sentiment_response(self, response_text: str, expected_count: int) -> List[Dict[str, Any]]:
         try:
-            start = response_text.find('[')
-            end = response_text.rfind(']') + 1
+            cleaned = self._clean_model_response(response_text)
+            json_str = self._extract_json_value(cleaned, expected_type=list)
 
-            if start != -1 and end > start:
-                json_str = response_text[start:end]
-                return json.loads(json_str)
-            else:
-                return [{"score": 0.5, "sentiment": "Neutral"}] * expected_count
+            if not json_str:
+                _safe_print(f"[MiniMaxClient] No sentiment JSON array found. Preview: {cleaned[:500]}")
+                return self._default_sentiment_results(expected_count, parse_failed=True)
 
-        except json.JSONDecodeError:
-            return [{"score": 0.5, "sentiment": "Neutral"}] * expected_count
+            parsed = json.loads(json_str)
+            if not isinstance(parsed, list):
+                return self._default_sentiment_results(expected_count, parse_failed=True)
+
+            normalized = []
+            for item in parsed[:expected_count]:
+                if not isinstance(item, dict):
+                    continue
+
+                try:
+                    score = float(item.get("score", 0.5))
+                except (TypeError, ValueError):
+                    score = 0.5
+
+                sentiment = item.get("sentiment", "Neutral")
+                if sentiment not in {"Positive", "Neutral", "Negative"}:
+                    sentiment = "Neutral"
+
+                normalized.append({
+                    "score": max(0.0, min(1.0, score)),
+                    "sentiment": sentiment,
+                    "_parse_failed": False
+                })
+
+            if not normalized:
+                return self._default_sentiment_results(expected_count, parse_failed=True)
+
+            if len(normalized) < expected_count:
+                normalized.extend(self._default_sentiment_results(
+                    expected_count - len(normalized),
+                    parse_failed=True
+                ))
+
+            return normalized
+
+        except json.JSONDecodeError as e:
+            preview = response_text[:500] if response_text else "EMPTY"
+            _safe_print(f"[MiniMaxClient] Sentiment JSON decode error: {e}. Preview: {preview}")
+            return self._default_sentiment_results(expected_count, parse_failed=True)
 
     def extract_intent_distribution(self, messages: List[str]) -> Dict[str, int]:
         prompt = f"""
@@ -295,6 +324,8 @@ class MiniMaxClient:
   "Usage Guide": 数量,
   "Complaint": 数量
 }}
+
+只返回合法JSON对象，不要输出解释、Markdown代码块或思考过程。
 """
 
         try:
@@ -319,33 +350,91 @@ class MiniMaxClient:
 
         except Exception as e:
             _safe_print(f"[MiniMaxClient] Error in intent analysis: {e}")
-            return {
-                "Pre-sale Inquiry": 0,
-                "Post-sale Support": 0,
-                "Logistics": 0,
-                "Usage Guide": 0,
-                "Complaint": 0
-            }
+            return self._default_intent_distribution(parse_failed=True)
 
     def _parse_intent_response(self, response_text: str) -> Dict[str, int]:
         try:
-            start = response_text.find('{')
-            end = response_text.rfind('}') + 1
+            cleaned = self._clean_model_response(response_text)
+            json_str = self._extract_json_value(cleaned, expected_type=dict)
 
-            if start != -1 and end > start:
-                json_str = response_text[start:end]
-                return json.loads(json_str)
-            else:
-                return self._default_intent_distribution()
+            if not json_str:
+                _safe_print(f"[MiniMaxClient] No intent JSON object found. Preview: {cleaned[:500]}")
+                return self._default_intent_distribution(parse_failed=True)
 
-        except json.JSONDecodeError:
-            return self._default_intent_distribution()
+            parsed = json.loads(json_str)
+            if not isinstance(parsed, dict):
+                return self._default_intent_distribution(parse_failed=True)
 
-    def _default_intent_distribution(self) -> Dict[str, int]:
-        return {
+            result = self._default_intent_distribution(parse_failed=False)
+            for key in self._intent_keys():
+                try:
+                    result[key] = int(parsed.get(key, 0))
+                except (TypeError, ValueError):
+                    result[key] = 0
+
+            return result
+
+        except json.JSONDecodeError as e:
+            preview = response_text[:500] if response_text else "EMPTY"
+            _safe_print(f"[MiniMaxClient] Intent JSON decode error: {e}. Preview: {preview}")
+            return self._default_intent_distribution(parse_failed=True)
+
+    def _default_sentiment_results(self, expected_count: int, parse_failed: bool) -> List[Dict[str, Any]]:
+        return [
+            {"score": 0.5, "sentiment": "Neutral", "_parse_failed": parse_failed}
+            for _ in range(expected_count)
+        ]
+
+    def _default_intent_distribution(self, parse_failed: bool = False) -> Dict[str, Any]:
+        result = {
             "Pre-sale Inquiry": 0,
             "Post-sale Support": 0,
             "Logistics": 0,
             "Usage Guide": 0,
             "Complaint": 0
         }
+        result["_parse_failed"] = parse_failed
+        return result
+
+    def _intent_keys(self) -> List[str]:
+        return [
+            "Pre-sale Inquiry",
+            "Post-sale Support",
+            "Logistics",
+            "Usage Guide",
+            "Complaint"
+        ]
+
+    def _clean_model_response(self, response_text: str) -> str:
+        if not response_text:
+            return ""
+
+        cleaned = re.sub(r"<think>.*?</think>", "", response_text, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = cleaned.strip()
+
+        fence_match = re.search(r"```(?:json)?\s*(.*?)```", cleaned, flags=re.DOTALL | re.IGNORECASE)
+        if fence_match:
+            cleaned = fence_match.group(1).strip()
+
+        return cleaned
+
+    def _extract_json_value(self, text: str, expected_type: type) -> str:
+        opening, closing = ("[", "]") if expected_type is list else ("{", "}")
+        decoder = json.JSONDecoder()
+
+        for match in re.finditer(re.escape(opening), text):
+            candidate = text[match.start():]
+            try:
+                value, end = decoder.raw_decode(candidate)
+            except json.JSONDecodeError:
+                continue
+
+            if isinstance(value, expected_type):
+                return candidate[:end]
+
+        start = text.find(opening)
+        end = text.rfind(closing) + 1
+        if start != -1 and end > start:
+            return text[start:end]
+
+        return ""
