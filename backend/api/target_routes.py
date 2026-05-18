@@ -676,34 +676,19 @@ async def get_buyer_orders(
 
         time_condition = time_conditions.get(time_range, time_conditions['1y'])
 
-        if time_range == 'all':
-            # 查询VIEW确保完整的历史数据
-            query = f"""
-                SELECT
-                    订单号, 子订单号, 商品名称, category,
-                    成交总金额, 退款金额, 退款类型,
-                    FP_MD, 图片地址, 最后付款时间, 件数,
-                    (成交总金额 - IFNULL(退款金额, 0)) as netsales
-                FROM dunhill_t01_trade_line
-                WHERE 买家昵称 = %s
-                  AND 买家昵称 IS NOT NULL AND 买家昵称 != ''
-                ORDER BY 最后付款时间 DESC, 子订单号 ASC
-                LIMIT %s
-            """
-        else:
-            # 使用预计算表查询(更快)
-            query = f"""
-                SELECT
-                    订单号, 子订单号, 商品名称, category as category,
-                    成交总金额, 退款金额, 退款类型,
-                    FP_MD, 图片地址, 最后付款时间, 件数,
-                    (成交总金额 - IFNULL(退款金额, 0)) as netsales
-                FROM target_buyer_orders
-                WHERE 买家昵称 = %s
-                  {time_condition}
-                ORDER BY 最后付款时间 DESC, 子订单号 ASC
-                LIMIT %s
-            """
+        # 统一使用预计算表（包含全部历史订单，且有索引，比VIEW快得多）
+        query = f"""
+            SELECT
+                订单号, 子订单号, 商品名称, category,
+                成交总金额, 退款金额, 退款类型,
+                FP_MD, 图片地址, 最后付款时间, 件数,
+                (成交总金额 - IFNULL(退款金额, 0)) as netsales
+            FROM target_buyer_orders
+            WHERE 买家昵称 = %s
+              {time_condition}
+            ORDER BY 最后付款时间 DESC, 子订单号 ASC
+            LIMIT %s
+        """
 
         params = [user_nick, limit]
         orders = db.execute_query(query, params)
@@ -753,45 +738,48 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         import logging
+        import asyncio
         # 获取buyer_nick - 优先使用buyer_nick字段，兼容user_nick
         user_nick = profile.get("buyer_nick") or profile.get("user_nick")
         logging.info(f"[DEBUG AI] user_nick={user_nick}")
 
-        # 1. 获取聊天记录(最近30条，增强分析需要更多数据)
         from backend.database import Database
         from backend.config import settings
         from backend.database import BuyerQueries
 
-        # 默认使用aliyunDB数据库
         db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
-        db = Database(db_name=db_name)
 
-        # 获取聊天记录
-        query, params = BuyerQueries.get_chat_messages(user_nick, limit=30)
-        chats = db.execute_query(query, params)
-        logging.info(f"[DEBUG AI] fetched {len(chats)} chats")
+        # 并行获取 chats + orders + external_records（3个独立查询）
+        def _fetch_chats():
+            db = Database(db_name=db_name)
+            query, params = BuyerQueries.get_chat_messages(user_nick, limit=30)
+            return db.execute_query(query, params)
 
-        # 2. 获取订单记录（用于行为分析）
-        # 注意: 使用原始表dunhill_t01_trade_line获取完整历史订单
-        # target_buyer_orders表只有近3个月数据，会导致AI分析数据不完整
-        orders_query = """
-            SELECT
-                订单号, 商品名称 as commodity_name, category,
-                成交总金额 as payment, 退款金额, 退款类型 as refund_status,
-                最后付款时间 as pay_time
-            FROM dunhill_t01_trade_line
-            WHERE 买家昵称 = %s
-            ORDER BY 最后付款时间 DESC
-            LIMIT 50
-        """
-        orders = db.execute_query(orders_query, [user_nick])
-        logging.info(f"[DEBUG AI] fetched {len(orders)} orders")
+        def _fetch_orders():
+            db = Database(db_name=db_name)
+            orders_query = """
+                SELECT
+                    订单号, 商品名称 as commodity_name, category,
+                    成交总金额 as payment, 退款金额, 退款类型 as refund_status,
+                    最后付款时间 as pay_time
+                FROM target_buyer_orders
+                WHERE 买家昵称 = %s
+                ORDER BY 最后付款时间 DESC
+                LIMIT 50
+            """
+            return db.execute_query(orders_query, [user_nick])
 
-        # 2.5 获取场外信息记录（用于补充上下文）
-        from backend.analytics.external_analyzer import get_external_analyzer
-        external_analyzer = get_external_analyzer()
-        external_records = external_analyzer.get_records_by_user(user_nick, limit=20)
-        logging.info(f"[DEBUG AI] fetched {len(external_records)} external records")
+        def _fetch_external():
+            from backend.analytics.external_analyzer import get_external_analyzer
+            external_analyzer = get_external_analyzer()
+            return external_analyzer.get_records_by_user(user_nick, limit=20)
+
+        chats, orders, external_records = await asyncio.gather(
+            asyncio.to_thread(_fetch_chats),
+            asyncio.to_thread(_fetch_orders),
+            asyncio.to_thread(_fetch_external),
+        )
+        logging.info(f"[DEBUG AI] fetched {len(chats)} chats, {len(orders)} orders, {len(external_records)} external records (parallel)")
 
         # 3. 准备profile数据（传递所有预计算表字段，除了updated_at）
         # 确保AI能够基于完整的真实数据进行分析
@@ -1166,24 +1154,33 @@ async def analyze_buyer_async(
         if not profile:
             raise HTTPException(status_code=404, detail=f"买家 {user_nick} 不存在")
 
-        # 2. 获取聊天记录
+        # 2. 并行获取 chats + orders
         db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
-        db = Database(db_name=db_name)
-        query, params = BuyerQueries.get_chat_messages(user_nick, limit=30)
-        chats = db.execute_query(query, params)
+        import asyncio
 
-        # 3. 获取订单记录(从VIEW获取完整数据)
-        orders_query = """
-            SELECT
-                订单号, 商品名称 as commodity_name, category,
-                成交总金额 as payment, 退款金额, 退款类型 as refund_status,
-                最后付款时间 as pay_time
-            FROM dunhill_t01_trade_line
-            WHERE 买家昵称 = %s
-            ORDER BY 最后付款时间 DESC
-            LIMIT 50
-        """
-        orders = db.execute_query(orders_query, [user_nick])
+        def _fetch_chats():
+            db = Database(db_name=db_name)
+            query, params = BuyerQueries.get_chat_messages(user_nick, limit=30)
+            return db.execute_query(query, params)
+
+        def _fetch_orders():
+            db = Database(db_name=db_name)
+            orders_query = """
+                SELECT
+                    订单号, 商品名称 as commodity_name, category,
+                    成交总金额 as payment, 退款金额, 退款类型 as refund_status,
+                    最后付款时间 as pay_time
+                FROM target_buyer_orders
+                WHERE 买家昵称 = %s
+                ORDER BY 最后付款时间 DESC
+                LIMIT 50
+            """
+            return db.execute_query(orders_query, [user_nick])
+
+        chats, orders = await asyncio.gather(
+            asyncio.to_thread(_fetch_chats),
+            asyncio.to_thread(_fetch_orders),
+        )
 
         # 4. 准备profile数据（与_add_ai_analysis相同）
         from datetime import datetime
@@ -1363,7 +1360,7 @@ async def export_buyer_orders_excel(
         time_condition = time_conditions.get(time_range, time_conditions['all'])
 
         if time_range == 'all':
-            table = 'dunhill_t01_trade_line'
+            table = 'target_buyer_orders'
         else:
             table = 'target_buyer_orders'
 

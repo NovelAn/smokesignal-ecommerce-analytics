@@ -131,8 +131,9 @@ class InMemoryTaskQueue:
         try:
             print(f"[Task Queue] 开始处理: {task_id} ({buyer_nick})")
 
-            # 调用AI分析器
-            result = analyzer.analyze_buyer_persona(
+            # 在线程池中运行同步AI分析，避免阻塞事件循环
+            result = await asyncio.to_thread(
+                analyzer.analyze_buyer_persona,
                 buyer_nick=buyer_nick,
                 profile=task["input"]["profile"],
                 chats=task["input"]["chats"],

@@ -5,6 +5,20 @@
 
 const API_BASE = '/api/v2';
 const BUYERS_TIMEOUT_MS = 15000;
+const DEFAULT_TIMEOUT_MS = 30000;
+
+function fetchWithTimeout(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { signal: controller.signal })
+    .catch((error) => {
+      if (error?.name === 'AbortError') {
+        throw new APIError(408, `请求超时(${timeoutMs / 1000}s)，请稍后重试`);
+      }
+      throw error;
+    })
+    .finally(() => clearTimeout(timeoutId));
+}
 
 type BuyersQueryParams = {
   search?: string;
@@ -145,7 +159,7 @@ export const apiClient = {
    * @param timeRange 时间范围: 7d/15d/30d/90d/1y/all (默认 'all' 获取全部历史)
    */
   getBuyerOrders: async (userNick: string, limit = 500, timeRange = 'all') => {
-    const response = await fetch(`${API_BASE}/buyers/${encodeURIComponent(userNick)}/orders?limit=${limit}&time_range=${timeRange}`);
+    const response = await fetchWithTimeout(`${API_BASE}/buyers/${encodeURIComponent(userNick)}/orders?limit=${limit}&time_range=${timeRange}`);
     return handleResponse<OrderRecord[]>(response);
   },
 
@@ -154,7 +168,7 @@ export const apiClient = {
    * GET /api/v2/buyers/{user_nick}/chats
    */
   getBuyerChats: async (userNick: string, limit = 100) => {
-    const response = await fetch(`${API_BASE}/buyers/${encodeURIComponent(userNick)}/chats?limit=${limit}`);
+    const response = await fetchWithTimeout(`${API_BASE}/buyers/${encodeURIComponent(userNick)}/chats?limit=${limit}`);
     return handleResponse<ChatMessage[]>(response);
   },
 
