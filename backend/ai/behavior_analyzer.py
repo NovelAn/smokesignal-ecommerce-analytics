@@ -1,6 +1,7 @@
 """
 Behavior Analyzer - 订单行为结构化分析
 """
+from collections import Counter
 from typing import Dict, List, Any
 from datetime import datetime
 from backend.ai.data_extractor import detect_rookie_signal, detect_expert_signal
@@ -32,8 +33,11 @@ def structure_order_behavior(profile: Dict, orders: List[Dict]) -> Dict[str, Any
 
 def analyze_purchase_features(profile: Dict, orders: List[Dict]) -> Dict[str, Any]:
     """分析购买特征"""
+    category_distribution = calculate_category_distribution(orders)
     return {
         "首次购买品类": profile.get("top_category", "未知"),
+        "真实品类分布": category_distribution,
+        "品类阶段变化": category_distribution.get("stage_summary", ""),
         "品类集中度": calculate_category_focus(orders),
         "客单价趋势": calculate_price_trend(orders),
         "复购间隔": calculate_avg_interval(profile, orders),
@@ -98,28 +102,190 @@ def calculate_category_focus(orders: List[Dict]) -> str:
     if not orders:
         return "未知"
 
-    categories = set()
-    for order in orders:
-        category = order.get("category", order.get("commodity_name", ""))
-        if category:
-            # 简化品类名称（取主要品类）
-            if "PIPES" in category.upper():
-                categories.add("PIPES")
-            elif "LIGHTER" in category.upper():
-                categories.add("LIGHTER")
-            elif "ACCESSORY" in category.upper():
-                categories.add("ACCESSORY")
-            else:
-                categories.add("OTHER")
+    distribution = calculate_category_distribution(orders)
+    categories = distribution.get("categories", [])
 
     if len(categories) == 0:
         return "未知"
-    elif len(categories) == 1:
-        return "专注型"
-    elif len(categories) == 2:
-        return "偏好型"
-    else:
-        return "多样化"
+
+    top = categories[0]
+    top_ratio = top.get("percentage", 0)
+    top_category = top.get("category", "未知")
+
+    if top_ratio >= 99.5:
+        return f"单一品类（{top_category} 100%）"
+    if top_ratio >= 80:
+        return f"品类专注型（{top_category} {top_ratio:.1f}%）"
+    if len(categories) == 2:
+        return f"双品类偏好（{distribution.get('summary', '')}）"
+    return f"多品类（{distribution.get('summary', '')}）"
+
+
+def calculate_category_distribution(orders: List[Dict]) -> Dict[str, Any]:
+    """
+    Calculate authoritative category distribution from raw order lines.
+
+    This is intentionally based on the actual category field from target_buyer_orders.
+    Do not collapse unknown categories into OTHER, because doing so can make the AI
+    overstate category focus.
+    """
+    if not orders:
+        return {
+            "total_order_lines": 0,
+            "categories": [],
+            "category_groups": [],
+            "yearly_categories": [],
+            "summary": "无订单品类数据",
+            "stage_summary": "无订单品类数据",
+            "single_category": False,
+            "top_category": "未知",
+            "top_percentage": 0.0,
+        }
+
+    counts: Counter[str] = Counter()
+    group_counts: Counter[str] = Counter()
+    yearly_counts: Dict[str, Counter[str]] = {}
+    for order in orders:
+        category = normalize_category(order.get("category"))
+        if category:
+            counts[category] += 1
+            group_counts[classify_category_group(category)] += 1
+
+            year = extract_order_year(order)
+            if year:
+                yearly_counts.setdefault(year, Counter())[category] += 1
+
+    if not counts:
+        return {
+            "total_order_lines": len(orders),
+            "categories": [],
+            "category_groups": [],
+            "yearly_categories": [],
+            "summary": "订单缺少category字段，不能判断品类占比",
+            "stage_summary": "订单缺少category字段，不能判断品类阶段变化",
+            "single_category": False,
+            "top_category": "未知",
+            "top_percentage": 0.0,
+        }
+
+    total = sum(counts.values())
+    categories = [
+        {
+            "category": category,
+            "order_lines": count,
+            "percentage": round(count / total * 100, 1),
+        }
+        for category, count in counts.most_common()
+    ]
+    category_groups = [
+        {
+            "group": group,
+            "order_lines": count,
+            "percentage": round(count / total * 100, 1),
+        }
+        for group, count in group_counts.most_common()
+    ]
+    yearly_categories = []
+    for year in sorted(yearly_counts):
+        year_total = sum(yearly_counts[year].values())
+        yearly_categories.append({
+            "year": year,
+            "total_order_lines": year_total,
+            "categories": [
+                {
+                    "category": category,
+                    "order_lines": count,
+                    "percentage": round(count / year_total * 100, 1),
+                }
+                for category, count in yearly_counts[year].most_common()
+            ],
+        })
+    summary = "、".join(
+        f"{item['category']} {item['order_lines']}行/{item['percentage']}%"
+        for item in categories
+    )
+    stage_summary = format_stage_summary(yearly_categories)
+
+    return {
+        "total_order_lines": total,
+        "categories": categories,
+        "category_groups": category_groups,
+        "yearly_categories": yearly_categories,
+        "summary": summary,
+        "stage_summary": stage_summary,
+        "single_category": len(categories) == 1,
+        "top_category": categories[0]["category"],
+        "top_percentage": categories[0]["percentage"],
+    }
+
+
+def normalize_category(category: Any) -> str:
+    """Normalize category values while preserving the source category label."""
+    if category is None:
+        return ""
+    value = str(category).strip()
+    if not value or value.lower() in {"none", "null", "nan", "unknown"}:
+        return ""
+    return value.upper()
+
+
+def classify_category_group(category: str) -> str:
+    """Map source category labels into broad commercial groups without translating them."""
+    value = normalize_category(category)
+    readywear = {
+        "KNITWEAR", "WOVEN OUTERWEAR", "CASUAL SHIRTS", "JACKETS", "JERSEY",
+        "READYWEAR", "READY TO WEAR", "READY-TO-WEAR", "SUITS", "TROUSERS",
+        "COATS", "SHIRTS", "T-SHIRTS", "POLO SHIRTS",
+    }
+    accessories = {
+        "JEWELLERY", "BELTS", "TIES", "GIFTING", "EYEWEAR", "SCARVES",
+        "HATS", "CUFFLINKS", "TIE CLIPS", "ACCESSORIES",
+    }
+    leather_goods = {
+        "LARGE LEATHER", "SMALL LEATHER", "LEATHER GOODS", "BAGS",
+        "WALLETS", "BRIEFCASES",
+    }
+    footwear = {"FOOTWEAR", "SHOES", "SNEAKERS", "BOOTS"}
+    pipes_lighters = {"PIPES", "LIGHTERS", "SMOKING ACCESSORIES"}
+
+    if value in readywear:
+        return "READYWEAR"
+    if value in accessories:
+        return "ACCESSORIES/GIFTING"
+    if value in leather_goods:
+        return "LEATHER GOODS"
+    if value in footwear:
+        return "FOOTWEAR"
+    if value in pipes_lighters:
+        return "PIPES/LIGHTERS"
+    return "OTHER"
+
+
+def extract_order_year(order: Dict[str, Any]) -> str:
+    """Extract payment year from common order timestamp fields."""
+    value = order.get("pay_time") or order.get("最后付款时间") or order.get("payment_time")
+    if not value:
+        return ""
+    if isinstance(value, datetime):
+        return str(value.year)
+    text = str(value)
+    return text[:4] if len(text) >= 4 and text[:4].isdigit() else ""
+
+
+def format_stage_summary(yearly_categories: List[Dict[str, Any]]) -> str:
+    """Format yearly category migration facts for AI prompts."""
+    if not yearly_categories:
+        return "缺少付款年份，无法判断品类阶段变化"
+
+    parts = []
+    for year_item in yearly_categories:
+        categories = year_item.get("categories", [])[:4]
+        category_text = "、".join(
+            f"{item['category']} {item['order_lines']}行"
+            for item in categories
+        )
+        parts.append(f"{year_item.get('year')}: {category_text}")
+    return "；".join(parts)
 
 
 def calculate_price_trend(orders: List[Dict]) -> str:

@@ -3,6 +3,7 @@ DeepSeek AI Client - DeepSeek-R1推理模型集成
 用于客户画像深度分析
 """
 import json
+import re
 import sys
 from datetime import datetime
 from typing import Dict, List, Any
@@ -42,6 +43,96 @@ def _serialize_datetime(obj: Any) -> Any:
         return [_serialize_datetime(item) for item in obj]
     else:
         return obj
+
+
+def _extract_category_distribution(order_behavior: Dict[str, Any]) -> Dict[str, Any]:
+    purchase_features = order_behavior.get("购买特征", {})
+    distribution = purchase_features.get("真实品类分布", {})
+    return distribution if isinstance(distribution, dict) else {}
+
+
+def _format_category_distribution_guard(category_distribution: Dict[str, Any]) -> str:
+    categories = category_distribution.get("categories") or []
+    if not categories:
+        return "订单缺少可用category字段。禁止写“100%为某品类”或“只购买某品类”；只能说明“品类数据不足，无法判断占比”。"
+
+    summary = category_distribution.get("summary", "")
+    top_category = category_distribution.get("top_category", "未知")
+    top_percentage = float(category_distribution.get("top_percentage") or 0)
+    single_category = bool(category_distribution.get("single_category"))
+
+    if single_category:
+        return f"真实品类分布：{summary}。只有在此情况下才允许写“100%为{top_category}”。"
+
+    return (
+        f"真实品类分布：{summary}。最高品类是{top_category} {top_percentage:.1f}%。"
+        "严禁写“100%为某品类”“历史订单均为某品类”“只购买某品类”。"
+        "客户类型必须按该分布判断；若最高品类未达到80%，不要写品类专注型。"
+    )
+
+
+def _build_category_stage_note(category_distribution: Dict[str, Any]) -> str:
+    stage_summary = category_distribution.get("stage_summary", "")
+    if stage_summary:
+        return f"品类阶段变化：{stage_summary}"
+    return ""
+
+
+def _sanitize_persona_category_claims(result: Dict[str, Any], category_distribution: Dict[str, Any]) -> Dict[str, Any]:
+    categories = category_distribution.get("categories") or []
+    if not categories:
+        return result
+
+    single_category = bool(category_distribution.get("single_category"))
+    if single_category:
+        return result
+
+    summary = category_distribution.get("summary", "")
+    stage_summary = category_distribution.get("stage_summary", "")
+    top_category = category_distribution.get("top_category", "未知")
+    top_percentage = float(category_distribution.get("top_percentage") or 0)
+    category_note = f"真实订单品类分布为：{summary}；最高品类为{top_category} {top_percentage:.1f}%，不能描述为100%单一品类。"
+    stage_note = f"品类阶段变化为：{stage_summary}。" if stage_summary else ""
+
+    invalid_patterns = [
+        r"100%\s*为[^，。；,.]*",
+        r"[^，。；,.]*品类\s*100%",
+        r"[^，。；,.]*100%\s*品类",
+        r"历史订单(?:均|全部|全都)[^，。；,.]*",
+        r"(?:只|仅|完全|全部)购买[^，。；,.]*",
+        r"均集中在[^，。；,.]*",
+        r"专注[^，。；,.]*品类",
+    ]
+
+    summary_text = result.get("summary")
+    if isinstance(summary_text, str) and any(re.search(pattern, summary_text) for pattern in invalid_patterns):
+        cleaned_text = re.sub("|".join(invalid_patterns), "存在多品类购买", summary_text)
+        result["summary"] = " ".join(part for part in [category_note, stage_note, cleaned_text] if part).strip()
+
+    interests = result.get("key_interests")
+    if isinstance(interests, list):
+        cleaned = []
+        for item in interests:
+            if isinstance(item, str) and any(re.search(pattern, item) for pattern in invalid_patterns):
+                cleaned.append("、".join(part for part in [category_note, stage_note] if part))
+            else:
+                cleaned.append(item)
+        result["key_interests"] = cleaned
+
+    customer_tags = result.get("customer_tags")
+    if isinstance(customer_tags, dict):
+        customer_type = str(customer_tags.get("客户类型", ""))
+        if "品类专注" in customer_type and top_percentage < 80:
+            customer_tags["客户类型"] = "探索型"
+
+    summary_text = result.get("summary")
+    if isinstance(summary_text, str):
+        if "品类专注型" in summary_text and top_percentage < 80:
+            result["summary"] = summary_text.replace("品类专注型", "多品类/阶段迁移型")
+        if "JEWELLERY" in summary_text and "JEWELLERY、" not in summary_text and top_percentage < 80:
+            result["summary"] = summary_text.replace("JEWELLERY", "JEWELLERY（最高品类）")
+
+    return result
 
 
 class DeepSeekClient:
@@ -103,9 +194,15 @@ class DeepSeekClient:
         try:
             # 阶段1：证据提取
             evidence = self._extract_evidence(buyer_nick, profile, chats, orders)
+            order_behavior = structure_order_behavior(profile, orders)
+            order_behavior_serialized = _serialize_datetime(order_behavior)
+            category_distribution = _extract_category_distribution(order_behavior_serialized)
+            evidence["_category_distribution_guard"] = _format_category_distribution_guard(category_distribution)
+            evidence["_authoritative_category_distribution"] = category_distribution
 
             # 阶段2：画像推理
             persona = self._infer_persona(evidence)
+            persona = _sanitize_persona_category_claims(persona, category_distribution)
 
             # 合并结果
             persona["evidence"] = evidence
@@ -138,6 +235,9 @@ class DeepSeekClient:
         # Serialize datetime objects to strings before JSON encoding
         order_behavior_serialized = _serialize_datetime(order_behavior)
         formatted_behavior = json.dumps(order_behavior_serialized, ensure_ascii=False, indent=2)
+        category_distribution_guard = _format_category_distribution_guard(
+            _extract_category_distribution(order_behavior_serialized)
+        )
 
         # 格式化场外信息
         external_records = profile.get("external_records", [])
@@ -155,7 +255,8 @@ class DeepSeekClient:
             days_since_last_purchase=profile.get("days_since_last_purchase", 0),
             days_since_last_chat=profile.get("days_since_last_chat", 0),
             avg_repurchase_interval_days=profile.get("avg_repurchase_interval_days", 0),
-            external_info=formatted_external
+            external_info=formatted_external,
+            category_distribution_guard=category_distribution_guard
         )
 
         response = self.client.chat.completions.create(
@@ -259,6 +360,8 @@ class DeepSeekClient:
 
         # Serialize datetime objects before JSON encoding
         order_behavior_serialized = _serialize_datetime(order_behavior)
+        category_distribution = _extract_category_distribution(order_behavior_serialized)
+        category_distribution_guard = _format_category_distribution_guard(category_distribution)
 
         # 格式化场外信息
         external_records = profile.get("external_records", [])
@@ -282,6 +385,9 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
 
 【订单行为】
 {json.dumps(order_behavior_serialized, ensure_ascii=False, indent=2)[:800]}
+
+【品类事实约束】
+{category_distribution_guard}
 
 【场外信息】（线下消费和私域沟通，仅供参考）
 {formatted_external[:500]}
@@ -328,7 +434,8 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
                 method="DeepSeek-Chat"
             )
 
-            return self._parse_json_response(result_text)
+            result = self._parse_json_response(result_text)
+            return _sanitize_persona_category_claims(result, category_distribution)
 
         except Exception as e:
             _safe_print(f"[DeepSeek-Chat] 快速分析失败: {e}")

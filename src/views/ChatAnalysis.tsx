@@ -187,7 +187,7 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
 
   // Order history pagination
   const [orderCurrentPage, setOrderCurrentPage] = useState(1);
-  const ORDERS_PER_PAGE = 10;
+  const [orderPageSize, setOrderPageSize] = useState<10 | 20 | 30>(10);
 
   // 图片放大状态
   const [enlargedImage, setEnlargedImage] = useState<{ url: string; alt: string } | null>(null);
@@ -685,6 +685,32 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
     // Convert to array and sort by date descending (most recent first)
     return Object.values(grouped).sort((a, b) => b.date.localeCompare(a.date));
   }, [enrichedProfile?.order_history]);
+
+  const sortedOrderHistory = useMemo(() => {
+    const parseOrderTime = (order: OrderRecord) => {
+      const rawDate = order.date || '';
+      const time = new Date(rawDate).getTime();
+      if (!Number.isNaN(time)) return time;
+      const fallbackTime = new Date(rawDate.replace(/\//g, '-')).getTime();
+      return Number.isNaN(fallbackTime) ? 0 : fallbackTime;
+    };
+
+    return [...(enrichedProfile?.order_history || [])].sort((a, b) => {
+      const dateDiff = parseOrderTime(b) - parseOrderTime(a);
+      if (dateDiff !== 0) return dateDiff;
+      return String(b.order_id || '').localeCompare(String(a.order_id || ''));
+    });
+  }, [enrichedProfile?.order_history]);
+
+  const orderTotalPages = Math.max(1, Math.ceil(sortedOrderHistory.length / orderPageSize));
+  const pagedOrderHistory = useMemo(() => {
+    const startIndex = (orderCurrentPage - 1) * orderPageSize;
+    return sortedOrderHistory.slice(startIndex, startIndex + orderPageSize);
+  }, [sortedOrderHistory, orderCurrentPage, orderPageSize]);
+
+  useEffect(() => {
+    setOrderCurrentPage((page) => Math.min(page, orderTotalPages));
+  }, [orderTotalPages]);
 
   // Group messages by date and sort by date ascending (oldest first)
   const groupedMessages = useMemo<Record<string, ChatMessage[]>>(() => {
@@ -1422,26 +1448,45 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
                                 <NotionCard
                                   icon={History}
                                   title="Full Order History"
-                                  subtitle={`${(enrichedProfile?.order_history || []).length} orders`}
+                                  subtitle={`${sortedOrderHistory.length} order lines`}
                                   action={
-                                    (enrichedProfile?.order_history || []).length > ORDERS_PER_PAGE && (
-                                      <div className="flex items-center gap-1">
+                                    sortedOrderHistory.length > 0 && (
+                                      <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-1 border-r border-notion-border pr-2">
+                                          {[10, 20, 30].map((size) => (
+                                            <button
+                                              key={size}
+                                              onClick={() => {
+                                                setOrderPageSize(size as 10 | 20 | 30);
+                                                setOrderCurrentPage(1);
+                                              }}
+                                              className={`px-2 py-1 text-[11px] border rounded transition-colors ${
+                                                orderPageSize === size
+                                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                                  : 'bg-white text-notion-muted border-notion-border hover:bg-notion-hover'
+                                              }`}
+                                              title={`Display ${size} order lines per page`}
+                                            >
+                                              {size}
+                                            </button>
+                                          ))}
+                                        </div>
                                         <button
                                           onClick={() => setOrderCurrentPage(p => Math.max(1, p - 1))}
                                           disabled={orderCurrentPage === 1}
                                           className="p-1 border border-notion-border rounded hover:bg-notion-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                          title="上一页"
+                                          title="Previous page"
                                         >
                                           <ChevronLeft size={14} />
                                         </button>
                                         <span className="text-xs text-notion-muted px-2">
-                                          {orderCurrentPage} / {Math.ceil((enrichedProfile?.order_history || []).length / ORDERS_PER_PAGE)}
+                                          {orderCurrentPage} / {orderTotalPages}
                                         </span>
                                         <button
-                                          onClick={() => setOrderCurrentPage(p => Math.min(Math.ceil((enrichedProfile?.order_history || []).length / ORDERS_PER_PAGE), p + 1))}
-                                          disabled={orderCurrentPage >= Math.ceil((enrichedProfile?.order_history || []).length / ORDERS_PER_PAGE)}
+                                          onClick={() => setOrderCurrentPage(p => Math.min(orderTotalPages, p + 1))}
+                                          disabled={orderCurrentPage >= orderTotalPages}
                                           className="p-1 border border-notion-border rounded hover:bg-notion-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                          title="下一页"
+                                          title="Next page"
                                         >
                                           <ChevronRight size={14} />
                                         </button>
@@ -1465,10 +1510,8 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
                                                  </tr>
                                              </thead>
                                              <tbody className="divide-y divide-notion-border">
-                                                 {(enrichedProfile?.order_history || [])
-                                                   .slice((orderCurrentPage - 1) * ORDERS_PER_PAGE, orderCurrentPage * ORDERS_PER_PAGE)
-                                                   .map((order: OrderRecord) => (
-                                                     <tr key={order.order_id} className="hover:bg-notion-hover transition-colors">
+                                                 {pagedOrderHistory.map((order: OrderRecord) => (
+                                                     <tr key={`${order.order_id}-${order.sub_order_id || order.date}`} className="hover:bg-notion-hover transition-colors">
                                                          <td className="py-3 px-3 font-mono text-xs whitespace-nowrap">{order.date}</td>
                                                          <td className="py-3 px-3 font-mono text-xs text-notion-muted whitespace-nowrap">{order.order_id}</td>
                                                          <td className="py-3 px-3">

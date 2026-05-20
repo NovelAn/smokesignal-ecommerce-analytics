@@ -250,6 +250,11 @@ class BatchAnalyzer:
                 parse_failed = bool(sentiment_results) and all(
                     r.get('_parse_failed') for r in sentiment_results
                 )
+                sentiment_sources = {
+                    r.get('_source')
+                    for r in sentiment_results
+                    if r.get('_source')
+                }
 
                 if parse_failed:
                     logger.info(f"[BatchAnalyzer] MiniMax sentiment parse failed for {buyer_nick}, falling through to DeepSeek")
@@ -279,6 +284,7 @@ class BatchAnalyzer:
                 intent_dist = self.minimax_client.extract_intent_distribution(buyer_messages)
 
                 intent_parse_failed = intent_dist.pop('_parse_failed', False)
+                intent_source = intent_dist.pop('_source', 'model')
 
                 if intent_parse_failed:
                     logger.info(f"[BatchAnalyzer] MiniMax intent parse failed for {buyer_nick}, falling through to DeepSeek")
@@ -292,7 +298,20 @@ class BatchAnalyzer:
                 else:
                     result['dominant_intent'] = 'Unknown'
 
-                result['sentiment_method'] = 'minimax_m27'
+                intent_dist = self._merge_intent_distribution(intent_dist, buyer_messages)
+                result['intent_distribution'] = intent_dist
+                result['dominant_intent'] = self._dominant_intent(intent_dist)
+
+                method_sources = []
+                if sentiment_sources:
+                    method_sources.extend(sorted(sentiment_sources))
+                if intent_source != 'model':
+                    method_sources.append(intent_source)
+                result['sentiment_method'] = (
+                    'minimax_m27'
+                    if not method_sources
+                    else f"minimax_m27_{'+'.join(sorted(set(method_sources)))}"
+                )
                 result['complaint_count'] = intent_dist.get('Complaint', 0)
 
                 # Calculate pre_sale_score and post_sale_score from intent_distribution
@@ -324,8 +343,14 @@ class BatchAnalyzer:
                 result['sentiment_score'] = deepseek_result.get('sentiment_score', 0.5)
                 result['sentiment_label'] = deepseek_result.get('sentiment_label', 'Neutral')
                 result['intent_distribution'] = deepseek_result.get('intent_distribution', {})
+                result['intent_distribution'] = self._merge_intent_distribution(
+                    result['intent_distribution'],
+                    buyer_messages
+                )
                 result['dominant_intent'] = deepseek_result.get('dominant_intent', 'Unknown')
+                result['dominant_intent'] = self._dominant_intent(result['intent_distribution'])
                 result['complaint_count'] = deepseek_result.get('complaint_count', 0)
+                result['complaint_count'] = result['intent_distribution'].get('Complaint', 0)
                 result['sentiment_method'] = 'deepseek'
 
                 # Calculate pre_sale_score and post_sale_score from intent_distribution
@@ -345,6 +370,125 @@ class BatchAnalyzer:
 
         # Final fallback to rule-based
         return self._rule_based_analysis(buyer_nick, buyer_messages)
+
+    def _dominant_intent(self, intent_dist: Dict[str, int]) -> str:
+        """Return dominant canonical intent, ignoring non-intent metadata."""
+        canonical = {
+            key: int(intent_dist.get(key, 0) or 0)
+            for key in [
+                "Pre-sale Inquiry",
+                "Post-sale Support",
+                "Logistics",
+                "Usage Guide",
+                "Complaint",
+            ]
+        }
+        if max(canonical.values()) > 0:
+            return max(canonical.items(), key=lambda x: x[1])[0]
+        return 'Unknown'
+
+    def _merge_intent_distribution(
+        self,
+        intent_dist: Dict[str, Any],
+        messages: List[str]
+    ) -> Dict[str, int]:
+        """
+        Merge AI intent distribution with strict local keyword signals.
+
+        AI providers often undercount post-sale support when a customer has both
+        product questions and service/defect follow-ups. Use local signals as a
+        floor, not only as an all-zero fallback.
+        """
+        canonical_keys = [
+            "Pre-sale Inquiry",
+            "Post-sale Support",
+            "Logistics",
+            "Usage Guide",
+            "Complaint",
+        ]
+        normalized = {
+            key: int((intent_dist or {}).get(key, 0) or 0)
+            for key in canonical_keys
+        }
+
+        local = self._classify_intents_by_keywords(messages)
+        merged = {
+            key: max(normalized.get(key, 0), local.get(key, 0))
+            for key in canonical_keys
+        }
+
+        if sum(normalized.values()) == 0 and sum(local.values()) > 0:
+            logger.info("[BatchAnalyzer] Repaired empty intent distribution with local keyword classifier")
+        elif merged != normalized:
+            logger.info("[BatchAnalyzer] Augmented intent distribution with local keyword classifier")
+
+        return merged
+
+    def _classify_intents_by_keywords(self, messages: List[str]) -> Dict[str, int]:
+        pre_sale_keywords = [
+            '价格', '多少钱', '有货', '现货', '库存', '尺寸', '尺码', '颜色',
+            '款式', '推荐', '新款', '上市', '还有吗', '链接', '双面', '材质',
+            '面料', '羊绒', '骆驼绒', '标识', '徽标', 'ad标', '长尾标',
+            '适合', '合身', '多大', '腰围', '胸围', '可以买吗', '怎么买'
+        ]
+        post_sale_keywords = [
+            '退货', '退了', '退款', '退一下', '换货', '换成', '调换', '维修',
+            '保修', '发票', '收到', '收到了', '售后', '售后服务', '裁袖',
+            '裁一下', '修改', '改袖', '改裤脚', '签收', '寄到', '瑕疵',
+            '划痕', '黑点', '小瑕疵', '包边', '带头', '不舒服', '不合适',
+            '不想要', '发错', '少发', '漏发', '色差', '掉色', '褪色',
+            '破损', '坏了', '有问题', '质量问题', '做工', '污渍'
+        ]
+        logistics_keywords = [
+            '物流', '快递', '发货', '发出', '发了吗', '运单', '单号',
+            '顺丰', '什么时候到', '配送', '寄出', '寄到', '签收', '地址'
+        ]
+        usage_keywords = [
+            '怎么用', '如何使用', '保养', '清洗', '维护', '说明', '教程',
+            '安装', '使用方法', '护理'
+        ]
+        strong_complaint_keywords = ['投诉', '差评', '举报', '315', '消费者协会', '工商', '找经理']
+        dissatisfaction_keywords = [
+            '太差', '质量差', '很差', '垃圾', '骗子', '骗人', '假的', '假货', '欺骗',
+            '失望', '不满', '不满意', '太慢', '态度差', '服务差', '差的', '不好用',
+            '质量太差', '质量不好', '做工差', '掉色', '褪色', '破损', '坏了', '有问题',
+            '差劲', '太差了', '质量太差了', '差评', '给差评'
+        ]
+
+        counts = {
+            "Pre-sale Inquiry": 0,
+            "Post-sale Support": 0,
+            "Logistics": 0,
+            "Usage Guide": 0,
+            "Complaint": 0,
+        }
+
+        for message in messages:
+            text = (message or '').lower()
+            if not text:
+                continue
+
+            has_complaint = (
+                any(kw in text for kw in strong_complaint_keywords)
+                or any(kw in text for kw in dissatisfaction_keywords)
+            )
+            has_post_sale = any(kw in text for kw in post_sale_keywords)
+            has_logistics = any(kw in text for kw in logistics_keywords)
+            has_usage = any(kw in text for kw in usage_keywords)
+            has_pre_sale = any(kw.lower() in text for kw in pre_sale_keywords)
+
+            if has_complaint:
+                counts["Complaint"] += 1
+            if has_post_sale:
+                counts["Post-sale Support"] += 1
+            if has_logistics:
+                counts["Logistics"] += 1
+            if has_usage:
+                counts["Usage Guide"] += 1
+            if has_pre_sale:
+                counts["Pre-sale Inquiry"] += 1
+
+        return counts
 
     def _rule_based_analysis(
         self,
@@ -470,8 +614,20 @@ class BatchAnalyzer:
 
     def _extract_keywords(self, messages: List[str], keyword_type: str) -> List[str]:
         """Extract keywords from messages"""
-        pre_sale_keywords = ['价格', '多少钱', '有货', '尺寸', '颜色', '款式', '推荐']
-        post_sale_keywords = ['退货', '换货', '维修', '保修', '发票']
+        pre_sale_keywords = [
+            '价格', '多少钱', '有货', '现货', '库存', '尺寸', '尺码', '颜色',
+            '款式', '推荐', '新款', '上市', '还有吗', '链接', '双面', '材质',
+            '面料', '羊绒', '骆驼绒', '标识', '徽标', 'ad标', '长尾标',
+            '适合', '合身', '多大', '腰围', '胸围', '可以买吗', '怎么买'
+        ]
+        post_sale_keywords = [
+            '退货', '退了', '退款', '退一下', '换货', '换成', '调换', '维修',
+            '保修', '发票', '收到', '收到了', '售后', '售后服务', '裁袖',
+            '裁一下', '修改', '改袖', '改裤脚', '签收', '寄到', '瑕疵',
+            '划痕', '黑点', '小瑕疵', '包边', '带头', '不舒服', '不合适',
+            '不想要', '发错', '少发', '漏发', '色差', '掉色', '褪色',
+            '破损', '坏了', '有问题', '质量问题', '做工', '污渍'
+        ]
 
         all_text = ' '.join(messages)
 
@@ -621,9 +777,19 @@ class BatchAnalyzer:
 
             # Process in batches
             for i in range(0, len(buyers), self.batch_size):
+                if self._should_cancel(task_id):
+                    self._mark_cancelled(task_id)
+                    logger.info(f"[BatchAnalyzer] Batch task {task_id} cancelled before batch {i // self.batch_size + 1}")
+                    return
+
                 batch = buyers[i:i + self.batch_size]
 
                 for buyer in batch:
+                    if self._should_cancel(task_id):
+                        self._mark_cancelled(task_id)
+                        logger.info(f"[BatchAnalyzer] Batch task {task_id} cancelled at buyer {buyer.get('buyer_nick')}")
+                        return
+
                     try:
                         buyer_nick = buyer['buyer_nick']
 
@@ -679,6 +845,34 @@ class BatchAnalyzer:
             "error_message": task.error_message,
             "created_at": task.created_at.isoformat()
         }
+
+    def cancel_batch_analysis(self, task_id: str) -> bool:
+        """Cancel a running batch analysis task."""
+        with self.task_lock:
+            task = self.tasks.get(task_id)
+            if not task:
+                return False
+            if task.status in {BatchTaskStatus.COMPLETED, BatchTaskStatus.FAILED, BatchTaskStatus.CANCELLED}:
+                return False
+            task.status = BatchTaskStatus.CANCELLED
+            task.completed_at = datetime.now()
+            task.error_message = "Cancelled by user"
+            return True
+
+    def _should_cancel(self, task_id: str) -> bool:
+        with self.task_lock:
+            task = self.tasks.get(task_id)
+            return bool(task and task.status == BatchTaskStatus.CANCELLED)
+
+    def _mark_cancelled(self, task_id: str):
+        with self.task_lock:
+            task = self.tasks.get(task_id)
+            if not task:
+                return
+            task.status = BatchTaskStatus.CANCELLED
+            task.completed_at = datetime.now()
+            if not task.error_message:
+                task.error_message = "Cancelled by user"
 
     def get_sentiment_summary(self) -> Dict[str, Any]:
         """Get overall sentiment distribution summary

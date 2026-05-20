@@ -97,6 +97,11 @@ class MiniMaxClient:
 【买家数据】
 {order_summary}
 
+**品类写作规则**
+- 品类名保留英文原名，不要翻译成中文。
+- 只有订单全部属于同一品类时，才可以写“历史订单均为某品类”或“100%为某品类”。
+- 如果看到多个品类，必须写成多品类买家，不能把最高频品类写成全部订单。
+
 【聊天记录】（最近{len(chats)}条）
 {self._format_chats(chats[:20])}
 
@@ -105,7 +110,7 @@ class MiniMaxClient:
 1. **summary** - 画像总结（2-3句话）
    - 使用具体数字：客单价、退款率、复购间隔、品类占比、MD占比等
    - **深度推断**：
-     * 品类偏好：所有订单都是同一品类？→ 专注型客户，偏好明确
+     * 品类偏好：如果多个品类并存，只能写最高频品类和占比，不能写成全部订单
      * 复购行为：第二单隔多久？仍买同品类？→ 偏好稳定，可推荐同品类新品
      * 客单价变化：持续上升？→ 消费升级，可推荐更高价位商品
    - 如果有聊天，引用客户原话
@@ -233,7 +238,7 @@ class MiniMaxClient:
 
         except Exception as e:
             _safe_print(f"[MiniMaxClient] Error in sentiment analysis: {e}")
-            return self._default_sentiment_results(len(messages), parse_failed=True)
+            return self._heuristic_sentiment_results(messages, source="exception")
 
     def _format_messages_for_sentiment(self, messages: List[str]) -> str:
         formatted = []
@@ -346,13 +351,13 @@ class MiniMaxClient:
             )
 
             response_text = response.choices[0].message.content
-            return self._parse_intent_response(response_text)
+            return self._parse_intent_response(response_text, messages)
 
         except Exception as e:
             _safe_print(f"[MiniMaxClient] Error in intent analysis: {e}")
-            return self._default_intent_distribution(parse_failed=True)
+            return self._heuristic_intent_distribution(messages, source="exception")
 
-    def _parse_intent_response(self, response_text: str) -> Dict[str, int]:
+    def _parse_intent_response(self, response_text: str, messages: List[str]) -> Dict[str, int]:
         try:
             cleaned = self._clean_model_response(response_text)
             json_str = self._extract_json_value(cleaned, expected_type=dict)
@@ -368,9 +373,13 @@ class MiniMaxClient:
             result = self._default_intent_distribution(parse_failed=False)
             for key in self._intent_keys():
                 try:
-                    result[key] = int(parsed.get(key, 0))
+                    result[key] = int(self._lookup_intent_value(parsed, key))
                 except (TypeError, ValueError):
                     result[key] = 0
+
+            if sum(result[k] for k in self._intent_keys()) == 0:
+                _safe_print("[MiniMaxClient] Parsed intent distribution is empty; falling back to heuristic classification")
+                return self._heuristic_intent_distribution(messages, source="empty_model")
 
             return result
 
@@ -378,6 +387,74 @@ class MiniMaxClient:
             preview = response_text[:500] if response_text else "EMPTY"
             _safe_print(f"[MiniMaxClient] Intent JSON decode error: {e}. Preview: {preview}")
             return self._default_intent_distribution(parse_failed=True)
+
+    def _heuristic_sentiment_results(self, messages: List[str], source: str = "heuristic") -> List[Dict[str, Any]]:
+        results = []
+        for msg in messages:
+            text = (msg or "").lower()
+            positive_hits = sum(1 for word in ["好", "喜欢", "满意", "感谢", "谢谢", "不错", "很好", "棒", "赞"] if word in text)
+            negative_hits = sum(1 for word in ["差", "不好", "失望", "投诉", "退货", "退款", "问题", "坏", "不喜欢"] if word in text)
+
+            if negative_hits > positive_hits:
+                sentiment = "Negative"
+                score = 0.2
+            elif positive_hits > negative_hits:
+                sentiment = "Positive"
+                score = 0.8
+            else:
+                sentiment = "Neutral"
+                score = 0.5
+
+            results.append({
+                "score": score,
+                "sentiment": sentiment,
+                "_parse_failed": False,
+                "_source": source
+            })
+        return results
+
+    def _heuristic_intent_distribution(self, messages: List[str], source: str = "heuristic") -> Dict[str, int]:
+        all_text = " ".join(messages)
+
+        pre_sale_keywords = ['价格', '多少钱', '有货', '尺寸', '颜色', '款式', '推荐', '新款', '上市']
+        post_sale_keywords = ['退货', '换货', '维修', '保修', '发票', '物流', '快递', '收到']
+        strong_complaint_keywords = ['投诉', '差评', '举报', '315', '消费者协会', '工商', '找经理']
+        dissatisfaction_keywords = [
+            '太差', '质量差', '很差', '垃圾', '骗子', '骗人', '假的', '假货', '欺骗',
+            '失望', '不满', '不满意', '太慢', '态度差', '服务差', '差的', '不好用',
+            '质量太差', '质量不好', '做工差', '掉色', '褪色', '破损', '坏了', '有问题',
+            '差劲', '太差了', '质量太差了', '差评', '给差评'
+        ]
+        functional_keywords = ['退款', '退货', '换货', '催促', '发货', '收到货', '物流']
+
+        pre_sale_count = sum(1 for word in pre_sale_keywords if word in all_text)
+        post_sale_count = sum(1 for word in post_sale_keywords if word in all_text)
+
+        strong_matches = [kw for kw in strong_complaint_keywords if kw in all_text]
+        dissatisfaction_matches = [kw for kw in dissatisfaction_keywords if kw in all_text]
+        functional_matches = [kw for kw in functional_keywords if kw in all_text]
+
+        complaint_count = 0
+        if len(strong_matches) >= 1:
+            complaint_count = 1
+        elif len(dissatisfaction_matches) >= 1:
+            complaint_count = 1
+
+        result = {
+            "Pre-sale Inquiry": pre_sale_count,
+            "Post-sale Support": post_sale_count,
+            "Logistics": 0,
+            "Usage Guide": 0,
+            "Complaint": complaint_count,
+            "_parse_failed": False,
+            "_source": source
+        }
+
+        if pre_sale_count == 0 and post_sale_count == 0 and complaint_count == 0 and functional_matches:
+            # 常见正常售后场景：退款/退货/发货
+            result["Post-sale Support"] = 1
+
+        return result
 
     def _default_sentiment_results(self, expected_count: int, parse_failed: bool) -> List[Dict[str, Any]]:
         return [
@@ -404,6 +481,39 @@ class MiniMaxClient:
             "Usage Guide",
             "Complaint"
         ]
+
+    def _lookup_intent_value(self, parsed: Dict[str, Any], canonical_key: str) -> Any:
+        aliases = {
+            "Pre-sale Inquiry": [
+                "Pre-sale Inquiry", "Pre-sale", "Pre Sale", "Presale", "pre_sale",
+                "preSale", "售前咨询", "售前", "咨询", "购买咨询"
+            ],
+            "Post-sale Support": [
+                "Post-sale Support", "Post-sale", "Post Sale", "After-sale", "After Sales",
+                "post_sale", "postSale", "售后支持", "售后", "售后服务"
+            ],
+            "Logistics": [
+                "Logistics", "Shipping", "Delivery", "logistics", "shipping",
+                "物流", "发货", "配送", "快递"
+            ],
+            "Usage Guide": [
+                "Usage Guide", "Usage", "Guide", "How-to", "usage_guide",
+                "使用指南", "使用", "教程", "保养", "功能说明"
+            ],
+            "Complaint": [
+                "Complaint", "Complaints", "complaint", "投诉", "差评", "负面反馈"
+            ],
+        }
+
+        normalized = {self._normalize_key(key): value for key, value in parsed.items()}
+        for alias in aliases[canonical_key]:
+            value = normalized.get(self._normalize_key(alias))
+            if value is not None:
+                return value
+        return 0
+
+    def _normalize_key(self, key: Any) -> str:
+        return re.sub(r"[\s_\-]+", "", str(key).strip().lower())
 
     def _clean_model_response(self, response_text: str) -> str:
         if not response_text:

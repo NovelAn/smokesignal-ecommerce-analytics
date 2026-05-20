@@ -806,7 +806,6 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
                 FROM target_buyer_orders
                 WHERE 买家昵称 = %s
                 ORDER BY 最后付款时间 DESC
-                LIMIT 50
             """
             return db.execute_query(orders_query, [user_nick])
 
@@ -1129,12 +1128,23 @@ async def force_refresh_analysis(
                         "chat_history": chats,
                     }
 
+                    orders_query = """
+                        SELECT
+                            订单号, 商品名称 as commodity_name, category,
+                            成交总金额 as payment, 退款金额, 退款类型 as refund_status,
+                            最后付款时间 as pay_time
+                        FROM target_buyer_orders
+                        WHERE 买家昵称 = %s
+                        ORDER BY 最后付款时间 DESC
+                    """
+                    orders = db.execute_query(orders_query, [user_nick])
+
                     # 调用orchestrator进行分析
                     ai_result = orchestrator.analyze_buyer_persona(
                         buyer_nick=user_nick,
                         profile=profile_data,
                         chats=chats,
-                        orders=[]  # 订单数据已在profile中
+                        orders=orders
                     )
 
                     # 保存结果到缓存
@@ -1216,7 +1226,6 @@ async def analyze_buyer_async(
                 FROM target_buyer_orders
                 WHERE 买家昵称 = %s
                 ORDER BY 最后付款时间 DESC
-                LIMIT 50
             """
             return db.execute_query(orders_query, [user_nick])
 
@@ -1699,6 +1708,34 @@ async def get_batch_analysis_status(
             raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
 
         return status
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai/batch-cancel/{task_id}")
+async def cancel_batch_analysis(
+    task_id: str
+) -> Dict[str, Any]:
+    """
+    中止批量AI情感/意图分析任务
+    """
+    try:
+        from backend.ai.batch_analyzer import get_batch_analyzer
+
+        batch_analyzer = get_batch_analyzer()
+        cancelled = batch_analyzer.cancel_batch_analysis(task_id)
+
+        if not cancelled:
+            raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在或已结束")
+
+        return {
+            "task_id": task_id,
+            "status": "cancelled",
+            "message": "批量分析任务已中止"
+        }
 
     except HTTPException:
         raise

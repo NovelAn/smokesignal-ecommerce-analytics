@@ -36,6 +36,14 @@ PERSONA_INFERENCE_PROMPT = """
 【提取的证据】
 {evidence_json}
 
+⚠️ **品类事实硬约束**：
+- 必须优先读取证据中的 `_authoritative_category_distribution` 和 `_category_distribution_guard`。
+- 只有 `_authoritative_category_distribution.single_category = true` 时，才允许写“100%为某品类”“历史订单均为某品类”“只购买某品类”。
+- 如果真实分布包含多个品类，summary 必须写真实分布或最高品类占比，不能把 top_category 误写成全部订单。
+- “品类专注型”要求最高品类占比 >= 80%；未达到则判断为探索型或多品类客户。
+- 品类名必须保留英文原名，不要翻译成中文。
+- 如果存在 `_authoritative_category_distribution.stage_summary`，summary 要体现品类阶段切换，例如“2024偏READYWEAR，2025偏ACCESSORIES，2026偏GIFTING/FOOTWEAR”，不要写成单一偏好。
+
 【画像推断框架】
 
 ## 1. 客户类型判断（必填）
@@ -46,6 +54,11 @@ PERSONA_INFERENCE_PROMPT = """
 - 特征：购买3个及以上品类，包含成衣+配饰
 - 描述示例："Total Look客户，在店内购买成衣、配饰、皮具多品类，追求整体搭配"
 - 推荐策略：推荐配套单品，打造完整造型
+
+**阶段迁移型**：
+- 特征：跨年份购买品类明显切换，但整体覆盖多个品类
+- 描述示例："2024偏READYWEAR，2025偏JEWELLERY/BELTS，2026偏GIFTING/FOOTWEAR，是跟随需求变化的多品类买家"
+- 推荐策略：按当前阶段偏好推荐，但不要忽略历史多品类基础
 
 **品类专注型**：
 - 特征：80%以上订单集中在单一品类
@@ -144,6 +157,9 @@ PERSONA_INFERENCE_PROMPT = """
 
 ⚠️ **summary正确示例**：
 
+**多品类阶段迁移客户示例**：
+"多品类客户，历史订单分布于JEWELLERY、GIFTING、BELTS、READYWEAR/APPAREL等多个品类。2024年偏READYWEAR，2025年偏JEWELLERY和BELTS，2026年转向GIFTING和FOOTWEAR，说明是跟随阶段需求变化的全品类买家。2024-2026年持续复购，忠诚度高，近期活跃，流失风险低。"
+
 **Total Look客户示例**：
 "Total Look客户，在店内购买成衣、配饰（领带、眼镜）、皮具等多品类，追求整体搭配。2024-2025-2026年持续复购，平均复购周期109天（奢侈品中频），高忠诚度。关注尺码合身度和穿搭效果，会通过直播了解款式上身效果，近期高活跃，流失风险低。已是熟悉客户（12单购买记录）。"
 
@@ -180,6 +196,7 @@ PERSONA_INFERENCE_PROMPT = """
 ⚠️ **推荐使用的表达**：
 - "Total Look客户，购买成衣、配饰、皮具多品类"
 - "2024-2025-2026年持续复购，高忠诚度"
+- "2024偏READYWEAR，2025偏ACCESSORIES，2026偏GIFTING/FOOTWEAR"
 - "平均复购周期109天（奢侈品中频）"
 - "关注尺码合身度和穿搭效果，会看直播"
 - "近期高活跃，流失风险低"

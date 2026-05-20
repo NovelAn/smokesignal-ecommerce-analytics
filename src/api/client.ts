@@ -411,6 +411,17 @@ export const apiClient = {
   },
 
   /**
+   * 中止批量AI情感/意图分析
+   * POST /api/v2/ai/batch-cancel/{task_id}
+   */
+  cancelBatchAnalysis: async (taskId: string) => {
+    const response = await fetch(`${API_BASE}/ai/batch-cancel/${taskId}`, {
+      method: 'POST',
+    });
+    return handleResponse<{ task_id: string; status: string; message: string }>(response);
+  },
+
+  /**
    * 获取情感分析汇总
    * GET /api/v2/analytics/sentiment-summary
    */

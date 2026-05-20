@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Terminal, Play, RefreshCw, CheckCircle, AlertCircle, Loader2, Search, User, Sparkles } from 'lucide-react';
+import { Terminal, Play, RefreshCw, CheckCircle, AlertCircle, Loader2, Search, User, Sparkles, Square } from 'lucide-react';
 import { apiClient, BatchAnalysisStatus, SentimentSummary } from '../api/client';
 
 const SettingsView: React.FC = () => {
@@ -7,6 +7,7 @@ const SettingsView: React.FC = () => {
   const [sentimentSummary, setSentimentSummary] = useState<SentimentSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Single customer analysis state
@@ -34,6 +35,7 @@ const SettingsView: React.FC = () => {
 
         if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
           setIsPolling(false);
+          setIsCancelling(false);
           // 刷新汇总数据
           loadSentimentSummary();
         }
@@ -77,6 +79,26 @@ const SettingsView: React.FC = () => {
       setError(err.message || '启动批量分析失败');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCancelBatchAnalysis = async () => {
+    if (!batchStatus?.task_id) return;
+
+    setIsCancelling(true);
+    setError(null);
+
+    try {
+      await apiClient.cancelBatchAnalysis(batchStatus.task_id);
+      const status = await apiClient.getBatchAnalysisStatus(batchStatus.task_id);
+      setBatchStatus(status);
+      if (status.status === 'cancelled') {
+        setIsPolling(false);
+      }
+    } catch (err: any) {
+      setError(err.message || '中止批量分析失败');
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -161,6 +183,8 @@ const SettingsView: React.FC = () => {
         return <CheckCircle className="w-4 h-4 text-green-500" />;
       case 'failed':
         return <AlertCircle className="w-4 h-4 text-red-500" />;
+      case 'cancelled':
+        return <AlertCircle className="w-4 h-4 text-gray-500" />;
       default:
         return null;
     }
@@ -273,19 +297,36 @@ const SettingsView: React.FC = () => {
                 </div>
               )}
 
-              {/* Start Button */}
-              <button
-                onClick={handleStartBatchAnalysis}
-                disabled={isLoading || isPolling}
-                className="mt-4 flex items-center gap-2 px-4 py-2 bg-notion-text text-white rounded-sm hover:bg-gray-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-              >
-                {isLoading || isPolling ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Play className="w-4 h-4" />
+              {/* Batch Controls */}
+              <div className="mt-4 flex items-center gap-2">
+                <button
+                  onClick={handleStartBatchAnalysis}
+                  disabled={isLoading || isPolling}
+                  className="flex items-center gap-2 px-4 py-2 bg-notion-text text-white rounded-sm hover:bg-gray-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isLoading || isPolling ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Play className="w-4 h-4" />
+                  )}
+                  {isLoading ? 'Starting...' : isPolling ? 'Analyzing...' : 'Start Batch Analysis'}
+                </button>
+
+                {isPolling && batchStatus?.task_id && (
+                  <button
+                    onClick={handleCancelBatchAnalysis}
+                    disabled={isCancelling}
+                    className="flex items-center gap-2 px-4 py-2 border border-red-300 text-red-700 bg-red-50 rounded-sm hover:bg-red-100 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isCancelling ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                    {isCancelling ? 'Stopping...' : 'Stop'}
+                  </button>
                 )}
-                {isLoading ? 'Starting...' : isPolling ? 'Analyzing...' : 'Start Batch Analysis'}
-              </button>
+              </div>
             </div>
           </div>
         </div>
