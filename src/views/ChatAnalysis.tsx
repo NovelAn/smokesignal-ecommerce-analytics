@@ -65,7 +65,8 @@ import {
   BarChart as BarChartIcon,
   Info,
   Award,
-  Gauge
+  Gauge,
+  RefreshCw
 } from 'lucide-react';
 import {
   KEYWORD_DATA,
@@ -1114,10 +1115,29 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
                      <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
                          {/* AI Summary Section */}
                          <NotionCard
-                           icon={Sparkles}
-                           title="AI Persona Analysis"
-                           subtitle={enableAI && !enrichedProfile?.analysis?.error ? "(AI分析已基于买家历史数据和聊天记录生成)" : undefined}
-                         >
+                          icon={Sparkles}
+                          title="AI Persona Analysis"
+                          subtitle={enableAI && !enrichedProfile?.analysis?.error ? "(AI分析已基于买家历史数据和聊天记录生成)" : undefined}
+                          action={
+                            <div className="flex items-center gap-2">
+                              {buyerProfile?.persona_refresh_required && (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap" title="最近有新订单或新聊天，建议刷新画像">
+                                  <AlertTriangle size={11} />
+                                  画像待刷新
+                                </span>
+                              )}
+                              <button
+                                onClick={handleForceRefreshPersona}
+                                disabled={isRefreshingAI}
+                                className="inline-flex items-center gap-2 px-2.5 py-1.5 text-xs rounded border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="重新生成AI画像"
+                              >
+                                <RefreshCw size={12} className={isRefreshingAI ? 'animate-spin' : ''} />
+                                刷新画像
+                              </button>
+                            </div>
+                          }
+                        >
                             {profileLoading ? (
                               <div className="py-8">
                                 <LoadingSpinner size={24} text="加载买家信息..." />

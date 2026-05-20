@@ -8,6 +8,10 @@ const SettingsView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isPersonaBatchLoading, setIsPersonaBatchLoading] = useState(false);
+  const [isPersonaBatchPolling, setIsPersonaBatchPolling] = useState(false);
+  const [isPersonaBatchCancelling, setIsPersonaBatchCancelling] = useState(false);
+  const [personaBatchStatus, setPersonaBatchStatus] = useState<BatchAnalysisStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Single customer analysis state
@@ -46,6 +50,26 @@ const SettingsView: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [isPolling, batchStatus?.task_id]);
+
+  useEffect(() => {
+    if (!isPersonaBatchPolling || !personaBatchStatus?.task_id) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const status = await apiClient.getPersonaBatchRefreshStatus(personaBatchStatus.task_id);
+        setPersonaBatchStatus(status);
+
+        if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+          setIsPersonaBatchPolling(false);
+          setIsPersonaBatchCancelling(false);
+        }
+      } catch (err) {
+        console.error('Failed to poll persona batch status:', err);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isPersonaBatchPolling, personaBatchStatus?.task_id]);
 
   const loadSentimentSummary = async () => {
     try {
@@ -99,6 +123,52 @@ const SettingsView: React.FC = () => {
       setError(err.message || '中止批量分析失败');
     } finally {
       setIsCancelling(false);
+    }
+  };
+
+  const handleStartPersonaBatchRefresh = async () => {
+    setIsPersonaBatchLoading(true);
+    setError(null);
+
+    try {
+      const response = await apiClient.startPersonaBatchRefresh(50);
+      setPersonaBatchStatus({
+        task_id: response.task_id,
+        status: 'pending',
+        total_buyers: 0,
+        processed_buyers: 0,
+        skipped_buyers: 0,
+        failed_buyers: 0,
+        progress_percent: 0,
+        started_at: null,
+        completed_at: null,
+        error_message: null,
+      });
+      setIsPersonaBatchPolling(true);
+    } catch (err: any) {
+      setError(err.message || '启动待刷新画像批量任务失败');
+    } finally {
+      setIsPersonaBatchLoading(false);
+    }
+  };
+
+  const handleCancelPersonaBatchRefresh = async () => {
+    if (!personaBatchStatus?.task_id) return;
+
+    setIsPersonaBatchCancelling(true);
+    setError(null);
+
+    try {
+      await apiClient.cancelPersonaBatchRefresh(personaBatchStatus.task_id);
+      const status = await apiClient.getPersonaBatchRefreshStatus(personaBatchStatus.task_id);
+      setPersonaBatchStatus(status);
+      if (status.status === 'cancelled') {
+        setIsPersonaBatchPolling(false);
+      }
+    } catch (err: any) {
+      setError(err.message || '中止待刷新画像批量任务失败');
+    } finally {
+      setIsPersonaBatchCancelling(false);
     }
   };
 
@@ -209,6 +279,25 @@ const SettingsView: React.FC = () => {
     }
   };
 
+  const getPersonaStatusText = () => {
+    if (!personaBatchStatus) return null;
+
+    switch (personaBatchStatus.status) {
+      case 'pending':
+        return '等待中...';
+      case 'running':
+        return `刷新中... ${personaBatchStatus.processed_buyers}/${personaBatchStatus.total_buyers}`;
+      case 'completed':
+        return `完成! 已刷新 ${personaBatchStatus.processed_buyers} 个客户`;
+      case 'failed':
+        return `失败: ${personaBatchStatus.error_message}`;
+      case 'cancelled':
+        return '已取消';
+      default:
+        return personaBatchStatus.status;
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-8">
       {/* Pipeline Configuration */}
@@ -228,6 +317,71 @@ const SettingsView: React.FC = () => {
               <div className="mt-4 flex items-center gap-2 text-xs font-mono text-notion-muted bg-notion-sidebar p-2 rounded border border-notion-border">
                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
                 Connected to PostgreSQL DB
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Persona Batch Refresh */}
+      <div>
+        <h2 className="text-2xl font-serif text-notion-text mb-4">AI Persona Refresh</h2>
+        <div className="bg-notion-bg border border-notion-border rounded-sm p-6 shadow-sm">
+          <div className="flex items-start gap-4">
+            <div className="p-2 bg-purple-50 rounded text-purple-700">
+              <Sparkles size={20} />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-medium text-notion-text">Batch Persona Refresh</h3>
+              <p className="text-sm text-notion-muted mt-1 leading-relaxed">
+                仅刷新待更新画像客户，不做全量重刷。任务会优先处理有新订单或新聊天的客户。
+              </p>
+
+              {personaBatchStatus && (
+                <div className="mt-4 flex items-center gap-2 text-sm bg-notion-sidebar p-3 rounded border border-notion-border">
+                  {getStatusIcon()}
+                  <span className="text-notion-text">{getPersonaStatusText()}</span>
+                  {personaBatchStatus.status === 'running' && (
+                    <div className="flex-1 ml-2">
+                      <div className="h-2 bg-notion-border rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-purple-500 transition-all duration-300"
+                          style={{ width: `${personaBatchStatus.progress_percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-4 flex items-center gap-2">
+                <button
+                  onClick={handleStartPersonaBatchRefresh}
+                  disabled={isPersonaBatchLoading || isPersonaBatchPolling}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-sm hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isPersonaBatchLoading || isPersonaBatchPolling ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4" />
+                  )}
+                  {isPersonaBatchLoading ? 'Starting...' : isPersonaBatchPolling ? 'Refreshing...' : 'Refresh Persona Batch'}
+                </button>
+
+                {isPersonaBatchPolling && personaBatchStatus?.task_id && (
+                  <button
+                    onClick={handleCancelPersonaBatchRefresh}
+                    disabled={isPersonaBatchCancelling}
+                    className="flex items-center gap-2 px-4 py-2 border border-red-300 text-red-700 bg-red-50 rounded-sm hover:bg-red-100 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isPersonaBatchCancelling ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                    {isPersonaBatchCancelling ? 'Stopping...' : 'Stop'}
+                  </button>
+                )}
               </div>
             </div>
           </div>

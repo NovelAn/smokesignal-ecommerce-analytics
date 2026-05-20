@@ -717,14 +717,15 @@ async def get_buyer_orders(
 
         time_condition = time_conditions.get(time_range, time_conditions['1y'])
 
-        # 统一使用预计算表（包含全部历史订单，且有索引，比VIEW快得多）
+        table_name = 'dunhill_t01_trade_line' if time_range == 'all' else 'target_buyer_orders'
+
         query = f"""
             SELECT
                 订单号, 子订单号, 商品名称, category,
                 成交总金额, 退款金额, 退款类型,
                 FP_MD, 图片地址, 最后付款时间, 件数,
                 (成交总金额 - IFNULL(退款金额, 0)) as netsales
-            FROM target_buyer_orders
+            FROM {table_name}
             WHERE 买家昵称 = %s
               {time_condition}
             ORDER BY 最后付款时间 DESC, 子订单号 ASC
@@ -803,7 +804,7 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
                     订单号, 商品名称 as commodity_name, category,
                     成交总金额 as payment, 退款金额, 退款类型 as refund_status,
                     最后付款时间 as pay_time
-                FROM target_buyer_orders
+                FROM dunhill_t01_trade_line
                 WHERE 买家昵称 = %s
                 ORDER BY 最后付款时间 DESC
             """
@@ -1133,7 +1134,7 @@ async def force_refresh_analysis(
                             订单号, 商品名称 as commodity_name, category,
                             成交总金额 as payment, 退款金额, 退款类型 as refund_status,
                             最后付款时间 as pay_time
-                        FROM target_buyer_orders
+                        FROM dunhill_t01_trade_line
                         WHERE 买家昵称 = %s
                         ORDER BY 最后付款时间 DESC
                     """
@@ -1223,7 +1224,7 @@ async def analyze_buyer_async(
                     订单号, 商品名称 as commodity_name, category,
                     成交总金额 as payment, 退款金额, 退款类型 as refund_status,
                     最后付款时间 as pay_time
-                FROM target_buyer_orders
+                FROM dunhill_t01_trade_line
                 WHERE 买家昵称 = %s
                 ORDER BY 最后付款时间 DESC
             """
@@ -1737,6 +1738,74 @@ async def cancel_batch_analysis(
             "message": "批量分析任务已中止"
         }
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai/persona-batch-refresh")
+async def start_persona_batch_refresh(
+    buyer_limit: int = Query(50, ge=1, le=200, description="Maximum buyers to refresh")
+) -> Dict[str, Any]:
+    """
+    启动待刷新画像批量任务
+    """
+    try:
+        from backend.ai.batch_analyzer import get_batch_analyzer
+
+        batch_analyzer = get_batch_analyzer()
+        task_id = batch_analyzer.start_persona_refresh_batch(buyer_limit=buyer_limit)
+
+        return {
+            "task_id": task_id,
+            "status": "pending",
+            "message": f"待刷新画像批量任务已创建，将刷新最多 {buyer_limit} 个客户"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ai/persona-batch-status/{task_id}")
+async def get_persona_batch_refresh_status(task_id: str) -> Dict[str, Any]:
+    """
+    查询待刷新画像批量任务状态
+    """
+    try:
+        from backend.ai.batch_analyzer import get_batch_analyzer
+
+        batch_analyzer = get_batch_analyzer()
+        status = batch_analyzer.get_task_status(task_id)
+
+        if not status:
+            raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+
+        return status
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai/persona-batch-cancel/{task_id}")
+async def cancel_persona_batch_refresh(task_id: str) -> Dict[str, Any]:
+    """
+    中止待刷新画像批量任务
+    """
+    try:
+        from backend.ai.batch_analyzer import get_batch_analyzer
+
+        batch_analyzer = get_batch_analyzer()
+        cancelled = batch_analyzer.cancel_batch_analysis(task_id)
+
+        if not cancelled:
+            raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在或已结束")
+
+        return {
+            "task_id": task_id,
+            "status": "cancelled",
+            "message": "待刷新画像批量任务已中止"
+        }
     except HTTPException:
         raise
     except Exception as e:

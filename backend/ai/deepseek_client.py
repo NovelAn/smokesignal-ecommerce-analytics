@@ -78,21 +78,153 @@ def _build_category_stage_note(category_distribution: Dict[str, Any]) -> str:
     return ""
 
 
-def _sanitize_persona_category_claims(result: Dict[str, Any], category_distribution: Dict[str, Any]) -> Dict[str, Any]:
+def _parse_order_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text[:len(fmt)], fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_purchase_timing_guard(
+    profile: Dict[str, Any],
+    orders: List[Dict[str, Any]],
+    category_distribution: Dict[str, Any]
+) -> str:
+    dated_orders = []
+    for order in orders:
+        paid_at = _parse_order_datetime(
+            order.get("pay_time") or order.get("最后付款时间") or order.get("payment_time")
+        )
+        if paid_at:
+            dated_orders.append((paid_at, order))
+
+    l6m_orders = int(_safe_float(profile.get("l6m_orders")))
+    l6m_netsales = _safe_float(profile.get("l6m_netsales"))
+    l6m_refund_rate = _safe_float(profile.get("l6m_refund_rate"))
+    lines = [
+        f"L6M订单数：{l6m_orders}；L6M净销售：¥{l6m_netsales:,.0f}；L6M退款率：{l6m_refund_rate:.1%}。"
+    ]
+
+    if not dated_orders:
+        return "\n".join(lines + ["订单缺少付款时间，禁止判断近期品类或召回间隔。"])
+
+    dated_orders.sort(key=lambda item: item[0])
+    latest_dt = dated_orders[-1][0]
+    latest_day = latest_dt.date()
+    latest_orders = [order for paid_at, order in dated_orders if paid_at.date() == latest_day]
+    previous_dates = sorted({paid_at.date() for paid_at, _ in dated_orders if paid_at.date() < latest_day})
+    latest_categories = sorted({
+        str(order.get("category", "")).strip().upper()
+        for order in latest_orders
+        if str(order.get("category", "")).strip()
+    })
+    historical_categories = sorted({
+        str(order.get("category", "")).strip().upper()
+        for paid_at, order in dated_orders
+        if paid_at.date() < latest_day and str(order.get("category", "")).strip()
+    })
+    non_recent_categories = [cat for cat in historical_categories if cat not in latest_categories]
+
+    latest_payment = sum(_safe_float(order.get("payment") or order.get("成交总金额")) for order in latest_orders)
+    latest_refund = sum(_safe_float(order.get("退款金额")) for order in latest_orders)
+    latest_net = latest_payment - latest_refund
+    latest_category_text = " / ".join(latest_categories) if latest_categories else "未知"
+    lines.append(
+        f"最近一次购买日期：{latest_day}；最近购买品类仅为：{latest_category_text}；"
+        f"最近一次订单净销售约¥{latest_net:,.0f}。"
+    )
+
+    if previous_dates:
+        previous_day = previous_dates[-1]
+        gap_days = (latest_day - previous_day).days
+        lines.append(f"上一购买日期：{previous_day}；与最近购买间隔约{gap_days}天。")
+        if gap_days >= 365:
+            lines.append("这是近期被召回的老客信号，summary必须体现“近期被召回/重新购买”，不要写成连续近期多品类购买。")
+        elif gap_days >= 180:
+            lines.append("这是较长间隔后的回购信号，summary应体现回购间隔，不要把历史品类说成近期购买。")
+
+    if non_recent_categories:
+        lines.append(
+            f"非近期历史品类：{' / '.join(non_recent_categories)}。这些品类不是近期购买，禁止写“近期购买{('/'.join(non_recent_categories))}”。"
+        )
+
+    categories = category_distribution.get("categories") or []
+    if categories:
+        top_items = "、".join(
+            f"{item.get('category')} {item.get('percentage')}%"
+            for item in categories[:2]
+        )
+        lines.append(f"历史Top品类只代表全历史分布：{top_items}；不要等同于最近一次购买。")
+
+    if l6m_orders > 0 and (l6m_netsales <= 0 or l6m_refund_rate >= 0.8):
+        lines.append("近6个月有购买但净销售为0或退款率极高，这是关键风险；summary必须写“高退货/无净销售”，不能只写购买活跃。")
+
+    return "\n".join(lines)
+
+
+def _compact_persona_summary(summary: str, max_chars: int = 170) -> str:
+    if not isinstance(summary, str):
+        return ""
+
+    text = re.sub(r"\s+", " ", summary).strip()
+    text = re.sub(r"真实订单品类分布为[:：][^。]*[。]?", "", text)
+    text = re.sub(r"真实订单品类分布[^。]*[。]?", "", text)
+    text = re.sub(r"最高品类[^。]*[。]?", "", text)
+    text = re.sub(r"品类阶段变化为[:：][^。]*", "", text)
+    text = re.sub(r"品类阶段变化[:：][^。]*", "", text)
+    text = re.sub(r"\d{4}\s*[:：][^；。]*(?:[；;]\s*)?", "", text)
+    text = re.sub(r"；\s*。", "。", text)
+    text = re.sub(r"。{2,}", "。", text).strip(" ，,；;。")
+
+    if len(text) <= max_chars:
+        return text
+
+    sentences = [s.strip() for s in re.split(r"(?<=[。.!！?？])", text) if s.strip()]
+    compact = ""
+    for sentence in sentences:
+        if len(compact + sentence) > max_chars:
+            break
+        compact += sentence
+    if compact:
+        return compact.strip(" ，,；;。")
+    return text[:max_chars].rstrip("，。；,. ")
+
+
+def _sanitize_persona_category_claims(
+    result: Dict[str, Any],
+    category_distribution: Dict[str, Any],
+    profile: Dict[str, Any] | None = None,
+    orders: List[Dict[str, Any]] | None = None
+) -> Dict[str, Any]:
     categories = category_distribution.get("categories") or []
     if not categories:
+        summary_text = result.get("summary")
+        if isinstance(summary_text, str):
+            result["summary"] = _compact_persona_summary(
+                _enforce_purchase_risk_summary(summary_text, profile or {}, orders or [])
+            )
         return result
 
     single_category = bool(category_distribution.get("single_category"))
-    if single_category:
-        return result
-
-    summary = category_distribution.get("summary", "")
-    stage_summary = category_distribution.get("stage_summary", "")
     top_category = category_distribution.get("top_category", "未知")
     top_percentage = float(category_distribution.get("top_percentage") or 0)
-    category_note = f"真实订单品类分布为：{summary}；最高品类为{top_category} {top_percentage:.1f}%，不能描述为100%单一品类。"
-    stage_note = f"品类阶段变化为：{stage_summary}。" if stage_summary else ""
 
     invalid_patterns = [
         r"100%\s*为[^，。；,.]*",
@@ -105,34 +237,69 @@ def _sanitize_persona_category_claims(result: Dict[str, Any], category_distribut
     ]
 
     summary_text = result.get("summary")
-    if isinstance(summary_text, str) and any(re.search(pattern, summary_text) for pattern in invalid_patterns):
-        cleaned_text = re.sub("|".join(invalid_patterns), "存在多品类购买", summary_text)
-        result["summary"] = " ".join(part for part in [category_note, stage_note, cleaned_text] if part).strip()
+    if isinstance(summary_text, str):
+        summary_text = re.sub(r"\s+", " ", summary_text).strip()
+        if not single_category and any(re.search(pattern, summary_text) for pattern in invalid_patterns):
+            summary_text = re.sub("|".join(invalid_patterns), "多品类购买", summary_text)
+        if "品类专注型" in summary_text and top_percentage < 80:
+            summary_text = summary_text.replace("品类专注型", "多品类客户")
+        if "JEWELLERY" in summary_text and "JEWELLERY、" not in summary_text and top_percentage < 80:
+            summary_text = summary_text.replace("JEWELLERY", "JEWELLERY（最高品类）")
+        result["summary"] = _compact_persona_summary(
+            _enforce_purchase_risk_summary(summary_text, profile or {}, orders or [])
+        )
 
     interests = result.get("key_interests")
     if isinstance(interests, list):
-        cleaned = []
-        for item in interests:
-            if isinstance(item, str) and any(re.search(pattern, item) for pattern in invalid_patterns):
-                cleaned.append("、".join(part for part in [category_note, stage_note] if part))
-            else:
-                cleaned.append(item)
-        result["key_interests"] = cleaned
+        result["key_interests"] = [
+            item for item in interests
+            if not (isinstance(item, str) and ("品类阶段变化" in item or "真实订单品类分布" in item))
+        ]
 
     customer_tags = result.get("customer_tags")
     if isinstance(customer_tags, dict):
         customer_type = str(customer_tags.get("客户类型", ""))
         if "品类专注" in customer_type and top_percentage < 80:
-            customer_tags["客户类型"] = "探索型"
-
-    summary_text = result.get("summary")
-    if isinstance(summary_text, str):
-        if "品类专注型" in summary_text and top_percentage < 80:
-            result["summary"] = summary_text.replace("品类专注型", "多品类/阶段迁移型")
-        if "JEWELLERY" in summary_text and "JEWELLERY、" not in summary_text and top_percentage < 80:
-            result["summary"] = summary_text.replace("JEWELLERY", "JEWELLERY（最高品类）")
+            customer_tags["客户类型"] = "多品类客户"
 
     return result
+
+
+def _enforce_purchase_risk_summary(summary: str, profile: Dict[str, Any], orders: List[Dict[str, Any]]) -> str:
+    if not isinstance(summary, str):
+        summary = ""
+
+    dated_orders = []
+    for order in orders:
+        paid_at = _parse_order_datetime(
+            order.get("pay_time") or order.get("最后付款时间") or order.get("payment_time")
+        )
+        if paid_at:
+            dated_orders.append((paid_at, order))
+
+    additions = []
+    if len({paid_at.date() for paid_at, _ in dated_orders}) >= 2:
+        dated_orders.sort(key=lambda item: item[0])
+        latest_day = dated_orders[-1][0].date()
+        previous_day = sorted({paid_at.date() for paid_at, _ in dated_orders if paid_at.date() < latest_day})[-1]
+        gap_days = (latest_day - previous_day).days
+        if gap_days >= 365 and "召回" not in summary and "长间隔" not in summary:
+            additions.append("近期被召回的老客")
+
+    l6m_orders = int(_safe_float(profile.get("l6m_orders")))
+    l6m_netsales = _safe_float(profile.get("l6m_netsales"))
+    l6m_refund_rate = _safe_float(profile.get("l6m_refund_rate"))
+    if l6m_orders > 0 and (l6m_netsales <= 0 or l6m_refund_rate >= 0.8):
+        if "无净销售" not in summary and "净销售为0" not in summary:
+            additions.append("近6个月高退货且无净销售")
+
+    if not additions:
+        return summary
+
+    suffix = "，".join(additions)
+    if not summary:
+        return suffix
+    return f"{summary.rstrip('。')}。{suffix}。"
 
 
 class DeepSeekClient:
@@ -202,7 +369,7 @@ class DeepSeekClient:
 
             # 阶段2：画像推理
             persona = self._infer_persona(evidence)
-            persona = _sanitize_persona_category_claims(persona, category_distribution)
+            persona = _sanitize_persona_category_claims(persona, category_distribution, profile, orders)
 
             # 合并结果
             persona["evidence"] = evidence
@@ -362,6 +529,7 @@ class DeepSeekClient:
         order_behavior_serialized = _serialize_datetime(order_behavior)
         category_distribution = _extract_category_distribution(order_behavior_serialized)
         category_distribution_guard = _format_category_distribution_guard(category_distribution)
+        purchase_timing_guard = _build_purchase_timing_guard(profile, orders, category_distribution)
 
         # 格式化场外信息
         external_records = profile.get("external_records", [])
@@ -381,18 +549,22 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
 总订单数：{profile.get("total_orders", 0)}
 
 【聊天记录】（最近{len(chats)}条）
-{self._format_chats_for_evidence(chat_insights)[:1500]}
+{self._format_chats_for_evidence(chat_insights)[:900]}
 
 【订单行为】
-{json.dumps(order_behavior_serialized, ensure_ascii=False, indent=2)[:800]}
+{json.dumps(order_behavior_serialized, ensure_ascii=False, indent=2)[:500]}
 
 【品类事实约束】
 {category_distribution_guard}
+
+【近期/历史购买事实约束】
+{purchase_timing_guard}
 
 【场外信息】（线下消费和私域沟通，仅供参考）
 {formatted_external[:500]}
 
 【输出要求】
+summary必须是结论摘要，不要罗列年度品类清单或完整证据。必须区分“历史Top品类”和“最近一次购买品类”；如果存在长间隔回购，要写“近期被召回的老客/长间隔后回购”。如果L6M净销售为0或退款率>=80%，必须写出“高退货/无净销售”这个风险。
 请返回JSON格式：
 {{
   "summary": "2-3句话画像总结，包含客户特征和购买偏好",
@@ -417,7 +589,7 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
                     }
                 ],
                 temperature=0.5,
-                max_tokens=1500
+                max_tokens=900
             )
 
             result_text = response.choices[0].message.content
@@ -435,7 +607,7 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
             )
 
             result = self._parse_json_response(result_text)
-            return _sanitize_persona_category_claims(result, category_distribution)
+            return _sanitize_persona_category_claims(result, category_distribution, profile, orders)
 
         except Exception as e:
             _safe_print(f"[DeepSeek-Chat] 快速分析失败: {e}")

@@ -17,6 +17,7 @@ import time
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 import threading
@@ -183,6 +184,346 @@ class BatchAnalyzer:
         logger.info(f"[BatchAnalyzer] Found {len(buyers)} buyers needing analysis (messages>={CHAT_THRESHOLD_MESSAGES})")
         return buyers
 
+    def get_buyers_needing_persona_refresh(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get buyers that need persona refresh."""
+        from backend.database import Database
+        from backend.config import settings
+
+        db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
+        db = Database(db_name=db_name)
+
+        query = """
+            SELECT
+                tb.buyer_nick,
+                tb.channel,
+                tb.buyer_type,
+                tb.follow_priority,
+                tb.vip_level,
+                tb.client_monthly_tag,
+                tb.historical_gmv,
+                tb.historical_refund,
+                tb.historical_net_sales,
+                tb.total_orders,
+                tb.total_net_orders,
+                tb.refund_rate,
+                tb.first_purchase_date,
+                tb.last_purchase_date,
+                tb.rolling_24m_netsales,
+                tb.rolling_24m_orders,
+                tb.l6m_gmv,
+                tb.l6m_netsales,
+                tb.l6m_orders,
+                tb.l6m_refund_rate,
+                tb.l1y_gmv,
+                tb.l1y_netsales,
+                tb.l1y_orders,
+                tb.l1y_refund_rate,
+                tb.discount_ratio,
+                tb.discount_sensitivity,
+                tb.chat_frequency_days,
+                tb.first_chat_date,
+                tb.last_chat_date,
+                tb.l30d_chat_frequency_days,
+                tb.l3m_chat_frequency_days,
+                tb.avg_chat_interval_days,
+                tb.churn_risk,
+                tb.city,
+                tb.top_category,
+                tb.second_category,
+                tb.third_category,
+                tb.rfm_segment,
+                cache.persona_summary,
+                cache.persona_analyzed_at,
+                cache.persona_analyzed_last_purchase_date,
+                cache.persona_analyzed_last_chat_date
+            FROM target_buyers_precomputed tb
+            LEFT JOIN buyer_ai_analysis_cache cache ON tb.buyer_nick = cache.buyer_nick
+            WHERE
+                cache.persona_summary IS NULL
+                OR (tb.last_purchase_date IS NOT NULL AND (
+                    cache.persona_analyzed_last_purchase_date IS NULL
+                    OR tb.last_purchase_date > cache.persona_analyzed_last_purchase_date
+                ))
+                OR (tb.last_chat_date IS NOT NULL AND (
+                    cache.persona_analyzed_last_chat_date IS NULL
+                    OR tb.last_chat_date > cache.persona_analyzed_last_chat_date
+                ))
+            ORDER BY
+                CASE tb.follow_priority
+                    WHEN '紧急' THEN 1
+                    WHEN '高' THEN 2
+                    WHEN '中' THEN 3
+                    ELSE 4
+                END,
+                CASE
+                    WHEN tb.churn_risk = '高' THEN 0
+                    WHEN tb.churn_risk = '中' THEN 1
+                    ELSE 2
+                END,
+                CASE
+                    WHEN tb.l6m_netsales >= 10000 THEN 0
+                    WHEN tb.l6m_netsales >= 3000 THEN 1
+                    ELSE 2
+                END,
+                tb.last_purchase_date DESC
+            LIMIT %s
+        """
+
+        buyers = db.execute_query(query, [limit])
+        logger.info(f"[BatchAnalyzer] Found {len(buyers)} buyers needing persona refresh")
+        return buyers
+
+    def _build_persona_profile_data(
+        self,
+        buyer_nick: str,
+        profile: Dict[str, Any],
+        chats: List[Dict[str, Any]],
+        orders: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Build the profile payload used by persona analysis."""
+        from datetime import datetime as dt
+
+        today = dt.now()
+
+        last_purchase_date = profile.get('last_purchase_date')
+        first_purchase_date = profile.get('first_purchase_date')
+        last_chat_date = profile.get('last_chat_date')
+
+        days_since_last_purchase = 0
+        days_since_last_chat = 0
+        avg_repurchase_interval_days = 0
+
+        if last_purchase_date:
+            try:
+                if isinstance(last_purchase_date, str):
+                    last_purchase_date = dt.strptime(last_purchase_date[:19], '%Y-%m-%d %H:%M:%S')
+                days_since_last_purchase = (today - last_purchase_date).days
+            except:
+                pass
+
+        if last_chat_date:
+            try:
+                if isinstance(last_chat_date, str):
+                    last_chat_date = dt.strptime(last_chat_date[:19], '%Y-%m-%d %H:%M:%S')
+                days_since_last_chat = (today - last_chat_date).days
+            except:
+                pass
+
+        total_orders = int(profile.get('total_orders', 0))
+        if first_purchase_date and last_purchase_date and total_orders > 1:
+            try:
+                if isinstance(first_purchase_date, str):
+                    first_purchase_date = dt.strptime(first_purchase_date[:19], '%Y-%m-%d %H:%M:%S')
+                if isinstance(last_purchase_date, str):
+                    last_purchase_date = dt.strptime(last_purchase_date[:19], '%Y-%m-%d %H:%M:%S')
+                days_span = (last_purchase_date - first_purchase_date).days
+                avg_repurchase_interval_days = round(days_span / (total_orders - 1)) if days_span > 0 else 0
+            except:
+                pass
+
+        return {
+            "user_nick": buyer_nick,
+            "buyer_nick": profile.get('buyer_nick'),
+            "channel": profile.get('channel'),
+            "buyer_type": profile.get('buyer_type'),
+            "is_smoker": profile.get('is_smoker', 0),
+            "is_vic": profile.get('is_vic', 0),
+            "vip_level": profile.get('vip_level', 'Non-VIP'),
+            "client_monthly_tag": profile.get('client_monthly_tag'),
+            "historical_gmv": float(profile.get('historical_gmv', 0)),
+            "historical_refund": float(profile.get('historical_refund', 0)),
+            "historical_net_sales": float(profile.get('historical_net_sales', 0)),
+            "total_orders": int(profile.get('total_orders', 0)),
+            "total_net_orders": int(profile.get('total_net_orders', 0)),
+            "refund_rate": float(profile.get('refund_rate', 0)),
+            "first_purchase_date": str(profile.get('first_purchase_date', '')) if profile.get('first_purchase_date') else '',
+            "last_purchase_date": str(profile.get('last_purchase_date', '')) if profile.get('last_purchase_date') else '',
+            "days_since_last_purchase": days_since_last_purchase,
+            "days_since_last_chat": days_since_last_chat,
+            "avg_repurchase_interval_days": avg_repurchase_interval_days,
+            "rolling_24m_netsales": float(profile.get('rolling_24m_netsales', 0)),
+            "rolling_24m_orders": int(profile.get('rolling_24m_orders', 0)),
+            "l6m_gmv": float(profile.get('l6m_gmv', 0)),
+            "l6m_netsales": float(profile.get('l6m_netsales', 0)),
+            "l6m_orders": int(profile.get('l6m_orders', 0)),
+            "l6m_refund_rate": float(profile.get('l6m_refund_rate', 0)),
+            "l1y_gmv": float(profile.get('l1y_gmv', 0)),
+            "l1y_netsales": float(profile.get('l1y_netsales', 0)),
+            "l1y_orders": int(profile.get('l1y_orders', 0)),
+            "l1y_refund_rate": float(profile.get('l1y_refund_rate', 0)),
+            "discount_ratio": float(profile.get('discount_ratio', 0)),
+            "discount_sensitivity": profile.get('discount_sensitivity', '未知'),
+            "chat_frequency_days": int(profile.get('chat_frequency_days', 0)),
+            "first_chat_date": str(profile.get('first_chat_date')) if profile.get('first_chat_date') else None,
+            "last_chat_date": str(profile.get('last_chat_date')) if profile.get('last_chat_date') else None,
+            "l30d_chat_frequency_days": int(profile.get('l30d_chat_frequency_days', 0)),
+            "l3m_chat_frequency_days": int(profile.get('l3m_chat_frequency_days', 0)),
+            "avg_chat_interval_days": float(profile.get('avg_chat_interval_days', 0)),
+            "churn_risk": profile.get('churn_risk', '未知'),
+            "city": profile.get('city', 'Unknown'),
+            "top_category": profile.get('top_category', 'Unknown'),
+            "second_category": profile.get('second_category'),
+            "third_category": profile.get('third_category'),
+            "chat_history": chats,
+            "external_records": [],
+            "total_refund_count": int(float(profile.get('historical_refund', 0)) / 1000) if float(profile.get('historical_refund', 0)) > 0 else 0
+        }
+
+    def start_persona_refresh_batch(
+        self,
+        buyer_limit: int = 100,
+        task_id: Optional[str] = None
+    ) -> str:
+        """Start a persona refresh batch task."""
+        import uuid
+
+        if task_id is None:
+            task_id = f"persona_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+
+        task = BatchTask(
+            task_id=task_id,
+            status=BatchTaskStatus.PENDING,
+            total_buyers=buyer_limit
+        )
+
+        with self.task_lock:
+            self.tasks[task_id] = task
+
+        thread = threading.Thread(
+            target=self._run_persona_refresh_batch,
+            args=(task_id, buyer_limit)
+        )
+        thread.daemon = True
+        thread.start()
+
+        logger.info(f"[BatchAnalyzer] Started persona refresh task {task_id}")
+        return task_id
+
+
+    def _run_persona_refresh_batch(self, task_id: str, buyer_limit: int):
+        """Run persona refresh batch analysis in the background."""
+        from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
+        from backend.database import Database, BuyerQueries
+        from backend.config import settings
+
+        orchestrator = get_analyzer_orchestrator()
+
+        with self.task_lock:
+            task = self.tasks.get(task_id)
+            if not task:
+                return
+            task.status = BatchTaskStatus.RUNNING
+            task.started_at = datetime.now()
+
+        try:
+            buyers = self.get_buyers_needing_persona_refresh(buyer_limit * 2)
+            buyers = sorted(
+                buyers,
+                key=lambda b: (
+                    0 if str(b.get('follow_priority')) == '紧急' else 1 if str(b.get('follow_priority')) == '高' else 2 if str(b.get('follow_priority')) == '中' else 3,
+                    0 if str(b.get('churn_risk')) == '高' else 1 if str(b.get('churn_risk')) == '中' else 2,
+                    -float(b.get('l6m_netsales') or 0),
+                    str(b.get('last_purchase_date') or ''),
+                )
+            )
+            buyers = list(reversed(buyers))[:buyer_limit]
+            task.total_buyers = len(buyers)
+
+            if not buyers:
+                task.status = BatchTaskStatus.COMPLETED
+                task.completed_at = datetime.now()
+                return
+
+            db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
+            worker_count = min(max(4, self.max_workers + 2), len(buyers), 8)
+
+            def process_buyer(buyer: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+                if self._should_cancel(task_id):
+                    return None
+
+                buyer_nick = buyer['buyer_nick']
+                try:
+                    db = Database(db_name=db_name)
+                    query, params = BuyerQueries.get_chat_messages(buyer_nick, limit=30)
+                    chats = db.execute_query(query, params)
+
+                    orders_query = """
+                        SELECT
+                            订单号, 商品名称 as commodity_name, category,
+                            成交总金额 as payment, 退款金额, 退款类型 as refund_status,
+                            最后付款时间 as pay_time
+                        FROM dunhill_t01_trade_line
+                        WHERE 买家昵称 = %s
+                        ORDER BY 最后付款时间 DESC
+                    """
+                    orders = db.execute_query(orders_query, [buyer_nick])
+
+                    profile_data = self._build_persona_profile_data(buyer_nick, buyer, chats, orders)
+                    if orchestrator.deepseek and hasattr(orchestrator.deepseek, "analyze_buyer_persona_chat"):
+                        result = orchestrator.deepseek.analyze_buyer_persona_chat(
+                            buyer_nick=buyer_nick,
+                            profile=profile_data,
+                            chats=chats,
+                            orders=orders
+                        )
+                        result["analysis_method"] = "DeepSeek-Chat"
+                    elif orchestrator.minimax:
+                        result = orchestrator.minimax.analyze_buyer_persona(
+                            buyer_nick,
+                            profile_data,
+                            chats,
+                            orchestrator._format_order_summary(orders)
+                        )
+                        result["analysis_method"] = "MiniMax-M2.7"
+                    else:
+                        result = orchestrator.analyze_buyer_persona(
+                            buyer_nick=buyer_nick,
+                            profile=profile_data,
+                            chats=chats,
+                            orders=orders,
+                            force_refresh=True
+                        )
+
+                    if orchestrator.cache_manager and orchestrator._is_valid_analysis(result):
+                        orchestrator.cache_manager.set_persona(buyer_nick, result, profile_data)
+
+                    return result
+                except Exception as e:
+                    logger.error(f"[BatchAnalyzer] Persona failed for {buyer_nick}: {e}")
+                    return {"__error__": True, "buyer_nick": buyer_nick}
+
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_map = {executor.submit(process_buyer, buyer): buyer for buyer in buyers}
+
+                for future in as_completed(future_map):
+                    if self._should_cancel(task_id):
+                        self._mark_cancelled(task_id)
+                        logger.info(f"[BatchAnalyzer] Persona task {task_id} cancelled during processing")
+                        return
+
+                    result = future.result()
+                    if not result:
+                        continue
+                    if result.get("__error__"):
+                        task.failed_buyers += 1
+                        continue
+
+                    task.results.append(result)
+                    task.processed_buyers += 1
+                    logger.debug(
+                        f"[BatchAnalyzer] Persona processed {result.get('buyer_nick')} "
+                        f"({task.processed_buyers}/{task.total_buyers})"
+                    )
+
+            task.status = BatchTaskStatus.COMPLETED
+            task.completed_at = datetime.now()
+            logger.info(f"[BatchAnalyzer] Persona task {task_id} completed: {task.processed_buyers} processed, {task.failed_buyers} failed")
+
+        except Exception as e:
+            logger.error(f"[BatchAnalyzer] Persona task {task_id} failed: {e}")
+            task.status = BatchTaskStatus.FAILED
+            task.error_message = str(e)
+            task.completed_at = datetime.now()
     def get_buyer_chats(self, buyer_nick: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Get recent chat messages for a buyer"""
         from backend.database import Database, BuyerQueries
@@ -755,8 +1096,11 @@ class BatchAnalyzer:
         logger.info(f"[BatchAnalyzer] Started batch task {task_id}")
         return task_id
 
+
     def _run_batch_analysis(self, task_id: str, buyer_limit: int):
         """Run the actual batch analysis (runs in background thread)"""
+        from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
+
         with self.task_lock:
             task = self.tasks.get(task_id)
             if not task:
@@ -765,7 +1109,6 @@ class BatchAnalyzer:
             task.started_at = datetime.now()
 
         try:
-            # Get buyers needing analysis
             buyers = self.get_buyers_needing_analysis(buyer_limit)
             task.total_buyers = len(buyers)
 
@@ -775,44 +1118,42 @@ class BatchAnalyzer:
                 task.completed_at = datetime.now()
                 return
 
-            # Process in batches
-            for i in range(0, len(buyers), self.batch_size):
+            orchestrator = get_analyzer_orchestrator()
+            worker_count = max(2, min(self.max_workers, len(buyers)))
+
+            def process_buyer(buyer: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 if self._should_cancel(task_id):
-                    self._mark_cancelled(task_id)
-                    logger.info(f"[BatchAnalyzer] Batch task {task_id} cancelled before batch {i // self.batch_size + 1}")
-                    return
+                    return None
 
-                batch = buyers[i:i + self.batch_size]
+                try:
+                    buyer_nick = buyer['buyer_nick']
+                    chats = self.get_buyer_chats(buyer_nick, limit=50)
+                    result = self.analyze_single_buyer(buyer_nick, chats)
+                    self.save_analysis_result(result, profile=buyer)
+                    return result
+                except Exception as e:
+                    logger.error(f"[BatchAnalyzer] Failed to process {buyer.get('buyer_nick')}: {e}")
+                    return {"__error__": True, "buyer_nick": buyer.get('buyer_nick')}
 
-                for buyer in batch:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                future_map = {executor.submit(process_buyer, buyer): buyer for buyer in buyers}
+
+                for future in as_completed(future_map):
                     if self._should_cancel(task_id):
                         self._mark_cancelled(task_id)
-                        logger.info(f"[BatchAnalyzer] Batch task {task_id} cancelled at buyer {buyer.get('buyer_nick')}")
+                        logger.info(f"[BatchAnalyzer] Batch task {task_id} cancelled during processing")
                         return
 
-                    try:
-                        buyer_nick = buyer['buyer_nick']
-
-                        # Get chats
-                        chats = self.get_buyer_chats(buyer_nick, limit=50)
-
-                        # Analyze
-                        result = self.analyze_single_buyer(buyer_nick, chats)
-
-                        # Save result with profile for data snapshot
-                        self.save_analysis_result(result, profile=buyer)
-
-                        task.results.append(result)
-                        task.processed_buyers += 1
-
-                        logger.debug(f"[BatchAnalyzer] Processed {buyer_nick} ({task.processed_buyers}/{task.total_buyers})")
-
-                    except Exception as e:
-                        logger.error(f"[BatchAnalyzer] Failed to process {buyer.get('buyer_nick')}: {e}")
+                    result = future.result()
+                    if not result:
+                        continue
+                    if result.get("__error__"):
                         task.failed_buyers += 1
+                        continue
 
-                # Small delay between batches
-                time.sleep(1)
+                    task.results.append(result)
+                    task.processed_buyers += 1
+                    logger.debug(f"[BatchAnalyzer] Processed {result.get('buyer_nick')} ({task.processed_buyers}/{task.total_buyers})")
 
             task.status = BatchTaskStatus.COMPLETED
             task.completed_at = datetime.now()
@@ -823,7 +1164,6 @@ class BatchAnalyzer:
             task.status = BatchTaskStatus.FAILED
             task.error_message = str(e)
             task.completed_at = datetime.now()
-
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get status of a batch task"""
         with self.task_lock:

@@ -219,6 +219,50 @@ BEGIN
     SET inserted_rows = ROW_COUNT();
     SELECT CONCAT('➕ 插入了 ', inserted_rows, ' 条近3个月的订单记录') AS message;
 
+    -- 3.3 补齐新入池目标客户或历史缺口客户的历史订单
+    -- 说明：
+    -- - 日常近3个月刷新保证速度和最近订单准确性；
+    -- - 这里按订单行粒度补齐 target_buyer_orders 缺失的历史行，避免新入池客户只有近3个月订单；
+    -- - NOT EXISTS 避免重复插入已存在的订单行。
+    INSERT INTO target_buyer_orders (
+        channel, 店铺名称, 订单号, 子订单号, 买家昵称, 买家openid, client_monthly_tag,
+        平台创建时间, 付款时间, 付款日期, 最后付款时间, 子订单状态, 图片地址,
+        是否聚划算, 预售单状态, 天猫ID, 天猫商品编码, 天猫款号, 天猫外部编码,
+        条形码, 商品名称, 宝尊商品编码, 件数, 商品划线价, 划线价总金额,
+        优惠金额, 应付总金额, 成交单价, 成交总金额, 省份, 城市,
+        退款类型, 退款金额, 退款完结时间, 退款完结日期, 退款原因,
+        商品sku属性, skc, product_name, rsp, oms_category, category,
+        main_category, division, season_by_arrival, season_by_code,
+        commercial_line, FP_MD, 是否分期, 分期数, 是否免息,
+        livestream_flag, 直播场次ID, 直播场次标题, 直播开播时间,
+        直播确认收货时间, 直播确认收货金额, ff_flag, sc_flag,
+        sc来源, sc推广日期, pay_year, pay_season, pay_month, pay_week
+    )
+    SELECT
+        t.channel, t.店铺名称, t.订单号, t.子订单号, t.买家昵称, t.买家openid, t.client_monthly_tag,
+        t.平台创建时间, t.付款时间, t.付款日期, t.最后付款时间, t.子订单状态, t.图片地址,
+        t.是否聚划算, t.预售单状态, t.天猫ID, t.天猫商品编码, t.天猫款号, t.天猫外部编码,
+        t.条形码, t.商品名称, t.宝尊商品编码, t.件数, t.商品划线价, t.划线价总金额,
+        t.优惠金额, t.应付总金额, t.成交单价, t.成交总金额, t.省份, t.城市,
+        t.退款类型, t.退款金额, t.退款完结时间, t.退款完结日期, t.退款原因,
+        t.商品sku属性, t.skc, t.product_name, t.rsp, t.oms_category, t.category,
+        t.main_category, t.division, t.season_by_arrival, t.season_by_code,
+        t.commercial_line, t.FP_MD, t.是否分期, t.分期数, t.是否免息,
+        t.livestream_flag, t.直播场次ID, t.直播场次标题, t.直播开播时间,
+        t.直播确认收货时间, t.直播确认收货金额, t.ff_flag, t.sc_flag,
+        t.sc来源, t.sc推广日期, t.pay_year, t.pay_season, t.pay_month, t.pay_week
+    FROM dunhill_t01_trade_line t
+    WHERE t.买家昵称 IN (SELECT buyer_nick FROM target_buyers_precomputed)
+      AND t.买家昵称 IS NOT NULL
+      AND t.买家昵称 != ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM target_buyer_orders existing
+          WHERE existing.子订单号 = t.子订单号
+      );
+
+    SELECT CONCAT('🧩 补齐了 ', ROW_COUNT(), ' 条缺失历史订单记录') AS message;
+
     -- 输出统计信息
     SELECT CONCAT('✅ 刷新完成！') AS message;
     SELECT CONCAT('📊 当前表中订单总数: ', (SELECT COUNT(*) FROM target_buyer_orders)) AS total_orders;

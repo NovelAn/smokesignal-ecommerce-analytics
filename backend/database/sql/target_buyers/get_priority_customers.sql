@@ -38,7 +38,22 @@ SELECT
     ai.persona_key_interests,
     ai.persona_pain_points,
     ai.persona_recommended_action,
-    ai.persona_summary
+    ai.persona_summary,
+    ai.persona_analyzed_at,
+    ai.persona_analyzed_last_purchase_date,
+    ai.persona_analyzed_last_chat_date,
+    CASE
+        WHEN ai.persona_summary IS NULL THEN TRUE
+        WHEN (tb.last_purchase_date IS NOT NULL AND (
+            ai.persona_analyzed_last_purchase_date IS NULL
+            OR tb.last_purchase_date > ai.persona_analyzed_last_purchase_date
+        )) THEN TRUE
+        WHEN (tb.last_chat_date IS NOT NULL AND (
+            ai.persona_analyzed_last_chat_date IS NULL
+            OR tb.last_chat_date > ai.persona_analyzed_last_chat_date
+        )) THEN TRUE
+        ELSE FALSE
+    END AS persona_refresh_required
 
 FROM target_buyers_precomputed tb
 LEFT JOIN buyer_ai_analysis_cache ai ON tb.buyer_nick = ai.buyer_nick

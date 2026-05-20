@@ -17,6 +17,7 @@ import {
   Filter,
   RefreshCw,
   Loader2,
+  BadgeAlert,
 } from 'lucide-react';
 import { NotionCard } from '../common/NotionCard';
 import { NotionTag } from '../common/NotionTag';
@@ -114,6 +115,20 @@ function truncateText(text: string | null | undefined, maxLen: number = 20): str
   if (!text) return '-';
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen) + '...';
+}
+
+function formatRefreshReason(customer: PriorityCustomer): string {
+  const reasons: string[] = [];
+  if (customer.persona_refresh_required) {
+    if (customer.persona_analyzed_last_purchase_date && customer.last_purchase_date > customer.persona_analyzed_last_purchase_date) {
+      reasons.push('有新订单');
+    }
+    if (customer.persona_analyzed_last_chat_date && customer.last_chat_date && customer.last_chat_date > customer.persona_analyzed_last_chat_date) {
+      reasons.push('有新聊天');
+    }
+    if (reasons.length === 0) reasons.push('画像时间早于最新数据');
+  }
+  return reasons.join(' / ');
 }
 
 /**
@@ -314,6 +329,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">情感</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">意图</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">RFM</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">画像</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap text-right">L6M</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap text-right">L1Y</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap text-right">退款</th>
@@ -380,6 +396,22 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                     <span className="text-notion-muted" title={customer.rfm_segment || ''}>
                       {truncateText(customer.rfm_segment, 6)}
                     </span>
+                  </td>
+
+                  <td className="px-2 py-1">
+                    {customer.persona_refresh_required ? (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap"
+                        title={formatRefreshReason(customer)}
+                      >
+                        <BadgeAlert size={10} />
+                        待刷新
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
+                        已更新
+                      </span>
+                    )}
                   </td>
 
                   {/* L6M NetSales */}

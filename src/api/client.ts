@@ -422,6 +422,38 @@ export const apiClient = {
   },
 
   /**
+   * 启动待刷新画像批量任务
+   * POST /api/v2/ai/persona-batch-refresh
+   */
+  startPersonaBatchRefresh: async (buyerLimit: number = 100) => {
+    const response = await fetch(
+      `${API_BASE}/ai/persona-batch-refresh?buyer_limit=${buyerLimit}`,
+      { method: 'POST' }
+    );
+    return handleResponse<{ task_id: string; status: string; message: string }>(response);
+  },
+
+  /**
+   * 获取待刷新画像批量任务状态
+   * GET /api/v2/ai/persona-batch-status/{task_id}
+   */
+  getPersonaBatchRefreshStatus: async (taskId: string) => {
+    const response = await fetch(`${API_BASE}/ai/persona-batch-status/${taskId}`);
+    return handleResponse<BatchAnalysisStatus>(response);
+  },
+
+  /**
+   * 中止待刷新画像批量任务
+   * POST /api/v2/ai/persona-batch-cancel/{task_id}
+   */
+  cancelPersonaBatchRefresh: async (taskId: string) => {
+    const response = await fetch(`${API_BASE}/ai/persona-batch-cancel/${taskId}`, {
+      method: 'POST',
+    });
+    return handleResponse<{ task_id: string; status: string; message: string }>(response);
+  },
+
+  /**
    * 获取情感分析汇总
    * GET /api/v2/analytics/sentiment-summary
    */
@@ -660,6 +692,10 @@ export interface BuyerProfile {
   ai_dominant_intent?: string; // e.g., "Pre-sale Inquiry"
   sentiment_label?: string; // e.g., "Positive", "Neutral", "Negative"
   sentiment_score?: number; // e.g., 0.8
+  persona_analyzed_at?: string | null;
+  persona_analyzed_last_purchase_date?: string | null;
+  persona_analyzed_last_chat_date?: string | null;
+  persona_refresh_required?: boolean;
 
   // 更新时间
   updated_at: string;
@@ -806,6 +842,7 @@ export interface PriorityCustomer {
   sentiment_label: string;
   dominant_intent: string;
   last_purchase_date: string;
+  last_chat_date?: string | null;
   l6m_netsales: number;
   l1y_netsales: number;
   l1y_refund_rate: number;
@@ -814,6 +851,10 @@ export interface PriorityCustomer {
   persona_key_interests: string[] | null;
   persona_pain_points: string[] | null;
   persona_recommended_action: string | null;
+  persona_analyzed_at?: string | null;
+  persona_analyzed_last_purchase_date?: string | null;
+  persona_analyzed_last_chat_date?: string | null;
+  persona_refresh_required?: boolean;
 }
 
 export interface PriorityCustomersFilters {

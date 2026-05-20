@@ -325,30 +325,22 @@ class AnalyzerOrchestrator:
 
         result = None
 
-        # 策略1: DeepSeek深度分析（优先使用）
+        # 策略1: DeepSeek快速画像（默认优先使用，单次调用）
         if self.deepseek:
             try:
-                if has_chats:
-                    print(f"[L1-DeepSeek-R1] 使用DeepSeek-Reasoner分析 {buyer_nick} (基于{chat_count}条聊天)")
-                    result = self.deepseek.analyze_buyer_persona(
-                        buyer_nick, profile, chats, orders
-                    )
-                    result["analysis_method"] = "DeepSeek-R1"
-                    result["data_source"] = "聊天记录+消费数据"
-                else:
-                    print(f"[L1-DeepSeek-Chat] 使用DeepSeek-Chat分析 {buyer_nick} (基于消费数据)")
-                    result = self.deepseek.analyze_buyer_persona_chat(
-                        buyer_nick, profile, chats, orders
-                    )
-                    result["analysis_method"] = "DeepSeek-Chat"
-                    result["data_source"] = "消费数据"
+                print(f"[L1-DeepSeek-Chat] 使用DeepSeek-Chat快速分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
+                result = self.deepseek.analyze_buyer_persona_chat(
+                    buyer_nick, profile, chats, orders
+                )
+                result["analysis_method"] = "DeepSeek-Chat"
+                result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据"
 
                 # 检查结果是否有效，无效则降级
                 if self._is_valid_analysis(result):
                     return self._cache_and_return(buyer_nick, profile, result)
                 else:
-                    print(f"[L1→L2] DeepSeek返回无效结果，降级到MiniMax M2.7")
-                    result = None  # 重置result以便继续降级
+                    print(f"[L1→L2] DeepSeek-Chat返回无效结果，降级到MiniMax M2.7")
+                    result = None
 
             except TimeoutError:
                 print(f"[L1→L2] DeepSeek超时，降级到MiniMax M2.7")
