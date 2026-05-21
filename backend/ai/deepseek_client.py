@@ -118,8 +118,12 @@ def _build_purchase_timing_guard(
     l6m_orders = int(_safe_float(profile.get("l6m_orders")))
     l6m_netsales = _safe_float(profile.get("l6m_netsales"))
     l6m_refund_rate = _safe_float(profile.get("l6m_refund_rate"))
+    historical_refund = _safe_float(profile.get("historical_refund"))
+    refund_rate = _safe_float(profile.get("refund_rate"))
     lines = [
-        f"L6M订单数：{l6m_orders}；L6M净销售：¥{l6m_netsales:,.0f}；L6M退款率：{l6m_refund_rate:.1%}。"
+        f"L6M订单数：{l6m_orders}；L6M净销售：¥{l6m_netsales:,.0f}；"
+        f"L6M退款率：{l6m_refund_rate:.1%}；历史退款额：¥{historical_refund:,.0f}；"
+        f"历史退款率/RRC：{refund_rate:.1%}。"
     ]
 
     if not dated_orders:
@@ -175,6 +179,8 @@ def _build_purchase_timing_guard(
 
     if l6m_orders > 0 and (l6m_netsales <= 0 or l6m_refund_rate >= 0.8):
         lines.append("近6个月有购买但净销售为0或退款率极高，这是关键风险；summary必须写“高退货/无净销售”，不能只写购买活跃。")
+    elif historical_refund <= 0 and refund_rate <= 0 and l6m_refund_rate <= 0:
+        lines.append("退款事实约束：RRC/历史退款率为0且L6M退款率为0，禁止写“高退货风险”“退货风险”“订单未完成风险”。尺码不合适、缺货、等待换货只能写为尺码/库存问题，不能升级为退货风险。")
 
     return "\n".join(lines)
 
@@ -184,6 +190,10 @@ def _compact_persona_summary(summary: str, max_chars: int = 170) -> str:
         return ""
 
     text = re.sub(r"\s+", " ", summary).strip()
+    text = re.sub(r"^该客户为", "", text)
+    text = re.sub(r"^客户为", "", text)
+    text = re.sub(r"属于[^，。；]*客户", "客户", text)
+    text = re.sub(r"(安徽|江苏|浙江|广东|福建|山东|河南|河北|湖南|湖北|四川|重庆|北京|上海|天津|海南|广西|云南|贵州|陕西|山西|江西|甘肃|青海|辽宁|吉林|黑龙江|内蒙古|新疆|西藏|宁夏|香港|澳门)[^，。；]*", "", text)
     text = re.sub(r"真实订单品类分布为[:：][^。]*[。]?", "", text)
     text = re.sub(r"真实订单品类分布[^。]*[。]?", "", text)
     text = re.sub(r"最高品类[^。]*[。]?", "", text)
@@ -205,6 +215,99 @@ def _compact_persona_summary(summary: str, max_chars: int = 170) -> str:
     if compact:
         return compact.strip(" ，,；;。")
     return text[:max_chars].rstrip("，。；,. ")
+
+
+def _looks_template_like(summary: str) -> bool:
+    if not isinstance(summary, str):
+        return False
+    markers = [
+        "该客户为",
+        "属于",
+        "潜在高端",
+        "模板",
+        "客户画像",
+        "高价值客户",
+        "潜在客户"
+    ]
+    return any(marker in summary for marker in markers)
+
+
+def _normalize_bullet_list(items: Any, max_items: int = 4, max_len: int = 40) -> List[str]:
+    if not isinstance(items, list):
+        return []
+    normalized = []
+    for item in items:
+        if not isinstance(item, str):
+            item = str(item)
+        text = re.sub(r"\s+", " ", item).strip()
+        if not text:
+            continue
+        if len(text) > max_len:
+            text = text[:max_len].rstrip("，,。；; ")
+        normalized.append(text)
+        if len(normalized) >= max_items:
+            break
+    return normalized
+
+
+def _apply_pipe_price_band_guard(summary: str, profile: Dict[str, Any], orders: List[Dict[str, Any]]) -> str:
+    if not isinstance(summary, str):
+        return summary
+
+    top_category = str(profile.get("top_category", "")).upper()
+    if top_category != "PIPES":
+        return summary
+
+    l6m_orders = int(_safe_float(profile.get("l6m_orders")))
+    avg_order_value = 0.0
+    latest_order_value = 0.0
+
+    if orders:
+        dated_orders = []
+        for order in orders:
+            paid_at = _parse_order_datetime(order.get("pay_time") or order.get("最后付款时间") or order.get("payment_time"))
+            value = _safe_float(order.get("payment") or order.get("成交总金额"))
+            if paid_at and value > 0:
+                dated_orders.append((paid_at, value))
+        if dated_orders:
+            dated_orders.sort(key=lambda item: item[0])
+            latest_order_value = dated_orders[-1][1]
+
+    if l6m_orders > 0:
+        avg_order_value = _safe_float(profile.get("l6m_netsales")) / max(l6m_orders, 1)
+    if avg_order_value <= 0 and orders:
+        order_values = []
+        for order in orders:
+            value = _safe_float(order.get("payment") or order.get("成交总金额"))
+            if value > 0:
+                order_values.append(value)
+        if order_values:
+            avg_order_value = sum(order_values) / len(order_values)
+
+    order_value = latest_order_value or avg_order_value
+
+    if order_value >= 20000:
+        if "高端限量斗" not in summary and "限量斗" not in summary:
+            summary = f"{summary.rstrip('。')}。若为限量编号或稀缺款，可按高端限量斗理解。"
+        return summary
+
+    if 12000 <= order_value < 20000:
+        summary = re.sub(r"高端限量斗|高端收藏|收藏型客户|收藏", "生肖斗/限量编号款", summary)
+        if "生肖斗" not in summary and "限量编号" not in summary:
+            summary = f"{summary.rstrip('。')}。该单更接近生肖斗/限量编号款，不宜直接定义为高端收藏。"
+        return summary
+
+    if 8000 <= order_value < 12000:
+        summary = re.sub(r"高端限量斗|高端收藏|收藏型客户|收藏", "生肖斗", summary)
+        if "生肖斗" not in summary:
+            summary = f"{summary.rstrip('。')}。该单属于生肖斗价位，不宜写成高端收藏。"
+        return summary
+
+    if order_value > 0:
+        summary = re.sub(r"高端限量斗|高端收藏|收藏型客户|收藏|高端烟斗", "普通斗", summary)
+        if "普通斗" not in summary:
+            summary = f"{summary.rstrip('。')}。该单属于普通斗价位，不宜写成高端收藏。"
+    return summary
 
 
 def _sanitize_persona_category_claims(
@@ -245,6 +348,7 @@ def _sanitize_persona_category_claims(
             summary_text = summary_text.replace("品类专注型", "多品类客户")
         if "JEWELLERY" in summary_text and "JEWELLERY、" not in summary_text and top_percentage < 80:
             summary_text = summary_text.replace("JEWELLERY", "JEWELLERY（最高品类）")
+        summary_text = _apply_pipe_price_band_guard(summary_text, profile or {}, orders or [])
         result["summary"] = _compact_persona_summary(
             _enforce_purchase_risk_summary(summary_text, profile or {}, orders or [])
         )
@@ -269,6 +373,10 @@ def _enforce_purchase_risk_summary(summary: str, profile: Dict[str, Any], orders
     if not isinstance(summary, str):
         summary = ""
 
+    historical_refund = _safe_float(profile.get("historical_refund"))
+    refund_rate = _safe_float(profile.get("refund_rate"))
+    l6m_refund_rate = _safe_float(profile.get("l6m_refund_rate"))
+
     dated_orders = []
     for order in orders:
         paid_at = _parse_order_datetime(
@@ -292,6 +400,15 @@ def _enforce_purchase_risk_summary(summary: str, profile: Dict[str, Any], orders
     if l6m_orders > 0 and (l6m_netsales <= 0 or l6m_refund_rate >= 0.8):
         if "无净销售" not in summary and "净销售为0" not in summary:
             additions.append("近6个月高退货且无净销售")
+    else:
+        summary = re.sub(r"[，,]?\s*(高退货/无净销售|高退货且无净销售|无净销售|净销售为0)", "", summary)
+
+    if historical_refund <= 0 and refund_rate <= 0 and l6m_refund_rate <= 0:
+        summary = re.sub(r"[，,]?\s*(高退货风险|退货风险|订单未完成风险|未完成风险)", "", summary)
+        summary = re.sub(r"[，,]?\s*(高退货/无净销售|高退货且无净销售)", "", summary)
+    elif l6m_orders > 0 and l6m_netsales > 0:
+        summary = re.sub(r"[，,]?\s*(高退货风险|高退货风险|高退货)", "", summary)
+        summary = re.sub(r"[，,]?\s*退货风险", "", summary)
 
     if not additions:
         return summary
@@ -565,6 +682,7 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
 
 【输出要求】
 summary必须是结论摘要，不要罗列年度品类清单或完整证据。必须区分“历史Top品类”和“最近一次购买品类”；如果存在长间隔回购，要写“近期被召回的老客/长间隔后回购”。如果L6M净销售为0或退款率>=80%，必须写出“高退货/无净销售”这个风险。
+如果历史退款额=0、RRC=0、L6M退款率=0，禁止写“高退货风险”“退货风险”“订单未完成风险”；尺码不合适、缺货、等待换货只能写成尺码/库存问题，不能升级为退货风险。
 请返回JSON格式：
 {{
   "summary": "2-3句话画像总结，包含客户特征和购买偏好",
@@ -607,6 +725,12 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
             )
 
             result = self._parse_json_response(result_text)
+            if isinstance(result.get("summary"), str):
+                result["summary"] = _compact_persona_summary(result["summary"], max_chars=140)
+            result["key_interests"] = _normalize_bullet_list(result.get("key_interests"), max_items=3, max_len=28)
+            result["pain_points"] = _normalize_bullet_list(result.get("pain_points"), max_items=2, max_len=28)
+            if isinstance(result.get("recommended_action"), str):
+                result["recommended_action"] = _compact_persona_summary(result["recommended_action"], max_chars=100)
             return _sanitize_persona_category_claims(result, category_distribution, profile, orders)
 
         except Exception as e:

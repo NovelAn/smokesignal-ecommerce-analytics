@@ -132,6 +132,47 @@ const formatShortDate = (dateStr: string | undefined | null): string => {
   }
 };
 
+const formatChatTime = (dateStr: string | undefined | null): string => {
+  if (!dateStr || typeof dateStr !== 'string') return '';
+  if (dateStr.includes('T')) {
+    const parts = dateStr.split('T');
+    return parts[1]?.slice(0, 8) || '';
+  }
+  const parts = dateStr.split(' ');
+  return parts[1]?.slice(0, 8) || '';
+};
+
+const normalizeTextArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : String(item).trim()))
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((item) => (typeof item === 'string' ? item.trim() : String(item).trim()))
+          .filter(Boolean);
+      }
+    } catch {
+      // fall through to delimiter splitting
+    }
+
+    return trimmed
+      .split(/[,;，、\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
 // Date range filter options
 type DateRangeFilter = 'LAST_6_MONTH' | 'LAST_1_YEAR' | 'LAST_2_YEAR' | 'ALL';
 
@@ -467,9 +508,10 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
     setOrderCurrentPage(1);
     // Open all dates by default when selecting a new user for better visibility
     const dates: Record<string, boolean> = {};
-    session.messages.forEach(m => {
-       const d = m.msg_time.split(' ')[0];
-       dates[d] = true;
+    (Array.isArray(session.messages) ? session.messages : []).forEach(m => {
+       const msgTime = typeof m?.msg_time === 'string' ? m.msg_time : '';
+       const d = msgTime.includes('T') ? msgTime.split('T')[0] : msgTime.split(' ')[0];
+       if (d) dates[d] = true;
     });
     setOpenDates(dates);
   };
@@ -496,7 +538,8 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
       // 1. 调用force-refresh API清除缓存并重新分析
       await apiClient.forceRefreshAnalysis(currentSession.user_nick, 'persona');
       // 2. 仅重新获取 AI 分析数据（Hook B），不影响基础数据
-      refetchAI();
+      await refetchProfile();
+      await refetchAI();
     } catch (error) {
       console.error('Force refresh failed:', error);
     } finally {
@@ -511,7 +554,22 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
     if (!currentSession || !buyerProfile) return currentSession?.profile;
 
     // AI画像分析：优先使用 Hook B 的结果，回退到 Hook A 的缓存
-    const aiAnalysis = aiAnalysisData?.ai_analysis || buyerProfile.ai_analysis || currentSession.profile.analysis;
+    const cachedPersonaAnalysis = buyerProfile.persona_summary ? {
+      summary: buyerProfile.persona_summary,
+      key_interests: normalizeTextArray(buyerProfile.persona_key_interests),
+      pain_points: normalizeTextArray(buyerProfile.persona_pain_points),
+      recommended_action: buyerProfile.persona_recommended_action || '',
+      error: undefined
+    } : undefined;
+    const aiAnalysis = aiAnalysisData?.ai_analysis || buyerProfile.ai_analysis || cachedPersonaAnalysis || currentSession.profile.analysis;
+    const normalizedAnalysis = aiAnalysis ? {
+      ...aiAnalysis,
+      key_interests: normalizeTextArray((aiAnalysis as any).key_interests),
+      pain_points: normalizeTextArray((aiAnalysis as any).pain_points),
+      recommended_action: typeof (aiAnalysis as any).recommended_action === 'string'
+        ? (aiAnalysis as any).recommended_action
+        : ''
+    } : aiAnalysis;
 
     return {
       ...currentSession.profile,
@@ -558,12 +616,15 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
         (buyerProfile as any).sentiment_label ?? (currentSession.profile as any).sentiment_label
       ].filter(Boolean),
       // AI画像分析结果
-      analysis: aiAnalysis,
+      analysis: normalizedAnalysis,
       // 包含订单历史和聊天记录
       order_history: (buyerProfile as any).order_history || currentSession.profile.order_history || [],
       chat_history: (buyerProfile as any).chat_history || currentSession.profile.chat_history || [],
     };
   }, [currentSession, buyerProfile, aiAnalysisData]);
+
+  const analysisKeyInterests = normalizeTextArray((enrichedProfile as any)?.analysis?.key_interests);
+  const analysisPainPoints = normalizeTextArray((enrichedProfile as any)?.analysis?.pain_points);
 
   const hasChatRecord = ((enrichedProfile as any)?.chat_history?.length || 0) > 0
     || !!buyerProfile?.last_chat_date
@@ -715,17 +776,21 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
 
   // Group messages by date and sort by date ascending (oldest first)
   const groupedMessages = useMemo<Record<string, ChatMessage[]>>(() => {
-     const chatHistory = enrichedProfile?.chat_history || currentSession?.messages || [];
+     const chatHistoryRaw = enrichedProfile?.chat_history || currentSession?.messages || [];
+     const chatHistory = Array.isArray(chatHistoryRaw) ? chatHistoryRaw : [];
      if (!chatHistory || chatHistory.length === 0) return {};
 
      const groups: Record<string, ChatMessage[]> = {};
      chatHistory.forEach((msg: ChatMessage) => {
          // Handle both ISO 8601 format (2026-01-19T22:54:32) and space-separated format (2026-01-19 22:54:32)
-         let date: string;
-         if (msg.msg_time.includes('T')) {
-             date = msg.msg_time.split('T')[0];  // ISO 8601 format
+         const msgTime = typeof msg?.msg_time === 'string' ? msg.msg_time : '';
+         let date = 'unknown-date';
+         if (msgTime.includes('T')) {
+             date = msgTime.split('T')[0];  // ISO 8601 format
+         } else if (msgTime.includes(' ')) {
+             date = msgTime.split(' ')[0];  // Space-separated format
          } else {
-             date = msg.msg_time.split(' ')[0];  // Space-separated format
+             date = msgTime || 'unknown-date';
          }
 
          if (!groups[date]) groups[date] = [];
@@ -734,7 +799,11 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
 
      // Sort messages within each date by time
      Object.keys(groups).forEach(date => {
-         groups[date].sort((a, b) => a.msg_time.localeCompare(b.msg_time));
+         groups[date].sort((a, b) => {
+             const aTime = typeof a?.msg_time === 'string' ? a.msg_time : '';
+             const bTime = typeof b?.msg_time === 'string' ? b.msg_time : '';
+             return aTime.localeCompare(bTime);
+         });
      });
 
      return groups;
@@ -742,7 +811,7 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
 
   // Get sorted dates for display (oldest first)
   const sortedDates = useMemo(() => {
-     return Object.keys(groupedMessages).sort((a, b) => a.localeCompare(b));
+     return Object.keys(groupedMessages).filter(Boolean).sort((a, b) => a.localeCompare(b));
   }, [groupedMessages]);
 
   const sortedDatesKey = sortedDates.join('|');
@@ -1120,8 +1189,24 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
                           subtitle={enableAI && !enrichedProfile?.analysis?.error ? "(AI分析已基于买家历史数据和聊天记录生成)" : undefined}
                           action={
                             <div className="flex items-center gap-2">
-                              {buyerProfile?.persona_refresh_required && (
-                                <span className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap" title="最近有新订单或新聊天，建议刷新画像">
+                              {buyerProfile?.persona_summary && (
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border whitespace-nowrap ${
+                                    buyerProfile.persona_refresh_required
+                                      ? 'border-orange-200 bg-orange-50 text-orange-700'
+                                      : 'border-green-200 bg-green-50 text-green-700'
+                                  }`}
+                                  title={buyerProfile.persona_refresh_required ? '最近有新订单或新聊天，建议刷新画像' : '已有可用画像结果'}
+                                >
+                                  {buyerProfile.persona_refresh_required ? <AlertTriangle size={11} /> : <CheckCircle size={11} />}
+                                  {buyerProfile.persona_refresh_required ? '画像待刷新' : '画像已保存'}
+                                </span>
+                              )}
+                              {!buyerProfile?.persona_summary && buyerProfile?.persona_refresh_required && (
+                                <span
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[10px] rounded border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap"
+                                  title="最近有新订单或新聊天，建议刷新画像"
+                                >
                                   <AlertTriangle size={11} />
                                   画像待刷新
                                 </span>
@@ -1166,8 +1251,8 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
                                     <div>
                                         <span className="text-xs font-bold text-notion-muted uppercase tracking-wider block mb-2">Key Interests</span>
                                         <div className="flex flex-wrap gap-2">
-                                            {(enrichedProfile?.analysis?.key_interests || []).length > 0 ? (
-                                              enrichedProfile?.analysis?.key_interests.map((tag, i) => (
+                                            {analysisKeyInterests.length > 0 ? (
+                                              analysisKeyInterests.map((tag, i) => (
                                                 <span key={i} className="px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded text-xs font-medium">
                                                   {tag}
                                                 </span>
@@ -1180,8 +1265,8 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
                                     <div>
                                         <span className="text-xs font-bold text-notion-muted uppercase tracking-wider block mb-2">Pain Points</span>
                                         <div className="flex flex-wrap gap-2">
-                                            {(enrichedProfile?.analysis?.pain_points || []).length > 0 ? (
-                                              enrichedProfile?.analysis?.pain_points.map((tag, i) => (
+                                            {analysisPainPoints.length > 0 ? (
+                                              analysisPainPoints.map((tag, i) => (
                                                 <span key={i} className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-100 rounded text-xs font-medium">
                                                   {tag}
                                                 </span>
@@ -1661,7 +1746,7 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
                                                                     <span className={`text-[10px] font-bold truncate max-w-[100px] ${isBuyer ? 'text-notion-muted' : 'text-blue-700'}`}>
                                                                         {isBuyer ? msg.sender_nick : 'Support'}
                                                                     </span>
-                                                                    <span className="text-[10px] opacity-40 font-mono">{msg.msg_time.split(' ')[1]}</span>
+                                                                    <span className="text-[10px] opacity-40 font-mono">{formatChatTime(msg.msg_time)}</span>
                                                                 </div>
                                                                 {msg.msg_type === 'image' ? (
                                                                     <div className="mt-1">

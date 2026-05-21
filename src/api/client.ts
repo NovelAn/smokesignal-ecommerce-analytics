@@ -692,6 +692,10 @@ export interface BuyerProfile {
   ai_dominant_intent?: string; // e.g., "Pre-sale Inquiry"
   sentiment_label?: string; // e.g., "Positive", "Neutral", "Negative"
   sentiment_score?: number; // e.g., 0.8
+  persona_summary?: string | null;
+  persona_key_interests?: string[] | null;
+  persona_pain_points?: string[] | null;
+  persona_recommended_action?: string | null;
   persona_analyzed_at?: string | null;
   persona_analyzed_last_purchase_date?: string | null;
   persona_analyzed_last_chat_date?: string | null;

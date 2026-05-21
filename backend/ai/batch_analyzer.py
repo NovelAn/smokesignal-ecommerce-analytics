@@ -23,6 +23,8 @@ from enum import Enum
 import threading
 
 from backend.analytics.tag_calculator import TagCalculator
+from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
+from backend.ai.model_selection import should_use_deepseek_pro
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +404,6 @@ class BatchAnalyzer:
 
     def _run_persona_refresh_batch(self, task_id: str, buyer_limit: int):
         """Run persona refresh batch analysis in the background."""
-        from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
         from backend.database import Database, BuyerQueries
         from backend.config import settings
 
@@ -459,14 +460,23 @@ class BatchAnalyzer:
                     orders = db.execute_query(orders_query, [buyer_nick])
 
                     profile_data = self._build_persona_profile_data(buyer_nick, buyer, chats, orders)
-                    if orchestrator.deepseek and hasattr(orchestrator.deepseek, "analyze_buyer_persona_chat"):
-                        result = orchestrator.deepseek.analyze_buyer_persona_chat(
-                            buyer_nick=buyer_nick,
-                            profile=profile_data,
-                            chats=chats,
-                            orders=orders
-                        )
-                        result["analysis_method"] = "DeepSeek-Chat"
+                    if orchestrator.deepseek:
+                        if should_use_deepseek_pro(profile_data, chats, orders):
+                            result = orchestrator.deepseek.analyze_buyer_persona(
+                                buyer_nick=buyer_nick,
+                                profile=profile_data,
+                                chats=chats,
+                                orders=orders
+                            )
+                            result["analysis_method"] = "deepseek-v4-pro"
+                        else:
+                            result = orchestrator.deepseek.analyze_buyer_persona_chat(
+                                buyer_nick=buyer_nick,
+                                profile=profile_data,
+                                chats=chats,
+                                orders=orders
+                            )
+                            result["analysis_method"] = "deepseek-v4-flash"
                     elif orchestrator.minimax:
                         result = orchestrator.minimax.analyze_buyer_persona(
                             buyer_nick,

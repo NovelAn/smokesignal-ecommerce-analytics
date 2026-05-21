@@ -19,6 +19,7 @@ from typing import Dict, List, Any, Optional
 from backend.ai.deepseek_client import DeepSeekClient
 from backend.ai.minimax_client import MiniMaxClient
 from backend.ai.rule_based_analyzer import RuleBasedAnalyzer
+from backend.ai.model_selection import should_use_deepseek_pro
 from backend.config import settings
 
 
@@ -325,21 +326,29 @@ class AnalyzerOrchestrator:
 
         result = None
 
-        # 策略1: DeepSeek快速画像（默认优先使用，单次调用）
+        # 策略1: DeepSeek画像（高价值高复杂度走Pro，其余走Flash）
         if self.deepseek:
             try:
-                print(f"[L1-DeepSeek-Chat] 使用DeepSeek-Chat快速分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
-                result = self.deepseek.analyze_buyer_persona_chat(
-                    buyer_nick, profile, chats, orders
-                )
-                result["analysis_method"] = "DeepSeek-Chat"
+                use_pro = should_use_deepseek_pro(profile, chats, orders)
+                if use_pro:
+                    print(f"[L1-DeepSeek-V4-Pro] 使用DeepSeek-V4-Pro深度分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
+                    result = self.deepseek.analyze_buyer_persona(
+                        buyer_nick, profile, chats, orders
+                    )
+                    result["analysis_method"] = "deepseek-v4-pro"
+                else:
+                    print(f"[L1-DeepSeek-V4-Flash] 使用DeepSeek-V4-Flash快速分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
+                    result = self.deepseek.analyze_buyer_persona_chat(
+                        buyer_nick, profile, chats, orders
+                    )
+                    result["analysis_method"] = "deepseek-v4-flash"
                 result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据"
 
                 # 检查结果是否有效，无效则降级
                 if self._is_valid_analysis(result):
                     return self._cache_and_return(buyer_nick, profile, result)
                 else:
-                    print(f"[L1→L2] DeepSeek-Chat返回无效结果，降级到MiniMax M2.7")
+                    print(f"[L1→L2] DeepSeek返回无效结果，降级到MiniMax M2.7")
                     result = None
 
             except TimeoutError:
@@ -419,6 +428,7 @@ class AnalyzerOrchestrator:
             return False
 
         summary = result.get("summary", "")
+        analysis_method = str(result.get("analysis_method", "")).lower()
 
         # 检查是否为默认失败响应或AI拒绝分析的响应
         invalid_summaries = [
@@ -437,6 +447,19 @@ class AnalyzerOrchestrator:
 
         for invalid in invalid_summaries:
             if invalid in summary:
+                return False
+
+        if analysis_method in {"deepseek-v4-flash"}:
+            template_markers = [
+                "该客户为",
+                "属于",
+                "潜在高端",
+                "客户画像",
+                "安徽",
+                "蚌埠",
+                "海口"
+            ]
+            if any(marker in summary for marker in template_markers):
                 return False
 
         # 至少要有有效的 summary 或 interests/pain_points

@@ -117,10 +117,9 @@ PIPE_CATEGORIES = {
 # 价格区间判断
 PRICE_RANGES = {
     "PIPES": {
-        "入门": (0, 200),
-        "中级": (200, 800),
-        "高级": (800, 2000),
-        "专家": (2000, 100000)
+        "普通斗": (0, 8000),
+        "生肖斗": (8000, 12000),
+        "高端限量斗": (20000, 1000000)
     },
     "LIGHTER": {
         "入门": (0, 100),
@@ -139,8 +138,8 @@ PRICE_RANGES = {
 # 购买行为模式
 BUYING_PATTERNS = {
     "收藏家": {
-        "signals": ["购买高端产品", "购买限量版", "购买不同款式"],
-        "recommendation": "推荐限量版、高端新品"
+        "signals": ["购买限量版", "购买不同款式", "限量编号"],
+        "recommendation": "推荐限量编号款、稀缺新品"
     },
     "使用者": {
         "signals": ["购买消耗品", "重复购买同类产品", "购买配件"],
@@ -167,12 +166,12 @@ LIFECYCLE_STAGES = {
         "推荐策略": "推荐中级产品、配件、组合优惠"
     },
     "成熟期": {
-        "特征": ["购买稳定", "有明确偏好", "购买高端产品"],
-        "推荐策略": "推荐高端产品、限量版、个性化定制"
+        "特征": ["购买稳定", "有明确偏好", "购买生肖斗"],
+        "推荐策略": "推荐生肖斗、编号款、个性化定制"
     },
     "专家": {
-        "特征": ["购买高端产品", "专业知识强", "收藏行为"],
-        "推荐策略": "推荐限量版、稀缺品、新品首发"
+        "特征": ["购买高端限量斗", "专业知识强", "收藏行为"],
+        "推荐策略": "推荐高端限量斗、稀缺品、新品首发"
     }
 }
 
@@ -219,6 +218,18 @@ def detect_customer_level(chats: list, orders: list, profile: dict) -> str:
 
     # 检查消费水平
     avg_order_value = profile.get("l6m_netsales", 0) / max(profile.get("l6m_orders", 1), 1)
+
+    top_category = str(profile.get("top_category", "")).upper()
+    if top_category == "PIPES":
+        pipe_price = avg_order_value
+        if pipe_price >= 20000:
+            return "专家"
+        elif pipe_price >= 12000:
+            return "成熟期"
+        elif pipe_price >= 8000:
+            return "成长期"
+        else:
+            return "新手"
 
     # 综合判断
     if expert_count > rookie_count and avg_order_value > 500:

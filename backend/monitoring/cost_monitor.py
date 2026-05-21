@@ -21,8 +21,8 @@ class CostMonitor:
 
     # 定价表（元/1M tokens）
     PRICING = {
-        "deepseek-reasoner": {"input": 1.0, "output": 2.0},
-        "deepseek-chat": {"input": 1.0, "output": 2.0},
+        "deepseek-v4-pro": {"input": 1.0, "output": 2.0},
+        "deepseek-v4-flash": {"input": 1.0, "output": 2.0},
         "glm-4-plus": {"input": 0.5, "output": 2.0}
     }
 
@@ -323,7 +323,7 @@ class CostMonitor:
 
                 # 更新模型特定统计
                 model = record["model"]
-                if "deepseek-reasoner" in model:
+                if "deepseek-v4-pro" in model:
                     cursor.execute(
                         """
                         INSERT INTO ai_cost_daily_summary
@@ -335,7 +335,7 @@ class CostMonitor:
                         """,
                         (date.today(), record["cost"], record["cost"])
                     )
-                elif "deepseek-chat" in model:
+                elif "deepseek-v4-flash" in model:
                     cursor.execute(
                         """
                         INSERT INTO ai_cost_daily_summary
