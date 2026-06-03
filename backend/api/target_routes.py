@@ -801,9 +801,9 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
             db = Database(db_name=db_name)
             orders_query = """
                 SELECT
-                    订单号, 商品名称 as commodity_name, category,
-                    成交总金额 as payment, 退款金额, 退款类型 as refund_status,
-                    最后付款时间 as pay_time
+                    订单号, 子订单号, 商品名称 as commodity_name, category,
+                    成交总金额 as payment, 退款金额 as refund_amount, 退款类型 as refund_status,
+                    FP_MD as fp_md, 件数 as quantity, 最后付款时间 as pay_time
                 FROM dunhill_t01_trade_line
                 WHERE 买家昵称 = %s
                 ORDER BY 最后付款时间 DESC
@@ -934,6 +934,8 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
             "external_records": external_records,  # 场外信息记录
             "total_refund_count": int(float(profile.get('historical_refund', 0)) / 1000) if float(profile.get('historical_refund', 0)) > 0 else 0  # 估算退款次数
         }
+        from backend.ai.persona_context import build_persona_profile_data
+        profile_data = build_persona_profile_data(user_nick, profile, chats, external_records)
 
         # 4. 调用增强版AI分析器（自动选择最优模型和降级策略）
         import logging
@@ -1118,6 +1120,7 @@ async def force_refresh_analysis(
                         "buyer_type": profile.get('buyer_type'),
                         "city": profile.get('city', 'Unknown'),
                         "rolling_24m_netsales": float(profile.get('rolling_24m_netsales', 0)),
+                        "historical_gmv": float(profile.get('historical_gmv', 0)),
                         "l6m_netsales": float(profile.get('l6m_netsales', 0)),
                         "first_purchase_date": str(profile.get('first_purchase_date', '')),
                         "last_purchase_date": str(profile.get('last_purchase_date', '')),
@@ -1125,6 +1128,8 @@ async def force_refresh_analysis(
                         "last_chat_date": profile.get('last_chat_date'),
                         "total_orders": int(profile.get('total_orders', 0)),
                         "historical_net_sales": float(profile.get('historical_net_sales', 0)),
+                        "discount_ratio": float(profile.get('discount_ratio', 0)),
+                        "discount_sensitivity": profile.get('discount_sensitivity', '未知'),
                         "days_since_last_purchase": days_since_last_purchase,
                         "days_since_last_chat": days_since_last_chat,
                         "avg_repurchase_interval_days": avg_repurchase_interval_days,
@@ -1132,12 +1137,14 @@ async def force_refresh_analysis(
                         "churn_risk": profile.get('churn_risk', '未知'),
                         "chat_history": chats,
                     }
+                    from backend.ai.persona_context import build_persona_profile_data
+                    profile_data = build_persona_profile_data(user_nick, profile, chats, [])
 
                     orders_query = """
                         SELECT
-                            订单号, 商品名称 as commodity_name, category,
-                            成交总金额 as payment, 退款金额, 退款类型 as refund_status,
-                            最后付款时间 as pay_time
+                            订单号, 子订单号, 商品名称 as commodity_name, category,
+                            成交总金额 as payment, 退款金额 as refund_amount, 退款类型 as refund_status,
+                            FP_MD as fp_md, 件数 as quantity, 最后付款时间 as pay_time
                         FROM dunhill_t01_trade_line
                         WHERE 买家昵称 = %s
                         ORDER BY 最后付款时间 DESC
@@ -1225,9 +1232,9 @@ async def analyze_buyer_async(
             db = Database(db_name=db_name)
             orders_query = """
                 SELECT
-                    订单号, 商品名称 as commodity_name, category,
-                    成交总金额 as payment, 退款金额, 退款类型 as refund_status,
-                    最后付款时间 as pay_time
+                    订单号, 子订单号, 商品名称 as commodity_name, category,
+                    成交总金额 as payment, 退款金额 as refund_amount, 退款类型 as refund_status,
+                    FP_MD as fp_md, 件数 as quantity, 最后付款时间 as pay_time
                 FROM dunhill_t01_trade_line
                 WHERE 买家昵称 = %s
                 ORDER BY 最后付款时间 DESC

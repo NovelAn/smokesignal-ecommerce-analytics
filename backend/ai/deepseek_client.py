@@ -22,7 +22,8 @@ from backend.ai.prompts.evidence_extraction import EVIDENCE_EXTRACTION_PROMPT
 from backend.ai.prompts.persona_inference import PERSONA_INFERENCE_PROMPT
 from backend.ai.prompts.domain_knowledge import build_external_info_context
 from backend.ai.data_extractor import extract_chat_insights
-from backend.ai.behavior_analyzer import structure_order_behavior
+from backend.ai.behavior_analyzer import build_order_facts, structure_order_behavior
+from backend.ai.persona_context import build_persona_prompt_v3
 
 
 def _serialize_datetime(obj: Any) -> Any:
@@ -644,6 +645,7 @@ class DeepSeekClient:
 
         # Serialize datetime objects before JSON encoding
         order_behavior_serialized = _serialize_datetime(order_behavior)
+        order_facts = build_order_facts(profile, orders, top_n=12)
         category_distribution = _extract_category_distribution(order_behavior_serialized)
         category_distribution_guard = _format_category_distribution_guard(category_distribution)
         purchase_timing_guard = _build_purchase_timing_guard(profile, orders, category_distribution)
@@ -669,7 +671,10 @@ L6M消费：¥{profile.get("l6m_netsales", 0):,.2f}
 {self._format_chats_for_evidence(chat_insights)[:900]}
 
 【订单行为】
-{json.dumps(order_behavior_serialized, ensure_ascii=False, indent=2)[:500]}
+{json.dumps(order_behavior_serialized, ensure_ascii=False, indent=2)[:1800]}
+
+【订单核心事实包】
+{json.dumps(order_facts, ensure_ascii=False, indent=2)[:1800]}
 
 【品类事实约束】
 {category_distribution_guard}
@@ -692,6 +697,7 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
   "confidence_level": "高/中/低"
 }}
 """
+        prompt = build_persona_prompt_v3(buyer_nick, profile, chats, orders)
 
         try:
             response = self.client.chat.completions.create(
@@ -706,8 +712,8 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
                         "content": prompt
                     }
                 ],
-                temperature=0.5,
-                max_tokens=900
+                temperature=0.3,
+                max_tokens=1800
             )
 
             result_text = response.choices[0].message.content
@@ -724,13 +730,13 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
                 method="DeepSeek-Chat"
             )
 
-            result = self._parse_json_response(result_text)
+            result = self._parse_json_response_v2(result_text)
             if isinstance(result.get("summary"), str):
-                result["summary"] = _compact_persona_summary(result["summary"], max_chars=140)
-            result["key_interests"] = _normalize_bullet_list(result.get("key_interests"), max_items=3, max_len=28)
-            result["pain_points"] = _normalize_bullet_list(result.get("pain_points"), max_items=2, max_len=28)
+                result["summary"] = _compact_persona_summary(result["summary"], max_chars=260)
+            result["key_interests"] = _normalize_bullet_list(result.get("key_interests"), max_items=5, max_len=80)
+            result["pain_points"] = _normalize_bullet_list(result.get("pain_points"), max_items=4, max_len=80)
             if isinstance(result.get("recommended_action"), str):
-                result["recommended_action"] = _compact_persona_summary(result["recommended_action"], max_chars=100)
+                result["recommended_action"] = _compact_persona_summary(result["recommended_action"], max_chars=180)
             return _sanitize_persona_category_claims(result, category_distribution, profile, orders)
 
         except Exception as e:
@@ -751,6 +757,36 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
             lines.append(f"[{i}] [{time}] {sender}: {content}")
 
         return "\n".join(lines)
+
+    def _parse_json_response_v2(self, response_text: str) -> Dict:
+        """Parse model JSON even when it includes thinking text or fences."""
+        try:
+            cleaned = re.sub(r"<think>.*?</think>", "", response_text or "", flags=re.DOTALL | re.IGNORECASE).strip()
+            fence_match = re.search(r"```(?:json)?\s*(.*?)```", cleaned, flags=re.DOTALL | re.IGNORECASE)
+            if fence_match:
+                cleaned = fence_match.group(1).strip()
+
+            decoder = json.JSONDecoder()
+            for match in re.finditer(r"\{", cleaned):
+                try:
+                    value, _ = decoder.raw_decode(cleaned[match.start():])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict):
+                    return value
+
+            raise ValueError("no valid JSON object found")
+        except Exception as e:
+            _safe_print(f"[DeepSeek] JSON parse failed: {e}")
+            _safe_print(f"[DeepSeek] Raw response: {(response_text or '')[:500]}")
+            return {
+                "summary": "AI分析结果解析失败",
+                "key_interests": [],
+                "pain_points": [],
+                "recommended_action": "请根据客户情况制定跟进策略",
+                "confidence_level": "低",
+                "error": str(e)
+            }
 
     def _parse_json_response(self, response_text: str) -> Dict:
         """解析JSON响应"""
