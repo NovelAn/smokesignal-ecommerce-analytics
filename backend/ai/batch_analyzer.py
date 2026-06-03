@@ -283,6 +283,9 @@ class BatchAnalyzer:
         orders: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Build the profile payload used by persona analysis."""
+        from backend.ai.persona_context import build_persona_profile_data
+        return build_persona_profile_data(buyer_nick, profile, chats, [])
+
         from datetime import datetime as dt
 
         today = dt.now()
@@ -450,9 +453,9 @@ class BatchAnalyzer:
 
                     orders_query = """
                         SELECT
-                            订单号, 商品名称 as commodity_name, category,
-                            成交总金额 as payment, 退款金额, 退款类型 as refund_status,
-                            最后付款时间 as pay_time
+                            订单号, 子订单号, 商品名称 as commodity_name, category,
+                            成交总金额 as payment, 退款金额 as refund_amount, 退款类型 as refund_status,
+                            FP_MD as fp_md, 件数 as quantity, 最后付款时间 as pay_time
                         FROM dunhill_t01_trade_line
                         WHERE 买家昵称 = %s
                         ORDER BY 最后付款时间 DESC
@@ -482,7 +485,8 @@ class BatchAnalyzer:
                             buyer_nick,
                             profile_data,
                             chats,
-                            orchestrator._format_order_summary(orders)
+                            orchestrator._format_order_summary(profile_data, orders),
+                            orders=orders
                         )
                         result["analysis_method"] = "MiniMax-M2.7"
                     else:
@@ -493,6 +497,9 @@ class BatchAnalyzer:
                             orders=orders,
                             force_refresh=True
                         )
+
+                    from backend.ai.behavior_analyzer import ground_persona_analysis_v3
+                    result = ground_persona_analysis_v3(result, profile_data, orders)
 
                     if orchestrator.cache_manager and orchestrator._is_valid_analysis(result):
                         orchestrator.cache_manager.set_persona(buyer_nick, result, profile_data)

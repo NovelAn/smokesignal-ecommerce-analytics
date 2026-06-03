@@ -21,6 +21,7 @@ from backend.ai.minimax_client import MiniMaxClient
 from backend.ai.rule_based_analyzer import RuleBasedAnalyzer
 from backend.ai.model_selection import should_use_deepseek_pro
 from backend.config import settings
+from backend.ai.behavior_analyzer import build_order_facts, ground_persona_analysis_v3
 
 
 class AICacheManager:
@@ -342,6 +343,7 @@ class AnalyzerOrchestrator:
                         buyer_nick, profile, chats, orders
                     )
                     result["analysis_method"] = "deepseek-v4-flash"
+                result = ground_persona_analysis_v3(result, profile, orders)
                 result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据"
 
                 # 检查结果是否有效，无效则降级
@@ -372,9 +374,11 @@ class AnalyzerOrchestrator:
                     buyer_nick,
                     profile,
                     chats,
-                    self._format_order_summary(orders)
+                    self._format_order_summary(profile, orders),
+                    orders=orders
                 )
                 result["analysis_method"] = "MiniMax-M2.7"
+                result = ground_persona_analysis_v3(result, profile, orders)
                 result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据(降级)"
                 return self._cache_and_return(buyer_nick, profile, result)
 
@@ -385,22 +389,34 @@ class AnalyzerOrchestrator:
         print(f"[L3-Rule] 使用规则引擎分析 {buyer_nick}")
         result = self.rule_based.analyze(profile, chats, orders)
         result["analysis_method"] = "Rule-Based"
+        result = ground_persona_analysis_v3(result, profile, orders)
         result["data_source"] = "规则引擎"
         return self._cache_and_return(buyer_nick, profile, result)
 
-    def _format_order_summary(self, orders: List[Dict]) -> str:
-        """格式化订单摘要（用于Zhipu）"""
-        if not orders:
+    def _format_order_summary(self, profile: Dict, orders: List[Dict]) -> str:
+        """Format an authoritative order fact pack for fallback models."""
+        facts = build_order_facts(profile, orders, top_n=12)
+        if not facts.get("total_orders"):
             return "暂无订单记录"
 
-        summary_lines = []
-        for order in orders[:10]:
-            commodity = order.get("commodity_name", "未知商品")
-            payment = order.get("payment", 0)
-            time = order.get("pay_time", "")
-            summary_lines.append(f"- {time}: {commodity} ¥{payment}")
-
-        return "\n".join(summary_lines)
+        lines = [
+            f"订单总数: {facts['total_orders']}",
+            f"历史总消费: ¥{facts['total_payment']:,.0f}",
+            f"历史AOV: ¥{facts['avg_order_value']:,.0f}",
+            f"折扣占比: {facts['discount_ratio']:.0%}",
+            f"折扣敏感度: {facts['discount_sensitivity']}",
+            f"购买高峰: {facts['spend_seasonality']}",
+            f"品类阶段: {facts['stage_summary'] or '无'}",
+            "品类分布: " + " / ".join(
+                f"{item['category']} {item['order_lines']}单({item['percentage']}%)"
+                for item in facts.get("top_categories", [])[:6]
+            ),
+            "近期订单: " + " | ".join(
+                f"{item['pay_time']} {item['category']} ¥{item['payment']:,.0f}"
+                for item in facts.get("recent_orders", [])[:12]
+            ),
+        ]
+        return "\n".join(lines)
 
     def _cache_and_return(
         self,
@@ -429,6 +445,9 @@ class AnalyzerOrchestrator:
 
         summary = result.get("summary", "")
         analysis_method = str(result.get("analysis_method", "")).lower()
+
+        if result.get("fact_guard_applied") and summary and len(summary) > 20:
+            return True
 
         # 检查是否为默认失败响应或AI拒绝分析的响应
         invalid_summaries = [

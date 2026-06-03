@@ -8,6 +8,7 @@ import re
 from typing import Dict, List, Any
 from openai import OpenAI
 from backend.config import settings
+from backend.ai.persona_context import build_persona_prompt_v3
 
 
 def _safe_print(message: str):
@@ -40,9 +41,10 @@ class MiniMaxClient:
         user_nick: str,
         profile_data: Dict[str, Any],
         recent_chats: List[Dict[str, Any]],
-        order_summary: str
+        order_summary: str = "",
+        orders: List[Dict[str, Any]] | None = None
     ) -> Dict[str, Any]:
-        prompt = self._build_persona_prompt(user_nick, profile_data, recent_chats, order_summary)
+        prompt = build_persona_prompt_v3(user_nick, profile_data, recent_chats, orders or [])
 
         try:
             _safe_print(f"[MiniMaxClient] Calling model: {self.model}")
@@ -137,6 +139,42 @@ class MiniMaxClient:
   "recommended_action": "具体的销售机会和执行建议..."
 }}
 """
+        prompt = f"""
+你是一位资深电商客户洞察专家。你的任务不是复述订单，而是提炼客户关键特征。
+
+核心要求：
+1. 使用具体数字和事实，不要用空泛形容词。
+2. 不要逐单罗列订单，不要写流水账。
+3. 结论必须聚焦三件事：购买时间习惯、品类偏好、价格/折扣心智。
+4. 如果出现多个品类，要写成多品类客户，不允许把最高频品类写成全部订单。
+5. 订单总数、总消费、AOV、折扣占比、折扣敏感度、购买高峰，优先使用下面事实包里的数字。
+
+【买家事实包】
+{order_summary}
+
+【聊天记录】（最近{len(chats)}条）
+{self._format_chats(chats[:20])}
+
+写作要求：
+- summary：2-3句话，必须写出客户关键特征，不要写成流水账。
+- key_interests：3-5个，提炼稳定偏好和行为习惯。
+- pain_points：2-4个，只写真实可见的阻碍或风险。
+- recommended_action：1-2句话，给出下一步跟进动作。
+
+可用结论方向：
+- 购买高峰期是否集中在 5-6 月、10-12 月等大促节点。
+- 是否是价格敏感客户，是否集中买折扣/MD商品。
+- 是否偏好某类商品、是否稳定复购同类。
+- 是否存在阶段性爆发购买、长间隔回购。
+
+输出格式（纯JSON）：
+{{
+  "summary": "用关键特征总结客户，不要复述订单",
+  "key_interests": ["兴趣点1", "兴趣点2"],
+  "pain_points": ["痛点1", "痛点2"],
+  "recommended_action": "下一步跟进建议"
+}}
+"""
         return prompt
 
     def _format_chats(self, chats: List[Dict]) -> str:
@@ -171,7 +209,7 @@ class MiniMaxClient:
             else:
                 _safe_print("[MiniMaxClient] No JSON found in response")
                 return {
-                    "summary": cleaned[:500],
+                    "summary": cleaned[:220],
                     "key_interests": [],
                     "pain_points": [],
                     "recommended_action": "请根据买家情况制定跟进策略"
@@ -180,7 +218,7 @@ class MiniMaxClient:
         except json.JSONDecodeError as e:
             _safe_print(f"[MiniMaxClient] JSON decode error: {e}")
             return {
-                "summary": response_text[:500] if response_text else "AI分析失败",
+                "summary": response_text[:220] if response_text else "AI分析失败",
                 "key_interests": [],
                 "pain_points": [],
                 "recommended_action": "请根据买家情况制定跟进策略"
