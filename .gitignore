@@ -70,3 +70,16 @@ coverage/
 response.json
 api_test.json
 nul
+
+# Runtime / MCP / debug artifacts
+.backend_pid
+.backend_job_id
+.backend_test_pid
+.playwright-mcp/
+pytest-cache*/
+tests/playwright/test_screenshots/
+
+# Python debug output dumps
+importtime.txt
+stderr.txt
+stdout.txt
