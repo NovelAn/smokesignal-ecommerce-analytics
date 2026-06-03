@@ -1,0 +1,3 @@
+# Force LF for Python source so Windows CRLF line endings don't cause
+# phantom modifications in the working copy.
+*.py text eol=lf
