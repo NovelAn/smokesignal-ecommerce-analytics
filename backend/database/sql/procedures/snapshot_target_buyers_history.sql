@@ -423,14 +423,14 @@ END$$
 DELIMITER ;
 
 -- ============================================
--- 注册事件: 每天 11:30 (主表 11:00 refresh 之后 30 分钟)
+-- 注册事件: 每天 13:30 (主表 13:20 refresh 之后 10 分钟)
 -- ============================================
 DROP EVENT IF EXISTS event_snapshot_target_buyers_history;
 
 CREATE EVENT event_snapshot_target_buyers_history
 ON SCHEDULE EVERY 1 DAY
-STARTS CONCAT(CURDATE() + INTERVAL 1 DAY, ' 11:30:00')
-COMMENT '每天 11:30 snapshot target_buyers_precomputed_history'
+STARTS CONCAT(CURDATE() + INTERVAL 1 DAY, ' 13:30:00')
+COMMENT '每天 13:30 snapshot target_buyers_precomputed_history (主表 13:20 refresh 之后 10 分钟)'
 DO
 CALL snapshot_target_buyers_history();
 
