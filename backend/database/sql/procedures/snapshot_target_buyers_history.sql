@@ -205,6 +205,17 @@ BEGIN
     -- Step 3: Final INSERT (CTE with R/F/M scores)
     -- ============================================
     INSERT INTO target_buyers_precomputed_history
+        (buyer_nick, snapshot_date, channel, client_monthly_tag, is_smoker, is_vic,
+         buyer_type, vip_level, historical_gmv, historical_refund, historical_net_sales,
+         total_orders, total_net_orders, refund_rate,
+         rolling_24m_gmv, rolling_24m_netsales, rolling_24m_orders, rolling_24m_net_orders,
+         l6m_netsales, l6m_gmv, l6m_orders, l6m_refund_rate,
+         l1y_netsales, l1y_gmv, l1y_orders, l1y_refund_rate,
+         avg_purchase_interval_days, discount_ratio, discount_sensitivity,
+         first_purchase_date, last_purchase_date, city,
+         top_category, second_category, third_category,
+         rfm_recency_score, rfm_frequency_score, rfm_monetary_score,
+         rfm_segment, churn_risk)
     WITH base AS (
         SELECT
             t.buyer_nick,
@@ -296,6 +307,7 @@ BEGIN
     )
     SELECT
         base.buyer_nick,
+        v_snapshot_date AS snapshot_date,
         base.channel,
         base.client_monthly_tag,
         base.is_smoker,
@@ -358,8 +370,7 @@ BEGIN
             WHEN base.r_score = 3 THEN '中'
             WHEN base.r_score = 4 AND base.f_score <= 2 THEN '中'
             ELSE '低'
-        END,
-        v_snapshot_date AS snapshot_date
+        END
     FROM base
     ON DUPLICATE KEY UPDATE
         channel = VALUES(channel),
