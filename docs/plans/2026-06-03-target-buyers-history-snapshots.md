@@ -288,4 +288,4 @@ END
 | 日期 | 状态 | 备注 |
 |---|---|---|
 | 2026-06-03 | Demo 阶段完成 | 30 天数据写入 demo 表，池子动态变化可见 |
-| | | |
+| 2026-06-04 | PR1 起点 commit `958ba6e` | 在 `feature/target-buyers-history-schema` 分支，commit demo 脚本 + plan |
