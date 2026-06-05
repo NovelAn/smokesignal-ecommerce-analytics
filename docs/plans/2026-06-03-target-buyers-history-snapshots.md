@@ -1,7 +1,7 @@
 # target_buyers_precomputed 历史快照架构改造
 
 > 实施计划 + 状态追踪。每个任务完成后更新本文件。
-> 最后更新：2026-06-03（demo 阶段完成）
+> 最后更新：2026-06-05（PR1 merged, PR2 脚本就绪待 push）
 
 ---
 
@@ -10,11 +10,11 @@
 | 阶段 | 状态 | 完成日期 | 备注 |
 |---|---|---|---|
 | **Demo 探索** | ✅ 完成 | 2026-06-03 | 见 §6 |
-| **P1: DDL 建表（带 partition）** | ⏳ 待开始 | | |
-| **P2: 每日 snapshot procedure** | ⏳ | | |
-| **P3: 月度 partition 维护 procedure** | ⏳ | | |
-| **P4: 告警机制** | ⏳ | | |
-| **P5: 回填脚本（生产规模）** | ⏳ | | 14M 累积 |
+| **P1: DDL 建表（带 partition）** | ✅ 完成 | 2026-06-05 | PR1 merged (03115a6) |
+| **P2: 每日 snapshot procedure** | ✅ 完成 | 2026-06-05 | PR1 merged |
+| **P3: 月度 partition 维护 procedure** | ✅ 完成 | 2026-06-05 | PR1 merged |
+| **P4: 告警机制** | ✅ 完成 | 2026-06-05 | PR1 merged (email) |
+| **P5: 回填脚本（生产规模）** | 🟡 脚本就绪 | 2026-06-05 | PR2 本地 commit, 等 SSH push |
 | **P6: 查询 SQL 文件** | ⏳ | | |
 | **P7: analyzer 集成** | ⏳ | | |
 | **P8: API endpoints** | ⏳ | | |
@@ -231,23 +231,27 @@ END
 
 ### PR1: Schema + Procedure (P1-P4)
 
-- [ ] 建新分支 `feature/target-buyers-history-schema` (基于 main)
-- [ ] commit 6 个 demo 脚本到该分支（作为历史起点）
-- [ ] P1: `create_target_buyers_precomputed_history.sql`（DDL + 24M partition）
-- [ ] P2: `snapshot_target_buyers_history()` procedure + 11:30 event
-- [ ] P3: `maintain_history_partitions()` procedure + 每月 event
-- [ ] P4: `send_alert_email()` 简化版告警
-- [ ] 在 staging 跑 demo_v2 验证
-- [ ] PR 提交 + 等用户 review
-- [ ] 合并到 main
+- [x] 建新分支 `feature/target-buyers-history-schema` (基于 main)
+- [x] commit 6 个 demo 脚本到该分支（作为历史起点）
+- [x] P1: `create_target_buyers_precomputed_history.sql`（DDL + 24M partition）
+- [x] P2: `snapshot_target_buyers_history()` procedure + 13:30 event
+- [x] P3: `maintain_history_partitions()` procedure + 每月 event
+- [x] P4: `send_alert_email()` 简化版告警
+- [x] 在 staging 跑 demo_v2 验证
+- [x] PR 提交 + 用户 review
+- [x] 合并到 main (commit 03115a6, PR #5)
 
 ### PR2: Backfill (P5)
 
-- [ ] 等 PR1 merge
-- [ ] 建新分支 `feature/target-buyers-history-backfill` (基于 main)
-- [ ] 抽离 `refresh_target_buyers_asof(as_of_date)` 参数化 procedure
-- [ ] Python 脚本 backfill 2025-04-01 → 2026-06-02
-- [ ] 进度持久化 + 避峰（凌晨跑）
+- [x] 等 PR1 merge ✅
+- [x] 建新分支 `feature/target-buyers-history-backfill` (基于 main)
+- [x] 抽离 `refresh_target_buyers_asof(as_of_date)` 参数化 procedure
+- [x] Python 脚本 backfill 2025-04-01 → 2026-06-02
+- [x] 进度持久化 (`logs/backfill_progress.json`) + 避峰 (02:00-06:00)
+- [x] README (`scripts/README_backfill_history.md`)
+- [x] 本地 commit (本步骤)
+- [ ] Push 到 origin + 开 PR (等 SSH)
+- [ ] 跑回填 (凌晨避峰窗口)
 - [ ] 监控一周
 
 ### PR3: API (P6-P8)
@@ -289,3 +293,5 @@ END
 |---|---|---|
 | 2026-06-03 | Demo 阶段完成 | 30 天数据写入 demo 表，池子动态变化可见 |
 | 2026-06-04 | PR1 起点 commit `958ba6e` | 在 `feature/target-buyers-history-schema` 分支，commit demo 脚本 + plan |
+| 2026-06-05 | PR1 merged to main | commit 03115a6, PR #5 — schema+procedure 全部上线 |
+| 2026-06-05 | PR2 脚本就绪 | 分支 `feature/target-buyers-history-backfill` 本地 commit: 1 procedure + 1 Python + 1 README + plan 更新, 等 SSH push |
