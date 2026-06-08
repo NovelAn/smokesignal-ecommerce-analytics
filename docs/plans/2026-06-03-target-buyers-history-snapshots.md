@@ -1,7 +1,7 @@
 # target_buyers_precomputed 历史快照架构改造
 
 > 实施计划 + 状态追踪。每个任务完成后更新本文件。
-> 最后更新：2026-06-05（PR1 merged, PR2 脚本就绪待 push）
+> 最后更新：2026-06-05（PR1 + PR2 全部完成并部署到 production, 准备 push + PR3 (API)）
 
 ---
 
@@ -14,11 +14,11 @@
 | **P2: 每日 snapshot procedure** | ✅ 完成 | 2026-06-05 | PR1 merged |
 | **P3: 月度 partition 维护 procedure** | ✅ 完成 | 2026-06-05 | PR1 merged |
 | **P4: 告警机制** | ✅ 完成 | 2026-06-05 | PR1 merged (email) |
-| **P5: 回填脚本（生产规模）** | 🟡 脚本就绪 | 2026-06-05 | PR2 本地 commit, 等 SSH push |
-| **P6: 查询 SQL 文件** | ⏳ | | |
-| **P7: analyzer 集成** | ⏳ | | |
-| **P8: API endpoints** | ⏳ | | |
-| **P9: 前端 UI** | ⏳ | | |
+| **P5: 回填脚本（生产规模）** | ✅ 完成 | 2026-06-05 | PR2 本地 + 部署 + 430 天 backfill 完成, 152,226 行 |
+| **P6: 查询 SQL 文件** | ⏳ | | PR3 (API) |
+| **P7: analyzer 集成** | ⏳ | | PR3 (API) |
+| **P8: API endpoints** | ⏳ | | PR3 (API) |
+| **P9: 前端 UI** | ⏳ | | PR4 (UI) |
 
 ---
 
@@ -246,13 +246,24 @@ END
 - [x] 等 PR1 merge ✅
 - [x] 建新分支 `feature/target-buyers-history-backfill` (基于 main)
 - [x] 抽离 `refresh_target_buyers_asof(as_of_date)` 参数化 procedure
-- [x] Python 脚本 backfill 2025-04-01 → 2026-06-02
+- [x] Python 脚本 backfill 2025-04-01 → 2026-06-04 (T-1, 含 PR1 阶段的 2026-06-03/04 脏数据)
 - [x] 进度持久化 (`logs/backfill_progress.json`) + 避峰 (02:00-06:00)
 - [x] README (`scripts/README_backfill_history.md`)
-- [x] 本地 commit (本步骤)
-- [ ] Push 到 origin + 开 PR (等 SSH)
-- [ ] 跑回填 (凌晨避峰窗口)
+- [x] 本地 commit
+- [x] 部署 asof procedure 到 production
+- [x] 真实数据验证: 30/30 client_monthly_tag 抽样 PASS, 499/499 today vs 主表 PASS
+- [x] **全量 430 天 backfill: 152,226 行, 0 failures, 1h29m 完成**
+- [x] 修复 client_monthly_tag bug: ROW_NUMBER() 替代 MAX(), 与主表 procedure 对齐
+- [ ] Push 到 origin + 开 PR (等用户)
 - [ ] 监控一周
+
+### 紧急 Fix PR (从 main 切, 修 snapshot procedure 同样 bug)
+
+- [x] 建 `fix/history-client-monthly-tag` 分支
+- [x] 修 `snapshot_target_buyers_history` 同款 client_monthly_tag bug
+- [x] 部署到 production + 跑 today snapshot
+- [x] 验证: 499/499 vs 主表 PASS, 30/30 抽样 PASS
+- [ ] Push 到 origin + 开 PR (等用户)
 
 ### PR3: API (P6-P8)
 
@@ -295,3 +306,6 @@ END
 | 2026-06-04 | PR1 起点 commit `958ba6e` | 在 `feature/target-buyers-history-schema` 分支，commit demo 脚本 + plan |
 | 2026-06-05 | PR1 merged to main | commit 03115a6, PR #5 — schema+procedure 全部上线 |
 | 2026-06-05 | PR2 脚本就绪 | 分支 `feature/target-buyers-history-backfill` 本地 commit: 1 procedure + 1 Python + 1 README + plan 更新, 等 SSH push |
+| 2026-06-05 | **PR2 完成 + 部署 + backfill 跑完** | 分支 4 commits ahead of main. 部署 asof procedure. 430 天 backfill: 152,226 行, 1h29m, 0 failures |
+| 2026-06-05 | Fix PR 就绪 (紧急) | 分支 `fix/history-client-monthly-tag` 1 commit: 修 snapshot procedure 同款 client_monthly_tag bug. 部署后 today snapshot 499/499 PASS |
+| 2026-06-05 | Plan 状态更新 | 准备 push + PR3 (API) |
