@@ -173,6 +173,97 @@ async def get_dashboard_metrics() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=detail)
 
 
+@router.get("/history/pool-summary")
+async def get_history_pool_summary(
+    date_from: str = Query(..., description="起始日期 YYYY-MM-DD"),
+    date_to: str = Query(..., description="结束日期 YYYY-MM-DD"),
+) -> Dict[str, Any]:
+    """
+    获取历史快照池子汇总趋势 (PR3a).
+
+    返回: 每天一行 (snapshot_date, pool_size, smoker/vic/both 计数,
+    new/active_old/recall_old 计数, total_gmv, total_net_sales)
+
+    性能: < 0.5秒 (idx_snapshot_date 索引 + 按月分区裁剪)
+    """
+    import asyncio
+    import logging
+    from datetime import date
+
+    # 参数校验
+    try:
+        d_from = date.fromisoformat(date_from)
+        d_to = date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date_from / date_to 必须是 YYYY-MM-DD")
+
+    if d_from > d_to:
+        raise HTTPException(status_code=400, detail="date_from 不能晚于 date_to")
+    if d_to > date.today():
+        raise HTTPException(status_code=400, detail="date_to 不能是未来日期")
+
+    try:
+        rows = await _run_blocking(
+            analyzer.get_history_pool_summary, date_from, date_to, timeout=30
+        )
+        return {
+            "date_from": date_from,
+            "date_to": date_to,
+            "total_days": len(rows),
+            "data": rows,
+        }
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail="Pool summary query timed out after 30s")
+    except Exception as e:
+        logging.exception("[History] get_history_pool_summary failed")
+        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
+
+
+@router.get("/history/yoy-compare")
+async def get_history_yoy_compare(
+    from_date: str = Query(..., description="基准日 (如 2025-04-01)"),
+    to_date: str = Query(..., description="对比日 (如 2026-04-01)"),
+) -> Dict[str, Any]:
+    """
+    获取历史快照同期对比 (PR3a) - VIC YoY / 任意两日对比.
+
+    返回: 2 行 (from_date + to_date): pool_size, smoker/vic/both 计数,
+    V3/V2/V1/V0 VIP 等级分布, total_net_sales, rolling_24m_total
+
+    性能: < 0.3秒 (PK 查找 + 按月分区裁剪)
+    """
+    import asyncio
+    import logging
+    from datetime import date
+
+    try:
+        d_from = date.fromisoformat(from_date)
+        d_to = date.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="from_date / to_date 必须是 YYYY-MM-DD")
+
+    if d_from == d_to:
+        raise HTTPException(status_code=400, detail="from_date 与 to_date 不能相同")
+
+    try:
+        rows = await _run_blocking(
+            analyzer.get_history_yoy_compare, from_date, to_date, timeout=30
+        )
+        # 按 snapshot_date 索引, 便于前端直接取 from_date / to_date 数据
+        by_date = {str(r["snapshot_date"]): r for r in rows}
+        return {
+            "from_date": from_date,
+            "to_date": to_date,
+            "from_data": by_date.get(from_date),
+            "to_data": by_date.get(to_date),
+        }
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail="YoY compare query timed out after 30s")
+    except Exception as e:
+        logging.exception("[History] get_history_yoy_compare failed")
+        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
+
+
 @router.get("/debug/db-pools")
 async def get_db_pool_stats() -> Dict[str, Any]:
     """Return database connection pool stats for troubleshooting."""
