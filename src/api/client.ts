@@ -558,6 +558,52 @@ export const apiClient = {
     const response = await fetch(`${API_BASE}/keyword-analysis?${queryParams}`);
     return handleResponse<KeywordAnalysisResponse>(response);
   },
+
+  // ========== 历史快照 (PR4) ==========
+
+  getHistoryPoolSummary: async (dateFrom: string, dateTo: string): Promise<HistoryPoolSummaryResponse> => {
+    const response = await fetch(
+      `${API_BASE}/history/pool-summary?date_from=${dateFrom}&date_to=${dateTo}`
+    );
+    return handleResponse<HistoryPoolSummaryResponse>(response);
+  },
+
+  getHistoryYoyCompare: async (fromDate: string, toDate: string): Promise<HistoryYoyCompareResponse> => {
+    const response = await fetch(
+      `${API_BASE}/history/yoy-compare?from_date=${fromDate}&to_date=${toDate}`
+    );
+    return handleResponse<HistoryYoyCompareResponse>(response);
+  },
+
+  getHistorySegmentTrend: async (
+    dateFrom: string,
+    dateTo: string,
+    segment?: string
+  ): Promise<HistorySegmentTrendResponse> => {
+    const segmentParam = segment ? `&segment=${encodeURIComponent(segment)}` : '';
+    const response = await fetch(
+      `${API_BASE}/history/segment-trend?date_from=${dateFrom}&date_to=${dateTo}${segmentParam}`
+    );
+    return handleResponse<HistorySegmentTrendResponse>(response);
+  },
+
+  getHistoryVipTrend: async (dateFrom: string, dateTo: string): Promise<HistoryVipTrendResponse> => {
+    const response = await fetch(
+      `${API_BASE}/history/vip-trend?date_from=${dateFrom}&date_to=${dateTo}`
+    );
+    return handleResponse<HistoryVipTrendResponse>(response);
+  },
+
+  getHistoryBuyerTimeline: async (
+    buyerNick: string,
+    dateFrom: string,
+    dateTo: string
+  ): Promise<HistoryBuyerTimelineResponse> => {
+    const response = await fetch(
+      `${API_BASE}/history/buyer-timeline?buyer_nick=${encodeURIComponent(buyerNick)}&date_from=${dateFrom}&date_to=${dateTo}`
+    );
+    return handleResponse<HistoryBuyerTimelineResponse>(response);
+  },
 };
 
 // ========== TypeScript 类型定义 ==========
@@ -906,4 +952,103 @@ export interface KeywordAnalysisResponse {
   total_messages: number;
   buyer_types: string[];
   selected_category: string | null;
+}
+
+// ========== 历史快照 API 类型 (PR4) ==========
+
+export interface HistoryPoolSummaryRow {
+  snapshot_date: string;
+  pool_size: number;
+  smoker_count: number;
+  vic_count: number;
+  both_count: number;
+  new_count: number;
+  active_old_count: number;
+  recall_old_count: number;
+  total_gmv: number;
+  total_net_sales: number;
+}
+
+export interface HistoryPoolSummaryResponse {
+  date_from: string;
+  date_to: string;
+  total_days: number;
+  data: HistoryPoolSummaryRow[];
+}
+
+export interface HistoryYoyRow {
+  snapshot_date: string;
+  pool_size: number;
+  smoker_count: number;
+  vic_count: number;
+  both_count: number;
+  v3_count: number;
+  v2_count: number;
+  v1_count: number;
+  v0_count: number;
+  total_net_sales: number;
+  rolling_24m_total: number;
+}
+
+export interface HistoryYoyCompareResponse {
+  from_date: string;
+  to_date: string;
+  from_data: HistoryYoyRow | null;
+  to_data: HistoryYoyRow | null;
+}
+
+export interface HistorySegmentTrendRow {
+  snapshot_date: string;
+  rfm_segment: string;
+  customer_count: number;
+}
+
+export interface HistorySegmentTrendResponse {
+  date_from: string;
+  date_to: string;
+  segment: string | null;
+  total_rows: number;
+  data: HistorySegmentTrendRow[];
+}
+
+export interface HistoryVipTrendRow {
+  snapshot_date: string;
+  vip_level: string;
+  customer_count: number;
+  total_net_sales: number;
+}
+
+export interface HistoryVipTrendResponse {
+  date_from: string;
+  date_to: string;
+  total_rows: number;
+  data: HistoryVipTrendRow[];
+}
+
+export interface HistoryBuyerTimelineRow {
+  snapshot_date: string;
+  channel: string;
+  is_smoker: number;
+  is_vic: number;
+  buyer_type: string;
+  vip_level: string;
+  client_monthly_tag: string;
+  historical_net_sales: number;
+  rolling_24m_netsales: number;
+  l6m_netsales: number;
+  l1y_netsales: number;
+  total_orders: number;
+  last_purchase_date: string | null;
+  rfm_segment: string;
+  churn_risk: string;
+  top_category: string;
+  discount_sensitivity: string;
+}
+
+export interface HistoryBuyerTimelineResponse {
+  buyer_nick: string;
+  date_from: string;
+  date_to: string;
+  total_rows: number;
+  data: HistoryBuyerTimelineRow[];
 }
