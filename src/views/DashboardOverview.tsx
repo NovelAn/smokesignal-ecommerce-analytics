@@ -18,6 +18,7 @@ import { MetricCards } from '../components/dashboard/MetricCards';
 import { KeywordAnalysisPanel } from '../components/dashboard/KeywordAnalysisPanel';
 import { PriorityAttentionBoard } from '../components/dashboard/PriorityAttentionBoard';
 import { SentimentCharts } from '../components/dashboard/SentimentCharts';
+import { HistoryTrendsSection } from '../components/dashboard/HistoryTrendsSection';
 
 type TimeRange = '7d' | '15d' | '30d' | '90d' | '1y';
 
@@ -83,6 +84,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
       {/* Row 4: 情感和意图图表 */}
       <SentimentCharts timeRange={timeRange} />
+
+      {/* Row 5: 历史快照趋势 (PR4) */}
+      <HistoryTrendsSection />
     </div>
   );
 };
