@@ -411,3 +411,41 @@ class TargetBuyerAnalyzer:
             has_chat=has_chat,
             use_default_filter=use_default_filter
         )
+
+    # === History (PR3b) ===
+
+    def get_history_segment_trend(
+        self,
+        date_from: str,
+        date_to: str,
+        segment: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取历史快照 segment 趋势 (PR3b) - 13 类 RFM 每日分布.
+
+        性能: < 0.5秒 (idx_snapshot_date + 按月分区裁剪)
+        """
+        return self.queries.get_history_segment_trend(date_from, date_to, segment)
+
+    def get_history_vip_trend(
+        self, date_from: str, date_to: str
+    ) -> List[Dict[str, Any]]:
+        """
+        获取历史快照 VIP 等级趋势 (PR3b).
+
+        性能: < 0.3秒 (idx_snapshot_vip + 按月分区裁剪)
+        """
+        return self.queries.get_history_vip_trend(date_from, date_to)
+
+    def get_history_buyer_timeline(
+        self,
+        buyer_nick: str,
+        date_from: str,
+        date_to: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取单买家历史时间线 (PR3b).
+
+        性能: < 0.2秒 (PK 查找)
+        """
+        return self.queries.get_history_buyer_timeline(buyer_nick, date_from, date_to)
