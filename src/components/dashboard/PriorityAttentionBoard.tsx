@@ -155,6 +155,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
   onRowAction
 }) => {
   // ========== 状态管理 ==========
+  const [activeTab, setActiveTab] = useState<'priority' | 'churn'>('priority');
   const [currentPage, setCurrentPage] = useState(1);
 
   // 筛选状态
@@ -250,10 +251,23 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
     <NotionCard
       className="overflow-hidden"
       icon={AlertTriangle}
-      title="需优先跟进的客户"
-      subtitle={`${response?.total || 0} 位客户 | 默认: 紧急/高优先级 或 负面情感`}
+      title={activeTab === 'priority' ? '需优先跟进的客户' : '流失预警'}
+      subtitle={activeTab === 'priority'
+        ? `${response?.total || 0} 位客户 | 默认: 紧急/高优先级 或 负面情感`
+        : 'segment 退化 + churn_risk 上升 (30天对比)'}
       action={
         <div className="flex items-center gap-3">
+          {/* Tab Bar - Round 1 */}
+          <div className="flex bg-gray-100 rounded-md p-0.5">
+            <button
+              onClick={() => { setActiveTab('priority'); setCurrentPage(1); }}
+              className={`px-3 py-1 text-xs rounded transition-colors ${activeTab === 'priority' ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-600 hover:text-gray-800'}`}
+            >需优先跟进</button>
+            <button
+              onClick={() => { setActiveTab('churn'); setCurrentPage(1); }}
+              className={`px-3 py-1 text-xs rounded transition-colors ${activeTab === 'churn' ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-600 hover:text-gray-800'}`}
+            >流失预警</button>
+          </div>
           {/* 分页器 */}
           {totalPages > 1 && (
             <div className="flex items-center gap-1">
@@ -336,6 +350,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">购买</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">兴趣</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">痛点</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-notion-border">
@@ -463,6 +478,19 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                     >
                       {parseJsonArray(customer.persona_pain_points)[0] || '-'}
                     </span>
+                  </td>
+                  {/* 操作 - Round 1 */}
+                  <td className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => {
+                        apiClient.markService({
+                          buyer_nick: customer.buyer_nick,
+                          status: 'contacted',
+                        }).then(() => refetch());
+                      }}
+                      className="px-2 py-0.5 text-xs bg-green-50 text-green-700 border border-green-200 rounded hover:bg-green-100 transition-colors"
+                      title="标记已触达"
+                    >已触达</button>
                   </td>
                 </tr>
               ))}
