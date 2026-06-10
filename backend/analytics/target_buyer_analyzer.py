@@ -461,3 +461,21 @@ class TargetBuyerAnalyzer:
         """
         return self.queries.get_history_buyer_timeline(buyer_nick, date_from, date_to)
 
+    # === CRM Round 1 ===
+
+    def get_churn_warning(
+        self, limit: int = 100, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """获取流失预警列表 (Round 1)."""
+        return self.queries.get_churn_warning(limit, offset)
+
+    def mark_service(
+        self, buyer_nick: str, status: str, notes: Optional[str] = None
+    ) -> int:
+        """标记客户处理状态 (Round 1). UPSERT customer_service_log."""
+        return self.queries.mark_service(buyer_nick, status, notes)
+
+    def get_service_history(self, buyer_nick: str) -> List[Dict[str, Any]]:
+        """获取某客户的所有处理记录 (Round 1)."""
+        return self.queries.get_service_history(buyer_nick)
+

@@ -2510,3 +2510,88 @@ async def get_history_buyer_timeline(
     except Exception as e:
         logging.exception("[History] get_history_buyer_timeline failed for %s", buyer_nick)
         raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
+
+
+# === CRM Round 1 ===
+
+@router.get("/history/churn-warning")
+async def get_churn_warning(
+    limit: int = Query(100, ge=1, le=1000, description="返回数量"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+) -> Dict[str, Any]:
+    """
+    获取流失预警列表 (Round 1).
+
+    返回: segment 退化 (30D 前 vs 现在) + churn_risk 上升的客户列表.
+    """
+    import asyncio
+    import logging
+
+    try:
+        rows = await _run_blocking(
+            analyzer.get_churn_warning, limit, offset, timeout=30
+        )
+        return {"total": len(rows), "limit": limit, "offset": offset, "data": rows}
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail="Churn warning query timed out after 30s")
+    except Exception as e:
+        logging.exception("[CRM] get_churn_warning failed")
+        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
+
+
+@router.post("/service/mark")
+async def mark_service(
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    标记客户处理状态 (Round 1).
+
+    Body: { buyer_nick, status (pending/contacted/resolved), notes? }
+    UPSERT customer_service_log.
+    """
+    import asyncio
+    import logging
+
+    buyer_nick = body.get("buyer_nick", "").strip()
+    if not buyer_nick:
+        raise HTTPException(status_code=400, detail="buyer_nick is required")
+
+    status = body.get("status", "")
+    if status not in ("pending", "contacted", "resolved"):
+        raise HTTPException(status_code=400, detail="status must be pending/contacted/resolved")
+
+    notes = body.get("notes", "")
+
+    try:
+        affected = await _run_blocking(
+            analyzer.mark_service, buyer_nick, status, notes, timeout=10
+        )
+        return {"success": True, "affected_rows": affected, "buyer_nick": buyer_nick, "status": status}
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail="Service mark timed out after 10s")
+    except Exception as e:
+        logging.exception("[CRM] mark_service failed for %s", buyer_nick)
+        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
+
+
+@router.get("/service/history/{buyer_nick}")
+async def get_service_history(buyer_nick: str) -> Dict[str, Any]:
+    """
+    获取某客户的所有处理记录 (Round 1).
+    """
+    import asyncio
+    import logging
+
+    if not buyer_nick or not buyer_nick.strip():
+        raise HTTPException(status_code=400, detail="buyer_nick is required")
+
+    try:
+        rows = await _run_blocking(
+            analyzer.get_service_history, buyer_nick, timeout=10
+        )
+        return {"buyer_nick": buyer_nick, "total": len(rows), "data": rows}
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail="Service history query timed out after 10s")
+    except Exception as e:
+        logging.exception("[CRM] get_service_history failed for %s", buyer_nick)
+        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)

@@ -700,3 +700,35 @@ class TargetBuyerQueries:
         sql = self._load_sql('get_history_buyer_timeline.sql')
         return self.db.execute_query(sql, (buyer_nick, date_from, date_to))
 
+    # === CRM Round 1 ===
+
+    def get_churn_warning(
+        self, limit: int = 100, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        获取流失预警列表 — segment 退化 (30D 前 vs 现在) + churn_risk 上升.
+        """
+        sql = self._load_sql('get_churn_warning.sql')
+        return self.db.execute_query(sql, {"limit": limit, "offset": offset})
+
+    def mark_service(
+        self, buyer_nick: str, status: str, notes: Optional[str] = None
+    ) -> int:
+        """UPSERT customer_service_log. 返回 affected rows."""
+        sql = """
+            INSERT INTO customer_service_log (buyer_nick, status, notes)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE status = VALUES(status), notes = VALUES(notes)
+        """
+        return self.db.execute_update(sql, (buyer_nick, status, notes or ""))
+
+    def get_service_history(self, buyer_nick: str) -> List[Dict[str, Any]]:
+        """获取某客户的所有处理记录."""
+        sql = """
+            SELECT id, buyer_nick, status, notes, created_at, updated_at
+            FROM customer_service_log
+            WHERE buyer_nick = %s
+            ORDER BY updated_at DESC
+        """
+        return self.db.execute_query(sql, (buyer_nick,))
+

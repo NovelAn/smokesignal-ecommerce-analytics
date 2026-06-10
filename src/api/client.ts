@@ -604,6 +604,27 @@ export const apiClient = {
     );
     return handleResponse<HistoryBuyerTimelineResponse>(response);
   },
+
+  // ========== CRM 运营 (Round 1) ==========
+
+  getChurnWarning: async (limit = 100, offset = 0): Promise<ChurnWarningResponse> => {
+    const response = await fetch(`${API_BASE}/history/churn-warning?limit=${limit}&offset=${offset}`);
+    return handleResponse<ChurnWarningResponse>(response);
+  },
+
+  markService: async (body: ServiceMarkRequest): Promise<ServiceMarkResponse> => {
+    const response = await fetch(`${API_BASE}/service/mark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return handleResponse<ServiceMarkResponse>(response);
+  },
+
+  getServiceHistory: async (buyerNick: string): Promise<ServiceHistoryResponse> => {
+    const response = await fetch(`${API_BASE}/service/history/${encodeURIComponent(buyerNick)}`);
+    return handleResponse<ServiceHistoryResponse>(response);
+  },
 };
 
 // ========== TypeScript 类型定义 ==========
@@ -1051,4 +1072,55 @@ export interface HistoryBuyerTimelineResponse {
   date_to: string;
   total_rows: number;
   data: HistoryBuyerTimelineRow[];
+}
+
+// ========== CRM Round 1 类型 ==========
+
+export interface ChurnWarningRow {
+  buyer_nick: string;
+  channel: string;
+  buyer_type: string;
+  vip_level: string;
+  segment_30d_ago: string;
+  segment_now: string;
+  churn_risk_30d_ago: string;
+  churn_risk_now: string;
+  l6m_netsales_change: number;
+  last_purchase_date: string | null;
+  last_chat_date: string | null;
+}
+
+export interface ChurnWarningResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  data: ChurnWarningRow[];
+}
+
+export interface ServiceMarkRequest {
+  buyer_nick: string;
+  status: 'pending' | 'contacted' | 'resolved';
+  notes?: string;
+}
+
+export interface ServiceMarkResponse {
+  success: boolean;
+  affected_rows: number;
+  buyer_nick: string;
+  status: string;
+}
+
+export interface ServiceHistoryRow {
+  id: number;
+  buyer_nick: string;
+  status: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceHistoryResponse {
+  buyer_nick: string;
+  total: number;
+  data: ServiceHistoryRow[];
 }
