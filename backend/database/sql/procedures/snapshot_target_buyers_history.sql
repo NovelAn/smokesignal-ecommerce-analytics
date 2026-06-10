@@ -72,7 +72,6 @@ BEGIN
     CREATE TEMPORARY TABLE tmp_cum (
         buyer_nick VARCHAR(255) PRIMARY KEY,
         channel VARCHAR(10),
-        client_monthly_tag VARCHAR(50),
         city VARCHAR(100),
         first_purchase_date DATETIME,
         last_purchase_date DATETIME,
@@ -86,7 +85,6 @@ BEGIN
     SELECT
         买家昵称,
         MAX(CASE WHEN channel IS NOT NULL THEN channel END),
-        MAX(client_monthly_tag),
         MAX(城市),
         MIN(最后付款时间),
         MAX(最后付款时间),
@@ -99,6 +97,25 @@ BEGIN
     WHERE 买家昵称 IN (SELECT buyer_nick FROM tmp_target)
       AND 最后付款时间 < v_snapshot_date
     GROUP BY 买家昵称;
+
+    -- client_monthly_tag: 取 v_snapshot_date 之前最近一次购买时的 tag
+    -- 修复: 原 MAX(client_monthly_tag) 按字母序聚合, 错误地把 active_old 归为 recall_old
+    -- 改用 ROW_NUMBER() 与主表 procedure 逻辑一致
+    DROP TEMPORARY TABLE IF EXISTS tmp_latest_tags;
+    CREATE TEMPORARY TABLE tmp_latest_tags (
+        buyer_nick VARCHAR(255) PRIMARY KEY,
+        client_monthly_tag VARCHAR(50)
+    );
+    INSERT INTO tmp_latest_tags (buyer_nick, client_monthly_tag)
+    SELECT 买家昵称, client_monthly_tag
+    FROM (
+        SELECT 买家昵称, client_monthly_tag,
+               ROW_NUMBER() OVER (PARTITION BY 买家昵称 ORDER BY 最后付款时间 DESC) AS rn
+        FROM dunhill_t01_trade_line
+        WHERE 买家昵称 IN (SELECT buyer_nick FROM tmp_target)
+          AND 最后付款时间 < v_snapshot_date
+    ) ranked
+    WHERE rn = 1;
 
     DROP TEMPORARY TABLE IF EXISTS tmp_r24;
     CREATE TEMPORARY TABLE tmp_r24 (
@@ -220,7 +237,7 @@ BEGIN
         SELECT
             t.buyer_nick,
             cum.channel,
-            cum.client_monthly_tag,
+            ltag.client_monthly_tag,
             t.is_smoker,
             t.is_vic,
             t.buyer_type,
@@ -304,6 +321,7 @@ BEGIN
                 MAX(CASE WHEN rank_num = 3 THEN category END) AS third_cat
             FROM tmp_cat GROUP BY buyer_nick
         ) cats ON t.buyer_nick = cats.buyer_nick
+        LEFT JOIN tmp_latest_tags ltag ON t.buyer_nick = ltag.buyer_nick
     )
     SELECT
         base.buyer_nick,
@@ -415,6 +433,7 @@ BEGIN
     -- 清理临时表
     DROP TEMPORARY TABLE IF EXISTS tmp_target;
     DROP TEMPORARY TABLE IF EXISTS tmp_cum;
+    DROP TEMPORARY TABLE IF EXISTS tmp_latest_tags;
     DROP TEMPORARY TABLE IF EXISTS tmp_r24;
     DROP TEMPORARY TABLE IF EXISTS tmp_l6m;
     DROP TEMPORARY TABLE IF EXISTS tmp_l1y;

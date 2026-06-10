@@ -94,6 +94,10 @@ def backfill_day(d):
     # 然后 final INSERT JOIN 起来
 
     # 2a. 累计 (< d)
+    # NOTE: 此处 MAX(client_monthly_tag) 保留作为历史 demo 阶段产物, 不再使用.
+    #       生产 procedure (snapshot_target_buyers_history / refresh_target_buyers_asof)
+    #       已改用 ROW_NUMBER() 取 d 之前最近一次购买时的 tag.
+    #       此 demo 脚本仅作为 PR1 前的探索阶段产物保留, 不参与 production.
     cur.execute("DROP TEMPORARY TABLE IF EXISTS tmp_cum")
     cur.execute("""
         CREATE TEMPORARY TABLE tmp_cum (
