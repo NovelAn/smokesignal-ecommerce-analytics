@@ -1,3 +1,5 @@
+DROP PROCEDURE IF EXISTS refresh_target_buyers_precomputed;
+
 CREATE DEFINER=`novelan`@`%` PROCEDURE `dunhill`.`refresh_target_buyers_precomputed`()
 BEGIN
     DECLARE start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
@@ -17,17 +19,33 @@ BEGIN
         buyer_type VARCHAR(50)
     );
 
+    -- 0. 找出 FF/SC 主导客户 (ff_sc 订单数 > 正常订单数) - 后续排除
+    -- 这些客户的购买行为主要由 FF 内卖/SC 推广贡献, 不属于真实目标 CRM 池
+    DROP TEMPORARY TABLE IF EXISTS tmp_ff_sc_excluded;
+    CREATE TEMPORARY TABLE tmp_ff_sc_excluded (
+        buyer_nick VARCHAR(255) PRIMARY KEY
+    );
+    INSERT INTO tmp_ff_sc_excluded (buyer_nick)
+    SELECT 买家昵称
+    FROM dunhill_t01_trade_line
+    WHERE 买家昵称 IS NOT NULL AND 买家昵称 != ''
+    GROUP BY 买家昵称
+    HAVING SUM(CASE WHEN ff_flag = 1 OR sc_flag = 1 THEN 1 ELSE 0 END)
+         > SUM(CASE WHEN ff_flag = 0 AND sc_flag = 0 THEN 1 ELSE 0 END);
+
     INSERT INTO tmp_target_buyers_new (buyer_nick, is_smoker, is_vic, buyer_type)
     SELECT DISTINCT 买家昵称, TRUE, FALSE, 'SMOKER'
     FROM dunhill_t01_trade_line
     WHERE category IN ('Pipes', 'Lighters')
-      AND 买家昵称 IS NOT NULL AND 买家昵称 != '';
+      AND 买家昵称 IS NOT NULL AND 买家昵称 != ''
+      AND 买家昵称 NOT IN (SELECT buyer_nick FROM tmp_ff_sc_excluded);
 
     INSERT INTO tmp_target_buyers_new (buyer_nick, is_smoker, is_vic, buyer_type)
     SELECT DISTINCT 买家昵称, FALSE, TRUE, 'VIC'
     FROM dunhill_t01_trade_line
     WHERE 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 24 MONTH)
       AND 买家昵称 IS NOT NULL AND 买家昵称 != ''
+      AND 买家昵称 NOT IN (SELECT buyer_nick FROM tmp_ff_sc_excluded)
     GROUP BY 买家昵称
     HAVING SUM(成交总金额 - IFNULL(退款金额, 0)) >= 30000
     ON DUPLICATE KEY UPDATE is_vic = TRUE, buyer_type = 'BOTH';
@@ -39,7 +57,8 @@ BEGIN
     INNER JOIN season_products sp ON t.skc = sp.skc AND sp.is_active = 1
     WHERE t.买家昵称 IS NOT NULL AND t.买家昵称 != ''
       AND t.付款时间 IS NOT NULL
-      AND t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 3 MONTH);
+      AND t.最后付款时间 >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
+      AND t.买家昵称 NOT IN (SELECT buyer_nick FROM tmp_ff_sc_excluded);
 
     -- 1d. 大单买家（近3个月单笔 >= 3件 且 >= ¥20,000，已有 VIC/Smoker/Season 自动跳过）
     INSERT IGNORE INTO tmp_target_buyers_new (buyer_nick, is_smoker, is_vic, buyer_type)
@@ -50,6 +69,7 @@ BEGIN
         WHERE 买家昵称 IS NOT NULL AND 买家昵称 != ''
           AND 付款时间 IS NOT NULL
           AND 最后付款时间 >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
+          AND 买家昵称 NOT IN (SELECT buyer_nick FROM tmp_ff_sc_excluded)
         GROUP BY 买家昵称, 订单号
         HAVING SUM(件数) >= 3 AND SUM(成交总金额) >= 20000
     ) bulk_buyers;
