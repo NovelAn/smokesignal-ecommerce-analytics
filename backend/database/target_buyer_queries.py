@@ -601,3 +601,41 @@ class TargetBuyerQueries:
         result = self.db.execute_query(sql, params)
 
         return result[0]['total'] if result else 0
+
+    # === History (PR3a) ===
+
+    def get_history_pool_summary(
+        self, date_from: str, date_to: str
+    ) -> List[Dict[str, Any]]:
+        """
+        获取历史快照池子汇总趋势 (PR3a).
+
+        Args:
+            date_from: 起始日期 (含), YYYY-MM-DD
+            date_to: 结束日期 (含), YYYY-MM-DD
+
+        Returns:
+            每天一行: snapshot_date, pool_size, smoker_count, vic_count,
+            both_count, new_count, active_old_count, recall_old_count,
+            total_gmv, total_net_sales
+        """
+        sql = self._load_sql('get_history_pool_summary.sql')
+        return self.db.execute_query(sql, (date_from, date_to))
+
+    def get_history_yoy_compare(
+        self, from_date: str, to_date: str
+    ) -> List[Dict[str, Any]]:
+        """
+        获取历史快照同期对比 (PR3a).
+
+        Args:
+            from_date: 起始日期 (YoY 基准日), YYYY-MM-DD
+            to_date: 对比日期 (通常 from_date 后 1 年/1 月), YYYY-MM-DD
+
+        Returns:
+            2 行 (from_date + to_date): snapshot_date, pool_size,
+            smoker_count, vic_count, both_count, v3/v2/v1/v0_count,
+            total_net_sales, rolling_24m_total
+        """
+        sql = self._load_sql('get_history_yoy_compare.sql')
+        return self.db.execute_query(sql, (from_date, to_date))

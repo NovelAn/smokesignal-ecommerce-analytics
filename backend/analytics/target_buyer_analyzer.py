@@ -394,15 +394,6 @@ class TargetBuyerAnalyzer:
         has_chat: Optional[str] = None,
         use_default_filter: bool = True
     ) -> int:
-        """
-        获取优先关注客户总数(用于分页)
-
-        Args:
-            同 get_priority_customers
-
-        Returns:
-            客户总数
-        """
         return self.queries.get_priority_customers_count(
             channel=channel,
             buyer_type=buyer_type,
@@ -411,3 +402,25 @@ class TargetBuyerAnalyzer:
             has_chat=has_chat,
             use_default_filter=use_default_filter
         )
+
+    # === History (PR3a) ===
+
+    def get_history_pool_summary(
+        self, date_from: str, date_to: str
+    ) -> List[Dict[str, Any]]:
+        """
+        获取历史快照池子汇总趋势 (PR3a).
+
+        性能: < 0.5秒 (idx_snapshot_date 索引 + 按月分区裁剪)
+        """
+        return self.queries.get_history_pool_summary(date_from, date_to)
+
+    def get_history_yoy_compare(
+        self, from_date: str, to_date: str
+    ) -> List[Dict[str, Any]]:
+        """
+        获取历史快照同期对比 (PR3a) - VIC YoY / 任意两日对比.
+
+        性能: < 0.3秒 (PK 查找 + 按月分区裁剪)
+        """
+        return self.queries.get_history_yoy_compare(from_date, to_date)
