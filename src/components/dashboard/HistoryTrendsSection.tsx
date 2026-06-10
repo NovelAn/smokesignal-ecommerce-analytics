@@ -230,12 +230,9 @@ function SegmentTrendChart({
     return () => { cancelled = true; };
   }, [dateFrom, dateTo, selectedSegment]);
 
-  if (loading) return <LoadingSpinner />;
-  if (error) return <ErrorAlert message={error} />;
-  if (!data || data.length === 0) return <div className="text-gray-500 text-sm">无数据</div>;
-
-  // pivot: snapshot_date -> segment -> count
+  // pivot: snapshot_date -> segment -> count  (hooks 必须在 early return 之前)
   const pivoted = useMemo(() => {
+    if (!data) return [];
     const byDate = new Map<string, Record<string, any>>();
     for (const row of data) {
       if (!byDate.has(row.snapshot_date)) byDate.set(row.snapshot_date, { snapshot_date: row.snapshot_date });
@@ -246,9 +243,14 @@ function SegmentTrendChart({
 
   // 决定渲染哪些 segment
   const segments = useMemo(() => {
+    if (!data) return [];
     if (selectedSegment) return [selectedSegment];
     return Array.from(new Set(data.map((r) => r.rfm_segment))).sort();
   }, [data, selectedSegment]);
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorAlert message={error} />;
+  if (!data || data.length === 0) return <div className="text-gray-500 text-sm">无数据</div>;
 
   return (
     <ResponsiveContainer width="100%" height={320}>
@@ -302,12 +304,9 @@ function VipTrendChart({ dateFrom, dateTo }: { dateFrom: string; dateTo: string 
     return () => { cancelled = true; };
   }, [dateFrom, dateTo]);
 
-  if (loading) return <LoadingSpinner />;
-  if (error) return <ErrorAlert message={error} />;
-  if (!data || data.length === 0) return <div className="text-gray-500 text-sm">无数据</div>;
-
-  // pivot + 按月聚合 (避免 14M 数据点太密)
+  // pivot + 按月聚合 (避免 14M 数据点太密)  (hooks 必须在 early return 之前)
   const pivoted = useMemo(() => {
+    if (!data) return [];
     const byMonth = new Map<string, Record<string, any>>();
     for (const row of data) {
       const month = row.snapshot_date.slice(0, 7);  // YYYY-MM
@@ -320,6 +319,10 @@ function VipTrendChart({ dateFrom, dateTo }: { dateFrom: string; dateTo: string 
     }
     return Array.from(byMonth.values()).sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date));
   }, [data]);
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorAlert message={error} />;
+  if (!data || data.length === 0) return <div className="text-gray-500 text-sm">无数据</div>;
 
   return (
     <ResponsiveContainer width="100%" height={280}>
