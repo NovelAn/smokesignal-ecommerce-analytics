@@ -2359,3 +2359,154 @@ async def get_keyword_analysis(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# === History (PR3b) ===
+
+@router.get("/history/segment-trend")
+async def get_history_segment_trend(
+    date_from: str = Query(..., description="起始日期 YYYY-MM-DD"),
+    date_to: str = Query(..., description="结束日期 YYYY-MM-DD"),
+    segment: Optional[str] = Query(None, description="可选 segment filter: 13 类 RFM 之一"),
+) -> Dict[str, Any]:
+    """
+    获取历史快照 segment 趋势 (PR3b).
+
+    返回: 每天每类一行 (snapshot_date, rfm_segment, customer_count)
+    不传 segment 返回 13 类的每日分布; 传 segment 返回单类趋势
+
+    性能: < 0.5秒 (idx_snapshot_date + 按月分区裁剪)
+
+    13 类 RFM segment:
+      重要价值客户 / 重要发展客户 / 重要保持客户 / 重要挽留客户
+      优质价值客户 / 优质发展客户 / 优质保持客户 / 优质挽留客户
+      潜力客户 / 待激活客户 / 新客户 / 低价值客户
+      已流失 / 无购买记录
+    """
+    import asyncio
+    import logging
+    from datetime import date as _date
+
+    try:
+        d_from = _date.fromisoformat(date_from)
+        d_to = _date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date_from / date_to 必须是 YYYY-MM-DD")
+
+    if d_from > d_to:
+        raise HTTPException(status_code=400, detail="date_from 不能晚于 date_to")
+    if d_to > _date.today():
+        raise HTTPException(status_code=400, detail="date_to 不能是未来日期")
+
+    try:
+        rows = await _run_blocking(
+            analyzer.get_history_segment_trend,
+            date_from, date_to, segment, timeout=30
+        )
+        return {
+            "date_from": date_from,
+            "date_to": date_to,
+            "segment": segment,
+            "total_rows": len(rows),
+            "data": rows,
+        }
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail="Segment trend query timed out after 30s")
+    except Exception as e:
+        logging.exception("[History] get_history_segment_trend failed")
+        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
+
+
+@router.get("/history/vip-trend")
+async def get_history_vip_trend(
+    date_from: str = Query(..., description="起始日期 YYYY-MM-DD"),
+    date_to: str = Query(..., description="结束日期 YYYY-MM-DD"),
+) -> Dict[str, Any]:
+    """
+    获取历史快照 VIP 等级趋势 (PR3b).
+
+    返回: 每天每类一行 (snapshot_date, vip_level, customer_count, total_net_sales)
+    5 类: V3 / V2 / V1 / V0 / Non-VIP
+
+    性能: < 0.3秒 (idx_snapshot_vip + 按月分区裁剪)
+    """
+    import asyncio
+    import logging
+    from datetime import date as _date
+
+    try:
+        d_from = _date.fromisoformat(date_from)
+        d_to = _date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date_from / date_to 必须是 YYYY-MM-DD")
+
+    if d_from > d_to:
+        raise HTTPException(status_code=400, detail="date_from 不能晚于 date_to")
+    if d_to > _date.today():
+        raise HTTPException(status_code=400, detail="date_to 不能是未来日期")
+
+    try:
+        rows = await _run_blocking(
+            analyzer.get_history_vip_trend, date_from, date_to, timeout=30
+        )
+        return {
+            "date_from": date_from,
+            "date_to": date_to,
+            "total_rows": len(rows),
+            "data": rows,
+        }
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail="VIP trend query timed out after 30s")
+    except Exception as e:
+        logging.exception("[History] get_history_vip_trend failed")
+        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
+
+
+@router.get("/history/buyer-timeline")
+async def get_history_buyer_timeline(
+    buyer_nick: str = Query(..., description="买家昵称"),
+    date_from: str = Query(..., description="起始日期 YYYY-MM-DD"),
+    date_to: str = Query(..., description="结束日期 YYYY-MM-DD"),
+) -> Dict[str, Any]:
+    """
+    获取单买家历史时间线 (PR3b).
+
+    返回: 每天一行 (snapshot_date + 17 关键指标)
+
+    性能: < 0.2秒 (PK 查找)
+    """
+    import asyncio
+    import logging
+    from datetime import date as _date
+
+    if not buyer_nick or not buyer_nick.strip():
+        raise HTTPException(status_code=400, detail="buyer_nick 不能为空")
+
+    try:
+        d_from = _date.fromisoformat(date_from)
+        d_to = _date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date_from / date_to 必须是 YYYY-MM-DD")
+
+    if d_from > d_to:
+        raise HTTPException(status_code=400, detail="date_from 不能晚于 date_to")
+    if d_to > _date.today():
+        raise HTTPException(status_code=400, detail="date_to 不能是未来日期")
+
+    try:
+        rows = await _run_blocking(
+            analyzer.get_history_buyer_timeline,
+            buyer_nick, date_from, date_to, timeout=30
+        )
+        return {
+            "buyer_nick": buyer_nick,
+            "date_from": date_from,
+            "date_to": date_to,
+            "total_rows": len(rows),
+            "data": rows,
+        }
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status_code=504, detail="Buyer timeline query timed out after 30s")
+    except Exception as e:
+        logging.exception("[History] get_history_buyer_timeline failed for %s", buyer_nick)
+        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)

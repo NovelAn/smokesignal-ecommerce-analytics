@@ -602,7 +602,7 @@ class TargetBuyerQueries:
 
         return result[0]['total'] if result else 0
 
-    # === History (PR3a) ===
+    # === History (PR3a + PR3b) ===
 
     def get_history_pool_summary(
         self, date_from: str, date_to: str
@@ -639,3 +639,64 @@ class TargetBuyerQueries:
         """
         sql = self._load_sql('get_history_yoy_compare.sql')
         return self.db.execute_query(sql, (from_date, to_date))
+
+    def get_history_segment_trend(
+        self,
+        date_from: str,
+        date_to: str,
+        segment: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取历史快照 segment 趋势 (PR3b).
+
+        Args:
+            date_from: 起始日期 (含), YYYY-MM-DD
+            date_to: 结束日期 (含), YYYY-MM-DD
+            segment: 可选, 13 类 RFM segment 之一 (e.g. '已流失', '重要价值客户')
+                     None 返回所有 13 类的每日分布
+
+        Returns:
+            每天每类一行: snapshot_date, rfm_segment, customer_count
+        """
+        sql = self._load_sql('get_history_segment_trend.sql')
+        return self.db.execute_query(sql, (date_from, date_to, segment, segment))
+
+    def get_history_vip_trend(
+        self, date_from: str, date_to: str
+    ) -> List[Dict[str, Any]]:
+        """
+        获取历史快照 VIP 等级趋势 (PR3b).
+
+        Args:
+            date_from: 起始日期 (含), YYYY-MM-DD
+            date_to: 结束日期 (含), YYYY-MM-DD
+
+        Returns:
+            每天每类一行: snapshot_date, vip_level, customer_count, total_net_sales
+        """
+        sql = self._load_sql('get_history_vip_trend.sql')
+        return self.db.execute_query(sql, (date_from, date_to))
+
+    def get_history_buyer_timeline(
+        self,
+        buyer_nick: str,
+        date_from: str,
+        date_to: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        获取单买家历史时间线 (PR3b).
+
+        Args:
+            buyer_nick: 买家昵称
+            date_from: 起始日期 (含), YYYY-MM-DD
+            date_to: 结束日期 (含), YYYY-MM-DD
+
+        Returns:
+            每天一行: snapshot_date, channel, is_smoker, is_vic, buyer_type,
+            vip_level, client_monthly_tag, historical_net_sales, rolling_24m_netsales,
+            l6m_netsales, l1y_netsales, total_orders, last_purchase_date,
+            rfm_segment, churn_risk, top_category, discount_sensitivity
+        """
+        sql = self._load_sql('get_history_buyer_timeline.sql')
+        return self.db.execute_query(sql, (buyer_nick, date_from, date_to))
+
