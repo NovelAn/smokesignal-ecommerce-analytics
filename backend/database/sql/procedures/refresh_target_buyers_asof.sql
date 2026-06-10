@@ -55,21 +55,38 @@ BEGIN
         buyer_type VARCHAR(50)
     );
 
-    -- Smoker: d 之前买过 Pipes/Lighters
+    -- 0. 找出 FF/SC 主导客户 (ff_sc 订单数 > 正常订单数) - 后续排除
+    -- 这些客户的购买行为主要由 FF 内卖/SC 推广贡献, 不属于真实目标 CRM 池
+    DROP TEMPORARY TABLE IF EXISTS tmp_ff_sc_excluded;
+    CREATE TEMPORARY TABLE tmp_ff_sc_excluded (
+        buyer_nick VARCHAR(255) PRIMARY KEY
+    );
+    INSERT INTO tmp_ff_sc_excluded (buyer_nick)
+    SELECT 买家昵称
+    FROM dunhill_t01_trade_line
+    WHERE 买家昵称 IS NOT NULL AND 买家昵称 != ''
+      AND 最后付款时间 < v_snapshot_date
+    GROUP BY 买家昵称
+    HAVING SUM(CASE WHEN ff_flag = 1 OR sc_flag = 1 THEN 1 ELSE 0 END)
+         > SUM(CASE WHEN ff_flag = 0 AND sc_flag = 0 THEN 1 ELSE 0 END);
+
+    -- Smoker: d 之前买过 Pipes/Lighters (排除 FF/SC 主导客户)
     INSERT IGNORE INTO tmp_target (buyer_nick, is_smoker, is_vic, buyer_type)
     SELECT DISTINCT 买家昵称, 1, 0, 'SMOKER'
     FROM dunhill_t01_trade_line
     WHERE category IN ('Pipes', 'Lighters')
       AND 买家昵称 IS NOT NULL AND 买家昵称 != ''
-      AND 最后付款时间 < v_snapshot_date;
+      AND 最后付款时间 < v_snapshot_date
+      AND 买家昵称 NOT IN (SELECT buyer_nick FROM tmp_ff_sc_excluded);
 
-    -- VIC: rolling 24M 净销售 >= 30K (基于 d)
+    -- VIC: rolling 24M 净销售 >= 30K (基于 d, 排除 FF/SC 主导客户)
     INSERT INTO tmp_target (buyer_nick, is_smoker, is_vic, buyer_type)
     SELECT 买家昵称, 0, 1, 'VIC'
     FROM dunhill_t01_trade_line
     WHERE 最后付款时间 < v_snapshot_date
       AND 最后付款时间 >= DATE_SUB(v_snapshot_date, INTERVAL 24 MONTH)
       AND 买家昵称 IS NOT NULL AND 买家昵称 != ''
+      AND 买家昵称 NOT IN (SELECT buyer_nick FROM tmp_ff_sc_excluded)
     GROUP BY 买家昵称
     HAVING SUM(成交总金额 - IFNULL(退款金额, 0)) >= 30000
     ON DUPLICATE KEY UPDATE is_vic=1, buyer_type='BOTH';
