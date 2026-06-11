@@ -148,12 +148,37 @@ class BuyerQueries:
         """
 
     @staticmethod
-    def get_chat_messages(user_nick: str, limit: int = 100) -> Tuple[str, tuple]:
+    def get_chat_messages(
+        user_nick: str,
+        limit: int = 100,
+        since_msg_time: Optional[datetime] = None
+    ) -> Tuple[str, tuple]:
         """
         Get chat messages for a specific buyer
 
+        Args:
+            user_nick: 买家昵称
+            limit: 返回消息数上限
+            since_msg_time: 增量起点（仅返回该时间之后的聊天）。
+                None 表示读全量历史；提供 datetime 表示增量模式。
+                增量模式用于 batch_analyzer 的"自上次分析以来的新聊天"分析。
+
         Returns: (query, params) tuple for safe parameterized execution
         """
+        if since_msg_time is not None:
+            query = """
+            SELECT
+                user_nick,
+                sender_nick,
+                msg_time,
+                msg_type,
+                content
+            FROM chat_history
+            WHERE user_nick = %s AND msg_time > %s
+            ORDER BY msg_time DESC
+            LIMIT %s
+            """
+            return query, (user_nick, since_msg_time, limit)
         query = """
         SELECT
             user_nick,

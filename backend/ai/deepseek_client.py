@@ -818,7 +818,8 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
     def analyze_sentiment_intent(
         self,
         buyer_nick: str,
-        messages: List[str]
+        messages: List[str],
+        is_incremental: bool = False
     ) -> Dict[str, Any]:
         """
         分析客户消息的情感和意图
@@ -826,6 +827,8 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
         Args:
             buyer_nick: 买家昵称
             messages: 客户消息列表
+            is_incremental: True=增量模式（messages 是自上次分析以来的新聊天）；
+                          False=全量模式（messages 是买家全部历史聊天）。
 
         Returns:
             {
@@ -851,9 +854,17 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
                 "complaint_count": 0
             }
 
+        scope_hint = (
+            "以下是**自上次分析以来的新增聊天**（请仅基于以下新增聊天判断情感和意图，不要考虑之前的历史聊天）。"
+            if is_incremental
+            else "以下是买家的全部历史聊天（请基于全部历史聊天判断每条消息的情感和意图）。"
+        )
+
         prompt = f"""分析以下客户消息的情感和意图。
 
-客户消息（最近{len(messages)}条）:
+{scope_hint}
+
+客户消息（{len(messages)}条）:
 {chr(10).join([f'- {msg}' for msg in messages[:20]])}
 
 请分析并返回JSON格式结果：
