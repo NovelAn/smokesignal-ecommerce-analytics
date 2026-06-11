@@ -31,6 +31,12 @@
 
 ## 已完成功能
 
+### 2026-06-11
+- ✅ **start-backend.sh 启动失败修复**（main: `08d5785`）
+  - Bug: 脚本 `cd "$(dirname "$0")"` 把自己 cd 进了 `scripts/`，再跑 `python -m backend.main` 找不到兄弟目录的 `backend` 包 → `ModuleNotFoundError: No module named 'backend'`
+  - Fix: `cd "$(dirname "$0")/.."` 回到项目根
+  - 验证: HTTP 200 `/`、`/docs`、`/openapi.json` 全部正常
+
 ### 2026-03-24
 - ✅ **关键词分类优化和统计去重**
   - 移除有包含关系的关键词（长词包含短词 → 只保留短词）
@@ -114,3 +120,20 @@
 
 ### 数据刷新
 运行命令: `PYTHONPATH=. python scripts/refresh_keyword_analysis_cache.py`
+
+---
+
+## 运维踩坑
+
+### 启动后端的正确姿势
+- 项目自带 `.venv/` 在项目根（已装 fastapi / uvicorn 等）
+- ✅ 脚本: `./scripts/start-backend.sh`（main 分支已修，feature 分支未带此修复）
+- ✅ 手动: `./.venv/bin/python -m backend.main`（最稳）
+- ❌ 避免: `python -m backend.main` —— 当前 `which python` 指向 `/Users/novel/Projects/data-import/.venv/bin/python`（**别项目的 venv 漏到了 PATH**）
+- 端口 8000 被旧进程占着时，新进程会 `address already in use` 直接退出；先 `lsof -i :8000` 查 PID
+
+### PATH 污染（用户级，非项目级）
+- 现象: `which python` / `which python3` 都返回 `data-import/.venv/bin/python`
+- 根因: 之前在 `data-import` 项目 `source` 过 venv，PATH 残留
+- 定位: `grep -nE "data-import|venv|VIRTUAL_ENV" ~/.zshenv ~/.zprofile ~/.zshrc`
+- 修复: 删掉写入 PATH 的那行，删掉后 `source ~/.zshrc` 或重开终端
