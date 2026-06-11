@@ -5,7 +5,8 @@
 AI分析: 使用DeepSeek-R1 + 多级降级策略
 """
 from fastapi import APIRouter, HTTPException, Query
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
+from pydantic import BaseModel, Field
 from backend.analytics.target_buyer_analyzer import TargetBuyerAnalyzer
 from backend.database import BuyerQueries
 
@@ -1250,8 +1251,9 @@ async def force_refresh_analysis(
                         orders=orders
                     )
 
-                    # 保存结果到缓存
-                    orchestrator.cache_manager.set_persona(user_nick, ai_result, profile_data)
+                    # 保存结果到缓存（仅当 cache 启用时；orchestrator 内部已写过缓存，这里是冗余兜底）
+                    if orchestrator.cache_manager:
+                        orchestrator.cache_manager.set_persona(user_nick, ai_result, profile_data)
 
                     reanalyzed.append("画像")
                     persona_method = ai_result.get('analysis_method', 'unknown')
@@ -1278,6 +1280,93 @@ async def force_refresh_analysis(
         import logging
         logging.error(f"[ForceRefresh] 失败: {e}")
         raise HTTPException(status_code=500, detail=f"强制刷新失败: {str(e)}")
+
+
+# ============================================
+# 客服操作记录 (Round 1 CRM) - service/mark endpoints
+# ============================================
+
+class ServiceMarkRequest(BaseModel):
+    buyer_nick: str
+    status: Literal['pending', 'contacted', 'resolved']
+    notes: Optional[str] = None
+
+
+class ServiceMarkResponse(BaseModel):
+    success: bool
+    affected_rows: int
+    buyer_nick: str
+    previous_status: Optional[str] = None   # 撤销用
+    new_status: str
+
+
+class ServiceMarkBatchRequest(BaseModel):
+    buyer_nicks: List[str] = Field(..., min_length=1, max_length=200)
+    status: Literal['pending', 'contacted', 'resolved']
+    notes: Optional[str] = None
+
+
+class ServiceMarkBatchResponse(BaseModel):
+    success: bool
+    affected_rows: int
+    processed: List[str]
+    failed: List[str] = []
+
+
+@router.post("/service/mark", response_model=ServiceMarkResponse)
+async def mark_customer_service(body: ServiceMarkRequest) -> ServiceMarkResponse:
+    """
+    标记单个客户处理状态 (Round 1 CRM)
+
+    用途：priority-customers 列表的客服操作列调用
+    - status='pending'：表示客户未处理（首次标记或撤销恢复）
+    - status='contacted'：客服已触达，等客户回复
+    - status='resolved'：问题已解决，闭环
+
+    返回 previous_status 用于前端 30 秒撤销。
+    """
+    try:
+        # 查上次状态（撤销用）
+        prev_history = analyzer.get_service_history(body.buyer_nick)
+        previous_status = prev_history[0].get('status') if prev_history else None
+
+        affected = analyzer.mark_service(body.buyer_nick, body.status, body.notes)
+
+        return ServiceMarkResponse(
+            success=True,
+            affected_rows=affected,
+            buyer_nick=body.buyer_nick,
+            previous_status=previous_status,
+            new_status=body.status,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"标记失败: {str(e)}")
+
+
+@router.post("/service/mark-batch", response_model=ServiceMarkBatchResponse)
+async def batch_mark_customer_service(body: ServiceMarkBatchRequest) -> ServiceMarkBatchResponse:
+    """
+    批量标记客户处理状态 (Round 1 CRM)
+
+    用途：priority-customers 列表顶部批量工具栏调用
+    - 最多 200 个/次，避免长事务
+    - partial 失败：失败的 buyer_nick 在 failed 列表返回
+    """
+    processed: List[str] = []
+    failed: List[str] = []
+    for nick in body.buyer_nicks:
+        try:
+            analyzer.mark_service(nick, body.status, body.notes)
+            processed.append(nick)
+        except Exception:
+            failed.append(nick)
+
+    return ServiceMarkBatchResponse(
+        success=len(failed) == 0,
+        affected_rows=len(processed),
+        processed=processed,
+        failed=failed,
+    )
 
 
 @router.post("/buyers/{user_nick}/analyze-async")
@@ -2509,89 +2598,4 @@ async def get_history_buyer_timeline(
         raise HTTPException(status_code=504, detail="Buyer timeline query timed out after 30s")
     except Exception as e:
         logging.exception("[History] get_history_buyer_timeline failed for %s", buyer_nick)
-        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
-
-
-# === CRM Round 1 ===
-
-@router.get("/history/churn-warning")
-async def get_churn_warning(
-    limit: int = Query(100, ge=1, le=1000, description="返回数量"),
-    offset: int = Query(0, ge=0, description="偏移量"),
-) -> Dict[str, Any]:
-    """
-    获取流失预警列表 (Round 1).
-
-    返回: segment 退化 (30D 前 vs 现在) + churn_risk 上升的客户列表.
-    """
-    import asyncio
-    import logging
-
-    try:
-        rows = await _run_blocking(
-            analyzer.get_churn_warning, limit, offset, timeout=30
-        )
-        return {"total": len(rows), "limit": limit, "offset": offset, "data": rows}
-    except (asyncio.TimeoutError, TimeoutError):
-        raise HTTPException(status_code=504, detail="Churn warning query timed out after 30s")
-    except Exception as e:
-        logging.exception("[CRM] get_churn_warning failed")
-        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
-
-
-@router.post("/service/mark")
-async def mark_service(
-    body: Dict[str, Any],
-) -> Dict[str, Any]:
-    """
-    标记客户处理状态 (Round 1).
-
-    Body: { buyer_nick, status (pending/contacted/resolved), notes? }
-    UPSERT customer_service_log.
-    """
-    import asyncio
-    import logging
-
-    buyer_nick = body.get("buyer_nick", "").strip()
-    if not buyer_nick:
-        raise HTTPException(status_code=400, detail="buyer_nick is required")
-
-    status = body.get("status", "")
-    if status not in ("pending", "contacted", "resolved"):
-        raise HTTPException(status_code=400, detail="status must be pending/contacted/resolved")
-
-    notes = body.get("notes", "")
-
-    try:
-        affected = await _run_blocking(
-            analyzer.mark_service, buyer_nick, status, notes, timeout=10
-        )
-        return {"success": True, "affected_rows": affected, "buyer_nick": buyer_nick, "status": status}
-    except (asyncio.TimeoutError, TimeoutError):
-        raise HTTPException(status_code=504, detail="Service mark timed out after 10s")
-    except Exception as e:
-        logging.exception("[CRM] mark_service failed for %s", buyer_nick)
-        raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
-
-
-@router.get("/service/history/{buyer_nick}")
-async def get_service_history(buyer_nick: str) -> Dict[str, Any]:
-    """
-    获取某客户的所有处理记录 (Round 1).
-    """
-    import asyncio
-    import logging
-
-    if not buyer_nick or not buyer_nick.strip():
-        raise HTTPException(status_code=400, detail="buyer_nick is required")
-
-    try:
-        rows = await _run_blocking(
-            analyzer.get_service_history, buyer_nick, timeout=10
-        )
-        return {"buyer_nick": buyer_nick, "total": len(rows), "data": rows}
-    except (asyncio.TimeoutError, TimeoutError):
-        raise HTTPException(status_code=504, detail="Service history query timed out after 10s")
-    except Exception as e:
-        logging.exception("[CRM] get_service_history failed for %s", buyer_nick)
         raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)

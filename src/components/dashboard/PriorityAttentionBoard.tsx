@@ -23,8 +23,24 @@ import { NotionCard } from '../common/NotionCard';
 import { NotionTag } from '../common/NotionTag';
 import { TableSkeleton } from '../common/LoadingState';
 import { ErrorAlert, EmptyState } from '../common/ErrorAlert';
-import { apiClient, PriorityCustomer, PriorityCustomersFilters, PriorityCustomersResponse } from '../../api/client';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { StatusButtonGroup } from '../common/StatusButtonGroup';
+import {
+  apiClient,
+  PriorityCustomer,
+  PriorityCustomersFilters,
+  PriorityCustomersResponse,
+  ServiceStatus,
+} from '../../api/client';
 import { useDataFetchingWithRetry } from '../../hooks/useDataFetching';
+
+const UNDO_WINDOW_MS = 30_000;
+
+const STATUS_LABEL: Record<ServiceStatus, string> = {
+  pending: '未处理',
+  contacted: '已触达',
+  resolved: '已解决',
+};
 
 // ========== 常量定义 ==========
 
@@ -167,6 +183,31 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
   const [tempFilters, setTempFilters] = useState<PriorityCustomersFilters>(filters);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
+  // 批量选择（Round 1 CRM 误触保护）
+  const [selectedNicks, setSelectedNicks] = useState<Set<string>>(new Set());
+
+  // 确认弹窗（用于 contacted / resolved 切换的二次确认）
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  // 30 秒撤销（最近一次 mark）
+  const [undoState, setUndoState] = useState<{
+    buyerNick: string;
+    previousStatus: ServiceStatus;
+    expiresAt: number;
+  } | null>(null);
+  const undoTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 卸载清理 undo timer
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    };
+  }, []);
+
   // ========== 数据获取 ==========
   const fetchPriorityCustomers = useCallback(async () => {
     const offset = (currentPage - 1) * PAGE_SIZE;
@@ -224,12 +265,6 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
     setCurrentPage(newPage);
   }, []);
 
-  const handleExportCSV = useCallback(() => {
-    const url = apiClient.getPriorityCustomersCSVUrl(filters);
-    window.open(url, '_blank');
-  }, [filters]);
-
-  // ========== 渲染 ==========
   // 保留之前的客户数据用于平滑过渡
   const prevCustomersRef = useRef<PriorityCustomer[]>([]);
   const customers = response?.customers || [];
@@ -247,6 +282,177 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
     ? prevCustomersRef.current
     : customers;
 
+  const handleExportCSV = useCallback(() => {
+    const url = apiClient.getPriorityCustomersCSVUrl(filters);
+    window.open(url, '_blank');
+  }, [filters]);
+
+  // ========== Round 1 CRM: 客服操作 handlers ==========
+
+  /** 清除单行撤销状态（数据刷新后失效） */
+  const clearUndoIfStale = useCallback(() => {
+    setUndoState(prev => {
+      if (prev && Date.now() >= prev.expiresAt) return null;
+      return prev;
+    });
+  }, []);
+
+  /** 单行状态切换入口：弹 confirm 或直接调 API */
+  const handleStatusChange = useCallback(
+    (buyer: PriorityCustomer, newStatus: ServiceStatus) => {
+      const prev = (buyer.service_status || 'pending') as ServiceStatus;
+      if (newStatus === prev) return;
+
+      const doMark = () => performMark(buyer, newStatus, prev);
+
+      // 改回 pending 不弹 confirm（兜底状态，可随时撤销）
+      if (newStatus === 'pending') {
+        doMark();
+        return;
+      }
+      // 切到 contacted / resolved 弹 confirm
+      setConfirmDialog({
+        title: `标记「${buyer.buyer_nick}」为「${STATUS_LABEL[newStatus]}」？`,
+        message: '标记后该客户将退出当前 tracking list（除非发生 reactivation 事件，如新增负面聊天/退款/RFM 退化）。30 秒内可点击撤销。',
+        onConfirm: () => {
+          setConfirmDialog(null);
+          doMark();
+        },
+      });
+    },
+    [],
+  );
+
+  /** 实际调 API + 写入 undoState */
+  const performMark = useCallback(
+    async (buyer: PriorityCustomer, newStatus: ServiceStatus, previousStatus: ServiceStatus) => {
+      try {
+        const resp = await apiClient.markService({
+          buyer_nick: buyer.buyer_nick,
+          status: newStatus,
+        });
+        // 设置 30 秒撤销窗口
+        if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+        const expiresAt = Date.now() + UNDO_WINDOW_MS;
+        setUndoState({
+          buyerNick: buyer.buyer_nick,
+          previousStatus: (resp.previous_status || previousStatus) as ServiceStatus,
+          expiresAt,
+        });
+        undoTimerRef.current = setTimeout(() => {
+          setUndoState(null);
+          undoTimerRef.current = null;
+        }, UNDO_WINDOW_MS);
+        await refetch();
+      } catch (err: unknown) {
+        // 网络/服务端错误 — 不弹 modal，避免中断客服流程
+        // 简单通过 console 报错（生产应接 logger）
+        console.error('[markService] 失败', err);
+        await refetch();
+      }
+    },
+    [refetch],
+  );
+
+  /** 撤销上一次 mark */
+  const handleUndo = useCallback(
+    async (buyer: PriorityCustomer) => {
+      if (!undoState || undoState.buyerNick !== buyer.buyer_nick) return;
+      if (Date.now() >= undoState.expiresAt) {
+        setUndoState(null);
+        return;
+      }
+      const previous = undoState.previousStatus;
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+      setUndoState(null);
+      try {
+        await apiClient.markService({
+          buyer_nick: buyer.buyer_nick,
+          status: previous,
+        });
+        await refetch();
+      } catch (err: unknown) {
+        console.error('[markService undo] 失败', err);
+        await refetch();
+      }
+    },
+    [undoState, refetch],
+  );
+
+  /** 批量 mark 入口：弹 confirm 一次 */
+  const handleBatchMark = useCallback(
+    (status: ServiceStatus) => {
+      const nicks = Array.from(selectedNicks);
+      if (nicks.length === 0) return;
+
+      const doBatch = async () => {
+        try {
+          const resp = await apiClient.batchMarkService({
+            buyer_nicks: nicks,
+            status,
+          });
+          // 批量后清除选择 + 撤销状态 + 刷新
+          setSelectedNicks(new Set());
+          setUndoState(null);
+          if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+          await refetch();
+          // partial 失败提示（Round1 简化：alert）
+          if (resp.failed.length > 0) {
+            alert(`批量标记完成：${resp.affected_rows} 成功，${resp.failed.length} 失败\n失败客户：${resp.failed.join(', ')}`);
+          }
+        } catch (err: unknown) {
+          console.error('[batchMarkService] 失败', err);
+          await refetch();
+        }
+      };
+
+      if (status === 'pending') {
+        // 批量改回 pending 直接执行（兜底）
+        doBatch();
+        return;
+      }
+      setConfirmDialog({
+        title: `批量将 ${nicks.length} 个客户标记为「${STATUS_LABEL[status]}」？`,
+        message: '这些客户将退出当前 tracking list（除非发生 reactivation 事件）。',
+        onConfirm: () => {
+          setConfirmDialog(null);
+          doBatch();
+        },
+      });
+    },
+    [selectedNicks, refetch],
+  );
+
+  /** 单行 checkbox 切换 */
+  const toggleSelect = useCallback((buyerNick: string) => {
+    setSelectedNicks(prev => {
+      const next = new Set(prev);
+      if (next.has(buyerNick)) next.delete(buyerNick);
+      else next.add(buyerNick);
+      return next;
+    });
+  }, []);
+
+  /** 表头全选/反选 */
+  const toggleSelectAll = useCallback(() => {
+    setSelectedNicks(prev => {
+      const allSelected = displayCustomers.every(c => prev.has(c.buyer_nick));
+      if (allSelected) return new Set();
+      return new Set(displayCustomers.map(c => c.buyer_nick));
+    });
+  }, [displayCustomers]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedNicks(new Set());
+  }, []);
+
+  // 数据刷新时清理过期的撤销状态
+  useEffect(() => {
+    clearUndoIfStale();
+  }, [response, clearUndoIfStale]);
+
+  // ========== 渲染 ==========
   return (
     <NotionCard
       className="overflow-hidden"
@@ -257,6 +463,37 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
         : 'segment 退化 + churn_risk 上升 (30天对比)'}
       action={
         <div className="flex items-center gap-3">
+          {/* 批量工具栏 - Round 1 CRM 误触保护 */}
+          {selectedNicks.size > 0 && (
+            <div className="flex items-center gap-2 px-2 py-1 bg-blue-50 border border-blue-200 rounded text-xs">
+              <span className="text-blue-700 font-medium">已选 {selectedNicks.size} 个</span>
+              <button
+                onClick={() => handleBatchMark('contacted')}
+                className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+              >
+                批量标为已触达
+              </button>
+              <button
+                onClick={() => handleBatchMark('resolved')}
+                className="px-2 py-0.5 bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"
+              >
+                批量标为已解决
+              </button>
+              <button
+                onClick={() => handleBatchMark('pending')}
+                className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
+              >
+                批量改回未处理
+              </button>
+              <button
+                onClick={clearSelection}
+                className="px-2 py-0.5 text-notion-muted hover:text-notion-text transition-colors"
+                title="取消所有选择"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           {/* Tab Bar - Round 1 */}
           <div className="flex bg-gray-100 rounded-md p-0.5">
             <button
@@ -338,6 +575,22 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
           <table className={`w-full text-xs transition-opacity duration-200 ${isLoading ? 'opacity-60' : 'opacity-100'}`}>
             <thead className="sticky top-0 z-20">
               <tr className="bg-white border-b border-notion-border text-left">
+                <th className="px-2 py-1 w-8">
+                  <input
+                    type="checkbox"
+                    checked={displayCustomers.length > 0 && displayCustomers.every(c => selectedNicks.has(c.buyer_nick))}
+                    ref={(el) => {
+                      if (el) {
+                        const allSelected = displayCustomers.length > 0 && displayCustomers.every(c => selectedNicks.has(c.buyer_nick));
+                        const someSelected = displayCustomers.some(c => selectedNicks.has(c.buyer_nick));
+                        el.indeterminate = someSelected && !allSelected;
+                      }
+                    }}
+                    onChange={toggleSelectAll}
+                    className="cursor-pointer"
+                    title="全选/反选当前页"
+                  />
+                </th>
                 <th className="px-3 py-1 font-medium text-notion-muted whitespace-nowrap">客户</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">优先级</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">情感</th>
@@ -354,12 +607,23 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-notion-border">
-              {displayCustomers.map((customer) => (
+              {displayCustomers.map((customer) => {
+                const canUndo = undoState?.buyerNick === customer.buyer_nick && Date.now() < undoState.expiresAt;
+                return (
                 <tr
                   key={customer.buyer_nick}
                   onClick={() => onRowAction?.(customer, 'view_details')}
                   className="hover:bg-notion-hover cursor-pointer transition-colors"
                 >
+                  {/* checkbox - Round 1 CRM */}
+                  <td className="px-2 py-1 w-8" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedNicks.has(customer.buyer_nick)}
+                      onChange={() => toggleSelect(customer.buyer_nick)}
+                      className="cursor-pointer"
+                    />
+                  </td>
                   {/* 客户信息 */}
                   <td className="px-3 py-1">
                     <div className="flex flex-col gap-0.5">
@@ -479,21 +743,18 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                       {parseJsonArray(customer.persona_pain_points)[0] || '-'}
                     </span>
                   </td>
-                  {/* 操作 - Round 1 */}
+                  {/* 操作 - Round 1 CRM: 按钮组 + 30秒撤销 */}
                   <td className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() => {
-                        apiClient.markService({
-                          buyer_nick: customer.buyer_nick,
-                          status: 'contacted',
-                        }).then(() => refetch());
-                      }}
-                      className="px-2 py-0.5 text-xs bg-green-50 text-green-700 border border-green-200 rounded hover:bg-green-100 transition-colors"
-                      title="标记已触达"
-                    >已触达</button>
+                    <StatusButtonGroup
+                      buyer={customer}
+                      onChange={(newStatus) => handleStatusChange(customer, newStatus)}
+                      canUndo={canUndo}
+                      onUndo={() => handleUndo(customer)}
+                    />
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -503,6 +764,20 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
           description="尝试调整筛选条件"
         />
       ) : null}
+
+      {/* 确认弹窗 - Round 1 CRM 误触保护 */}
+      {confirmDialog && (
+        <ConfirmDialog
+          open={!!confirmDialog}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmText="确认标记"
+          cancelText="取消"
+          confirmVariant="danger"
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
     </NotionCard>
   );
 };

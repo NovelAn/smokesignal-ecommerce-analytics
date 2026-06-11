@@ -621,6 +621,15 @@ export const apiClient = {
     return handleResponse<ServiceMarkResponse>(response);
   },
 
+  batchMarkService: async (body: ServiceMarkBatchRequest): Promise<ServiceMarkBatchResponse> => {
+    const response = await fetch(`${API_BASE}/service/mark-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return handleResponse<ServiceMarkBatchResponse>(response);
+  },
+
   getServiceHistory: async (buyerNick: string): Promise<ServiceHistoryResponse> => {
     const response = await fetch(`${API_BASE}/service/history/${encodeURIComponent(buyerNick)}`);
     return handleResponse<ServiceHistoryResponse>(response);
@@ -926,6 +935,10 @@ export interface PriorityCustomer {
   persona_analyzed_last_purchase_date?: string | null;
   persona_analyzed_last_chat_date?: string | null;
   persona_refresh_required?: boolean;
+  // 客服操作记录 (Round 1 CRM)
+  service_status?: 'pending' | 'contacted' | 'resolved' | null;
+  service_updated_at?: string | null;
+  service_notes?: string | null;
 }
 
 export interface PriorityCustomersFilters {
@@ -1097,9 +1110,11 @@ export interface ChurnWarningResponse {
   data: ChurnWarningRow[];
 }
 
+export type ServiceStatus = 'pending' | 'contacted' | 'resolved';
+
 export interface ServiceMarkRequest {
   buyer_nick: string;
-  status: 'pending' | 'contacted' | 'resolved';
+  status: ServiceStatus;
   notes?: string;
 }
 
@@ -1107,7 +1122,21 @@ export interface ServiceMarkResponse {
   success: boolean;
   affected_rows: number;
   buyer_nick: string;
-  status: string;
+  previous_status: ServiceStatus | null;
+  new_status: ServiceStatus;
+}
+
+export interface ServiceMarkBatchRequest {
+  buyer_nicks: string[];
+  status: ServiceStatus;
+  notes?: string;
+}
+
+export interface ServiceMarkBatchResponse {
+  success: boolean;
+  affected_rows: number;
+  processed: string[];
+  failed: string[];
 }
 
 export interface ServiceHistoryRow {
