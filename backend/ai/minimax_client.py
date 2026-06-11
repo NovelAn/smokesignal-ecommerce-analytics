@@ -232,12 +232,231 @@ class MiniMaxClient:
             "recommended_action": "建议根据买家历史购买情况制定个性化跟进方案"
         }
 
-    def analyze_sentiment_batch(self, messages: List[str]) -> List[Dict[str, Any]]:
+    def analyze_sentiment_intent(
+        self,
+        buyer_nick: str,
+        messages: List[str],
+        is_incremental: bool = False
+    ) -> Dict[str, Any]:
+        """
+        分析客户消息的情感和意图（统一接口 - 与 DeepSeek 同签名同字段）
+
+        用途：
+        - 上层 batch_analyzer 调用的统一入口，L1=MiniMax（首选，月订阅制省 token），L2=DeepSeek（备选，按 token 计费）。
+        - Prompt 与 DeepSeek 完全一致（deepseek_client.py:854-934），保证两个模型行为一致。
+        - 返回字段与 DeepSeek 完全对齐：sentiment_score / sentiment_label / intent_distribution / dominant_intent / complaint_count。
+
+        Args:
+            buyer_nick: 买家昵称
+            messages: 客户消息列表（仅买家自己说的话）
+            is_incremental: 是否增量分析模式。True 时 prompt 强调"新增聊天"。
+
+        Returns:
+            {
+                "sentiment_score": float (0-1, 0=非常消极, 1=非常积极),
+                "sentiment_label": str (Positive/Neutral/Negative),
+                "intent_distribution": dict,
+                "dominant_intent": str,
+                "complaint_count": int
+            }
+        """
+        if not messages:
+            return {
+                "sentiment_score": 0.5,
+                "sentiment_label": "Neutral",
+                "intent_distribution": {
+                    "Pre-sale Inquiry": 0,
+                    "Post-sale Support": 0,
+                    "Logistics": 0,
+                    "Usage Guide": 0,
+                    "Complaint": 0
+                },
+                "dominant_intent": "Unknown",
+                "complaint_count": 0
+            }
+
+        # Prompt 与 DeepSeek 完全一致（deepseek_client.py:854-934）— 一字不改，确保行为对齐
+        scope_hint = (
+            "以下是**自上次分析以来的新增聊天**。"
+            if is_incremental
+            else ""
+        )
+
+        prompt = f"""分析以下客户消息的情感和意图。{scope_hint}
+
+客户消息（最近{len(messages)}条）:
+{chr(10).join([f'- {msg}' for msg in messages[:20]])}
+
+请分析并返回JSON格式结果：
+{{
+    "sentiment_score": 情感分数(0-1, 0=非常消极, 1=非常积极),
+    "sentiment_label": "Positive"或"Neutral"或"Negative",
+    "intent_distribution": {{
+        "Pre-sale Inquiry": 售前咨询相关消息数量,
+        "Post-sale Support": 售后支持相关消息数量,
+        "Logistics": 物流相关消息数量,
+        "Usage Guide": 使用指南相关消息数量,
+        "Complaint": 投诉相关消息数量
+    }},
+    "dominant_intent": "主要意图(上述数量最多的类别)",
+    "complaint_count": 投诉相关消息总数
+}}
+
+【重要】情感分数(sentiment_score)判断标准：
+
+一、Neutral（0.4-0.6）：正常的业务咨询（最常见）
+- 询问库存、价格、物流："有没有货""什么时候发货""多少钱"
+- 表达疑惑或好奇："怎么下架了""就一个吗""为什么"
+- 功能性请求："退款""退货""换货"
+- 产品问题反馈（非投诉）："小了""大了""不合适""颜色不对""发错货"
+- 正常售后沟通："好的""可以""收到"等礼貌回复
+- 带语气词的询问："到底有没有啊""怎么这样"（语气词≠负面情绪）
+
+二、Negative（< 0.4）：只有明确负面表达时才判为负面
+- 包含投诉词汇："我要投诉""给差评""举报"
+- 包含负面评价词："太差""垃圾""骗子""假货""失望""不满"
+- 表达愤怒或强烈不满
+
+三、Positive（> 0.6）：明确的正面情绪
+- 表达感谢、满意、赞赏
+- 再次购买意愿、推荐他人
+
+【重要】意图分类标准（每条消息必须归入以下5类之一）：
+
+1. Pre-sale Inquiry（售前咨询）- 询问产品、价格、推荐、库存、款式等购买前问题
+   - 关键词：推荐、有没有货、多少钱、尺寸、颜色、款式、新款、上市、材质、面料、有没有、现货
+   - ✅ "推荐一款春季外套" → Pre-sale Inquiry
+   - ✅ "这个有没有L码" → Pre-sale Inquiry
+   - ✅ "新款什么时候上架" → Pre-sale Inquiry
+   - ✅ "这件和那件有什么区别" → Pre-sale Inquiry
+
+2. Post-sale Support（售后支持）- 收到产品后的问题反馈、退换货咨询、保修维修
+   - 关键词：退货、换货、退款、小了、大了、不合适、颜色不对、发错货、质量问题
+   - ✅ "小了，我要退货" → Post-sale Support
+   - ✅ "发错货了，帮我换一下" → Post-sale Support
+   - ✅ "收到货了，颜色和图片不一样" → Post-sale Support
+
+3. Logistics（物流）- 关于发货、快递、物流跟踪、配送时间
+   - 关键词：发货、快递、物流、什么时候到、运费、地址
+   - ✅ "什么时候发货" → Logistics
+   - ✅ "快递到哪了" → Logistics
+
+4. Usage Guide（使用指南）- 询问如何使用、保养、功能说明
+   - 关键词：怎么用、怎么保养、清洗、收纳
+   - ✅ "这个皮具怎么保养" → Usage Guide
+
+5. Complaint（投诉）- 仅限明确投诉行为（非常严格）
+   - 强投诉词：投诉/差评/举报/315/消费者协会/工商/找经理
+   - 负面评价词：太差/质量差/很差/垃圾/骗子/假货/欺骗/失望/不满/态度差/服务差
+   - ❌ 单纯退换货不算投诉，❌ 语气词不算不满，❌ 询问不算投诉
+
+【重要】intent_distribution 的数值 = 属于该类别的消息条数（不是分数），所有类别的数值之和应等于消息总数。
+
+【示例】：
+- "推荐一款春季外套" → Neutral(0.5), Pre-sale Inquiry
+- "这个有没有现货" → Neutral(0.5), Pre-sale Inquiry
+- "质量太差了" → Negative(0.2), Complaint
+- "我要投诉你们" → Negative(0.2), Complaint
+- "小了，我要退货" → Neutral(0.5), Post-sale Support（正常退货≠投诉）
+- "发错货了，帮我换一下" → Neutral(0.5), Post-sale Support（正常售后≠投诉）
+- "什么时候发货" → Neutral(0.5), Logistics
+- "好的👌" → Neutral(0.6), Post-sale Support（礼貌确认）
+
+只返回JSON，不要其他内容。"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是一位专业的客户情感分析师，擅长从客户消息中分析情感倾向和意图。"
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+
+            result_text = response.choices[0].message.content
+            return self._parse_sentiment_intent_response(result_text)
+
+        except Exception as e:
+            _safe_print(f"[MiniMax] 情感意图分析失败: {e}")
+            raise
+
+    def _parse_sentiment_intent_response(self, response_text: str) -> Dict[str, Any]:
+        """解析情感意图分析响应（与 DeepSeek._parse_sentiment_response 字段对齐）"""
+        try:
+            start = response_text.find('{')
+            end = response_text.rfind('}') + 1
+
+            if start != -1 and end > start:
+                json_str = response_text[start:end]
+                result = json.loads(json_str)
+
+                # 确保所有必要字段存在（与 DeepSeek 完全一致）
+                return {
+                    "sentiment_score": float(result.get("sentiment_score", 0.5)),
+                    "sentiment_label": result.get("sentiment_label", "Neutral"),
+                    "intent_distribution": result.get("intent_distribution", {
+                        "Pre-sale Inquiry": 0,
+                        "Post-sale Support": 0,
+                        "Logistics": 0,
+                        "Usage Guide": 0,
+                        "Complaint": 0
+                    }),
+                    "dominant_intent": result.get("dominant_intent", "Unknown"),
+                    "complaint_count": int(result.get("complaint_count", 0))
+                }
+            else:
+                raise ValueError("未找到有效JSON")
+
+        except Exception as e:
+            _safe_print(f"[MiniMax] 情感意图JSON解析失败: {e}")
+            return {
+                "sentiment_score": 0.5,
+                "sentiment_label": "Neutral",
+                "intent_distribution": {
+                    "Pre-sale Inquiry": 0,
+                    "Post-sale Support": 0,
+                    "Logistics": 0,
+                    "Usage Guide": 0,
+                    "Complaint": 0
+                },
+                "dominant_intent": "Unknown",
+                "complaint_count": 0
+            }
+
+    def analyze_sentiment_batch(
+        self,
+        messages: List[str],
+        is_incremental: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze sentiment for a batch of buyer messages.
+
+        Args:
+            messages: 买家消息内容列表
+            is_incremental: True=增量模式（messages 是自上次分析以来的新聊天）；
+                          False=全量模式（messages 是买家全部历史聊天）。
+        """
         if not messages:
             return []
 
+        scope_hint = (
+            "以下是**自上次分析以来的新增聊天**。请仅基于以下新增聊天判断情感倾向，不要考虑之前的历史聊天。"
+            if is_incremental
+            else "以下是买家的全部历史聊天。请基于全部历史聊天判断每条消息的情感倾向。"
+        )
+
         prompt = f"""
-请分析以下买家消息的情绪倾向，对每条消息给出：
+{scope_hint}
+
+对每条消息给出：
 - 情绪分数（0-1，0表示非常负面，0.5中性，1非常正面）
 - 情绪分类（Positive/Neutral/Negative）
 

@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     # Specify which database name to use from the config
     db_name_to_use: str = os.getenv("DB_NAME_TO_USE", "")
 
-    # MiniMax AI (Fallback)
+    # MiniMax AI (Primary - 月订阅制，量大管饱，不按 token 计费)
     minimax_api_key: str = os.getenv("MINIMAX_API_KEY", "")
-    minimax_model: str = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
+    minimax_model: str = os.getenv("MINIMAX_MODEL", "MiniMax-M3")
     minimax_base_url: str = os.getenv("MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
 
     # DeepSeek AI

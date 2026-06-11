@@ -327,48 +327,13 @@ class AnalyzerOrchestrator:
 
         result = None
 
-        # 策略1: DeepSeek画像（高价值高复杂度走Pro，其余走Flash）
-        if self.deepseek:
-            try:
-                use_pro = should_use_deepseek_pro(profile, chats, orders)
-                if use_pro:
-                    print(f"[L1-DeepSeek-V4-Pro] 使用DeepSeek-V4-Pro深度分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
-                    result = self.deepseek.analyze_buyer_persona(
-                        buyer_nick, profile, chats, orders
-                    )
-                    result["analysis_method"] = "deepseek-v4-pro"
-                else:
-                    print(f"[L1-DeepSeek-V4-Flash] 使用DeepSeek-V4-Flash快速分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
-                    result = self.deepseek.analyze_buyer_persona_chat(
-                        buyer_nick, profile, chats, orders
-                    )
-                    result["analysis_method"] = "deepseek-v4-flash"
-                result = ground_persona_analysis_v3(result, profile, orders)
-                result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据"
-
-                # 检查结果是否有效，无效则降级
-                if self._is_valid_analysis(result):
-                    return self._cache_and_return(buyer_nick, profile, result)
-                else:
-                    print(f"[L1→L2] DeepSeek返回无效结果，降级到MiniMax M2.7")
-                    result = None
-
-            except TimeoutError:
-                print(f"[L1→L2] DeepSeek超时，降级到MiniMax M2.7")
-            except Exception as e:
-                error_str = str(e).lower()
-                if "429" in error_str or "rate" in error_str or "quota" in error_str or "insufficient" in error_str or "余额" in error_str:
-                    print(f"[L1→L2] DeepSeek API余额不足(429)，降级到MiniMax M2.7")
-                else:
-                    print(f"[L1→L2] DeepSeek失败: {e}，降级到MiniMax M2.7")
-
-        # 策略2: MiniMax M2.7（DeepSeek失败时降级）
+        # 策略1: MiniMax-M3画像（首选，月订阅制省 token）
         if self.minimax:
             try:
                 if has_chats:
-                    print(f"[L2-MiniMax-M2.7] 使用MiniMax分析 {buyer_nick} (Fallback)")
+                    print(f"[L1-MiniMax-M3] 使用MiniMax-M3分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
                 else:
-                    print(f"[L2-MiniMax-M2.7] 使用MiniMax分析 {buyer_nick} (Fallback，基于消费数据)")
+                    print(f"[L1-MiniMax-M3] 使用MiniMax-M3分析 {buyer_nick} (基于消费数据)")
 
                 result = self.minimax.analyze_buyer_persona(
                     buyer_nick,
@@ -377,13 +342,54 @@ class AnalyzerOrchestrator:
                     self._format_order_summary(profile, orders),
                     orders=orders
                 )
-                result["analysis_method"] = "MiniMax-M2.7"
+                result["analysis_method"] = "MiniMax-M3"
                 result = ground_persona_analysis_v3(result, profile, orders)
-                result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据(降级)"
-                return self._cache_and_return(buyer_nick, profile, result)
+                result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据"
+
+                # 检查结果是否有效，无效则降级
+                if self._is_valid_analysis(result):
+                    return self._cache_and_return(buyer_nick, profile, result)
+                else:
+                    print(f"[L1→L2] MiniMax-M3返回无效结果，降级到DeepSeek")
+                    result = None
 
             except Exception as e:
-                print(f"[L2→L3] MiniMax失败: {e}，使用规则引擎")
+                print(f"[L1→L2] MiniMax-M3失败: {e}，降级到DeepSeek")
+
+        # 策略2: DeepSeek画像（备选 - MiniMax失败时降级，按token计费；高复杂度走Pro，其余走Flash）
+        if self.deepseek:
+            try:
+                use_pro = should_use_deepseek_pro(profile, chats, orders)
+                if use_pro:
+                    print(f"[L2-DeepSeek-V4-Pro] 使用DeepSeek-V4-Pro深度分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
+                    result = self.deepseek.analyze_buyer_persona(
+                        buyer_nick, profile, chats, orders
+                    )
+                    result["analysis_method"] = "deepseek-v4-pro"
+                else:
+                    print(f"[L2-DeepSeek-V4-Flash] 使用DeepSeek-V4-Flash快速分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
+                    result = self.deepseek.analyze_buyer_persona_chat(
+                        buyer_nick, profile, chats, orders
+                    )
+                    result["analysis_method"] = "deepseek-v4-flash"
+                result = ground_persona_analysis_v3(result, profile, orders)
+                result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据(降级)"
+
+                # 检查结果是否有效，无效则降级
+                if self._is_valid_analysis(result):
+                    return self._cache_and_return(buyer_nick, profile, result)
+                else:
+                    print(f"[L2→L3] DeepSeek返回无效结果，降级到规则引擎")
+                    result = None
+
+            except TimeoutError:
+                print(f"[L2→L3] DeepSeek超时，降级到规则引擎")
+            except Exception as e:
+                error_str = str(e).lower()
+                if "429" in error_str or "rate" in error_str or "quota" in error_str or "insufficient" in error_str or "余额" in error_str:
+                    print(f"[L2→L3] DeepSeek API余额不足(429)，降级到规则引擎")
+                else:
+                    print(f"[L2→L3] DeepSeek失败: {e}，降级到规则引擎")
 
         # 策略3: 规则引擎兜底
         print(f"[L3-Rule] 使用规则引擎分析 {buyer_nick}")
