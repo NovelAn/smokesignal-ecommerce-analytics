@@ -31,6 +31,7 @@ import {
   PriorityCustomersFilters,
   PriorityCustomersResponse,
   ServiceStatus,
+  ChurnWarningRow,
 } from '../../api/client';
 import { useDataFetchingWithRetry } from '../../hooks/useDataFetching';
 
@@ -41,6 +42,109 @@ const STATUS_LABEL: Record<ServiceStatus, string> = {
   contacted: '已触达',
   resolved: '已解决',
 };
+
+// ========== Churn row helper (流失预警 Tab 行内单元格) ==========
+
+function getChurnRiskColor(risk: string): 'red' | 'orange' | 'green' {
+  if (risk === '高') return 'red';
+  if (risk === '中') return 'orange';
+  return 'green';
+}
+
+interface ChurnRowCellsProps {
+  row: ChurnWarningRow;
+  canUndo: boolean;
+  customer: PriorityCustomer;
+  onStatusChange: (customer: PriorityCustomer, newStatus: ServiceStatus) => void;
+  onUndo: (buyer: PriorityCustomer) => void;
+}
+
+function ChurnRowCells({ row, canUndo, customer, onStatusChange, onUndo }: ChurnRowCellsProps) {
+  const l6mChange = Number(row.l6m_netsales_change) || 0;
+  const l6mPositive = l6mChange > 0;
+  const l6mZero = l6mChange === 0;
+
+  return (
+    <>
+      {/* 客户信息 (复用优先级 tab 的样式) */}
+      <td className="px-3 py-1">
+        <div className="flex flex-col gap-0.5">
+          <span className="font-medium text-notion-text truncate max-w-[120px]" title={row.buyer_nick}>
+            {row.buyer_nick}
+          </span>
+          <div className="flex items-center gap-1">
+            <NotionTag text={row.channel} color={row.channel === 'DTC' ? 'blue' : 'green'} size="xs" />
+            <NotionTag
+              text={row.buyer_type}
+              color={row.buyer_type === 'SMOKER' ? 'orange' : row.buyer_type === 'BOTH' ? 'red' : row.buyer_type === 'SEASON' ? 'green' : row.buyer_type === 'BULK' ? 'purple' : 'blue'}
+              size="xs"
+            />
+          </div>
+        </div>
+      </td>
+
+      {/* VIP 等级 */}
+      <td className="px-2 py-1">
+        <NotionTag
+          text={row.vip_level || 'N/A'}
+          color={row.vip_level === 'V3' || row.vip_level === 'V2' ? 'red' : row.vip_level === 'V1' ? 'orange' : 'gray'}
+          size="xs"
+        />
+      </td>
+
+      {/* Segment 退化 (30D前 → 现在) */}
+      <td className="px-2 py-1">
+        <div className="flex items-center gap-1">
+          <NotionTag text={row.segment_30d_ago} color="green" size="xs" />
+          <span className="text-red-500 text-xs">→</span>
+          <NotionTag text={row.segment_now} color={getChurnRiskColor(row.churn_risk_now) === 'red' ? 'red' : 'orange'} size="xs" />
+        </div>
+      </td>
+
+      {/* Churn 升级 (30D前 → 现在) */}
+      <td className="px-2 py-1">
+        <div className="flex items-center gap-1">
+          <NotionTag text={row.churn_risk_30d_ago} color={getChurnRiskColor(row.churn_risk_30d_ago)} size="xs" />
+          <span className="text-red-500 text-xs">→</span>
+          <NotionTag text={row.churn_risk_now} color={getChurnRiskColor(row.churn_risk_now)} size="xs" />
+        </div>
+      </td>
+
+      {/* L6M NetSales 变化 */}
+      <td className="px-2 py-1 text-right">
+        <span
+          className={`font-mono ${
+            l6mZero
+              ? 'text-notion-muted'
+              : l6mPositive
+              ? 'text-green-600'
+              : 'text-red-600'
+          }`}
+          title={`L6M NetSales 30天变化: ${l6mChange.toLocaleString()}`}
+        >
+          {l6mZero ? '-' : `${l6mPositive ? '▲' : '▼'} ¥${Math.abs(l6mChange).toLocaleString()}`}
+        </span>
+      </td>
+
+      {/* 最后购买日期 */}
+      <td className="px-2 py-1">
+        <span className="text-notion-muted" title={`最后购买: ${row.last_purchase_date || 'N/A'}`}>
+          {row.last_purchase_date ? row.last_purchase_date.split('T')[0] : 'N/A'}
+        </span>
+      </td>
+
+      {/* 操作 - 复用 StatusButtonGroup（流失客户跟进也要 mark）*/}
+      <td className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
+        <StatusButtonGroup
+          buyer={customer}
+          onChange={(newStatus) => onStatusChange(customer, newStatus)}
+          canUndo={canUndo}
+          onUndo={() => onUndo(customer)}
+        />
+      </td>
+    </>
+  );
+}
 
 // ========== 常量定义 ==========
 
@@ -164,11 +268,26 @@ function parseJsonArray(value: string | string[] | null | undefined): string[] {
 // ========== 组件定义 ==========
 
 interface PriorityAttentionBoardProps {
-  onRowAction?: (buyer: PriorityCustomer, actionType: string) => void;
+  onRowAction?: (buyer: PriorityCustomer, actionType: string, currentPage: number) => void;
+  /** Back to Overview 时高亮的买家 */
+  highlightBuyerNick?: string | null;
+  /** 高亮买家所在的页码（Back 时跳回） */
+  highlightBuyerPage?: number;
+  /** 高亮 5 秒后清除 */
+  onClearClickedHighlight?: () => void;
+  /** 触发器：Back to Overview 时自增，强制 useEffect 重跑（即使 buyer 相同） */
+  highlightTrigger?: number;
+  /** App 级 activeTab — 仅在 === 'overview' 时才跑 scroll + timer 逻辑 */
+  appActiveTab?: string;
 }
 
 export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
-  onRowAction
+  onRowAction,
+  highlightBuyerNick = null,
+  highlightBuyerPage = 1,
+  onClearClickedHighlight,
+  highlightTrigger = 0,
+  appActiveTab,
 }) => {
   // ========== 状态管理 ==========
   const [activeTab, setActiveTab] = useState<'priority' | 'churn'>('priority');
@@ -208,15 +327,108 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
     };
   }, []);
 
-  // ========== 数据获取 ==========
-  const fetchPriorityCustomers = useCallback(async () => {
+  // ========== Round 1: Back to Overview 高亮定位 ==========
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // 整个 PriorityAttentionBoard 的容器 ref — 用作外层 main 滚动的目标点
+  // 解决 tr 嵌套在 max-h-[400px] overflow-y-auto 内层时 scrollIntoView 只能滚内层的问题
+  const boardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!highlightBuyerNick) return;
+    // 只在 priority tab 触发（churn tab 不需要 highlight，因为行点击行为不同）
+    if (activeTab !== 'priority') return;
+    // 关键 gate：只有用户当前在 Overview 时才跑 scroll + 启动 timer
+    // 否则原始 click 时 effect 也会跑（deps highlightBuyerNick 变了），
+    // rowRef 一直挂着，5s timer 会在 ChatAnalysis 页面上 fire 把 highlightBuyerNick 清掉
+    if (appActiveTab !== 'overview') return;
+
+    let boardTimer: NodeJS.Timeout | null = null;
+    let rowTimer: NodeJS.Timeout | null = null;
+    let boardRetry = 0;
+    let rowRetry = 0;
+    const MAX_RETRY = 20; // 最多重试 1 秒（20 * 50ms）
+
+    // 两步滚动：
+    //  1. boardRef.scrollIntoView — 把外层 main 滚到 PriorityAttentionBoard 顶部
+    //     (tr 嵌套在 max-h-[400px] 内部 scrollable，单纯 tr.scrollIntoView 只滚内层)
+    //  2. 等外层滚动稳定后，tr.scrollIntoView — 把内层表格滚到该行
+    function tryBoardScroll() {
+      const board = boardRef.current;
+      if (board) {
+        board.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        boardRetry = MAX_RETRY;
+        // 给外层 smooth scroll 留时间（通常 200-400ms），再尝试滚内层 tr
+        rowTimer = setTimeout(tryRowScroll, 400);
+      } else if (boardRetry < MAX_RETRY) {
+        boardRetry++;
+        boardTimer = setTimeout(tryBoardScroll, 50);
+      } else {
+        // board 始终未挂上，直接尝试 row scroll
+        rowTimer = setTimeout(tryRowScroll, 50);
+      }
+    }
+
+    function startHighlightTimer() {
+      // 关键：5s 计时只在「行已 scrollIntoView 成功」之后启动，
+      // 不在 effect 触发时启动。否则用户在 ChatAnalysis 浏览子 tab 超过 5s，
+      // timer 会在 ChatAnalysis 页面上 fire 把 highlightBuyerNick 清掉，
+      // 回到 overview 时 useEffect 跑到 if (!highlightBuyerNick) return 提前 return。
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => {
+        onClearClickedHighlight?.();
+        highlightTimerRef.current = null;
+      }, 5_000);
+    }
+
+    function tryRowScroll() {
+      const el = rowRefs.current.get(highlightBuyerNick!);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        rowRetry = MAX_RETRY;
+        startHighlightTimer();
+      } else if (rowRetry < MAX_RETRY) {
+        rowRetry++;
+        rowTimer = setTimeout(tryRowScroll, 50);
+      }
+    }
+
+    // 1. 跳到目标页（如果不同）
+    if (highlightBuyerPage && highlightBuyerPage !== currentPage) {
+      setCurrentPage(highlightBuyerPage);
+      // 给翻页 + data 加载 + DOM 重新挂载留时间，再开始 board 滚动
+      boardTimer = setTimeout(tryBoardScroll, 350);
+    } else {
+      // 立即尝试 board 滚动
+      boardTimer = setTimeout(tryBoardScroll, 50);
+    }
+
+    return () => {
+      if (boardTimer) clearTimeout(boardTimer);
+      if (rowTimer) clearTimeout(rowTimer);
+      // 注意: 不 clear highlightTimerRef — 让 timer 自己跑完或下次 useEffect 重入时清
+    };
+  }, [highlightBuyerNick, highlightBuyerPage, activeTab, onClearClickedHighlight, highlightTrigger, appActiveTab]);
+  //  ↑ 移除 currentPage（避免 setCurrentPage 触发 effect re-run 导致 cleanup）
+  //  ↑ 加 activeTab（priority tab 切回时重跑 highlight）
+
+  // ========== 数据获取（按 activeTab 切换 API）==========
+  const fetchCustomers = useCallback(async () => {
     const offset = (currentPage - 1) * PAGE_SIZE;
+    if (activeTab === 'churn') {
+      // 流失预警：返回 data 字段，重命名为 customers 兼容现有渲染逻辑
+      const churnResp = await apiClient.getChurnWarning(PAGE_SIZE, offset);
+      return {
+        ...churnResp,
+        customers: churnResp.data as unknown as PriorityCustomer[],
+      } as PriorityCustomersResponse;
+    }
     return apiClient.getPriorityCustomers({
       ...filters,
       limit: PAGE_SIZE,
       offset
     });
-  }, [currentPage, filters]);
+  }, [currentPage, filters, activeTab]);
 
   const {
     data: response,
@@ -224,9 +436,9 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
     error,
     refetch
   } = useDataFetchingWithRetry<PriorityCustomersResponse>(
-    fetchPriorityCustomers,
+    fetchCustomers,
     2,
-    [currentPage, filters] // Re-fetch when page or filters change
+    [currentPage, filters, activeTab] // 切换 tab / 翻页 / 筛选 都会重 fetch
   );
 
   // ========== 计算属性 ==========
@@ -454,6 +666,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
 
   // ========== 渲染 ==========
   return (
+    <div ref={boardRef}>
     <NotionCard
       className="overflow-hidden"
       icon={AlertTriangle}
@@ -573,6 +786,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
             </div>
           )}
           <table className={`w-full text-xs transition-opacity duration-200 ${isLoading ? 'opacity-60' : 'opacity-100'}`}>
+            {activeTab === 'priority' ? (
             <thead className="sticky top-0 z-20">
               <tr className="bg-white border-b border-notion-border text-left">
                 <th className="px-2 py-1 w-8">
@@ -606,14 +820,52 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">操作</th>
               </tr>
             </thead>
+            ) : (
+            <thead className="sticky top-0 z-20">
+              <tr className="bg-white border-b border-notion-border text-left">
+                <th className="px-2 py-1 w-8">
+                  <input
+                    type="checkbox"
+                    checked={displayCustomers.length > 0 && displayCustomers.every(c => selectedNicks.has(c.buyer_nick))}
+                    ref={(el) => {
+                      if (el) {
+                        const allSelected = displayCustomers.length > 0 && displayCustomers.every(c => selectedNicks.has(c.buyer_nick));
+                        const someSelected = displayCustomers.some(c => selectedNicks.has(c.buyer_nick));
+                        el.indeterminate = someSelected && !allSelected;
+                      }
+                    }}
+                    onChange={toggleSelectAll}
+                    className="cursor-pointer"
+                    title="全选/反选当前页"
+                  />
+                </th>
+                <th className="px-3 py-1 font-medium text-notion-muted whitespace-nowrap">客户</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">VIP</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">Segment 变化</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">Churn 升级</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap text-right">L6M 变化</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">最后购买</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">操作</th>
+              </tr>
+            </thead>
+            )}
             <tbody className="divide-y divide-notion-border">
               {displayCustomers.map((customer) => {
                 const canUndo = undoState?.buyerNick === customer.buyer_nick && Date.now() < undoState.expiresAt;
+                const churnRow = activeTab === 'churn' ? (customer as unknown as ChurnWarningRow) : null;
                 return (
                 <tr
                   key={customer.buyer_nick}
-                  onClick={() => onRowAction?.(customer, 'view_details')}
-                  className="hover:bg-notion-hover cursor-pointer transition-colors"
+                  ref={(el) => {
+                    if (el) rowRefs.current.set(customer.buyer_nick, el);
+                    else rowRefs.current.delete(customer.buyer_nick);
+                  }}
+                  onClick={() => onRowAction?.(customer, 'view_details', currentPage)}
+                  className={`hover:bg-notion-hover cursor-pointer transition-colors ${
+                    highlightBuyerNick === customer.buyer_nick
+                      ? 'bg-yellow-50 ring-2 ring-yellow-400 animate-pulse'
+                      : ''
+                  }`}
                 >
                   {/* checkbox - Round 1 CRM */}
                   <td className="px-2 py-1 w-8" onClick={(e) => e.stopPropagation()}>
@@ -624,6 +876,10 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                       className="cursor-pointer"
                     />
                   </td>
+                  {churnRow ? (
+                    <ChurnRowCells row={churnRow} canUndo={canUndo} customer={customer} onStatusChange={handleStatusChange} onUndo={handleUndo} />
+                  ) : (
+                  <>
                   {/* 客户信息 */}
                   <td className="px-3 py-1">
                     <div className="flex flex-col gap-0.5">
@@ -752,6 +1008,8 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                       onUndo={() => handleUndo(customer)}
                     />
                   </td>
+                  </>
+                  )}
                 </tr>
                 );
               })}
@@ -779,6 +1037,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
         />
       )}
     </NotionCard>
+    </div>
   );
 };
 

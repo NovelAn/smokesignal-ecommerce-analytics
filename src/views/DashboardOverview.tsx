@@ -11,7 +11,7 @@
  * - 情感和意图图表（SentimentCharts）
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { apiClient, DashboardMetrics } from '../api/client';
 import { useDataFetchingWithRetry } from '../hooks/useDataFetching';
 import { MetricCards } from '../components/dashboard/MetricCards';
@@ -26,11 +26,26 @@ type TimeRange = '7d' | '15d' | '30d' | '90d' | '1y';
  * Dashboard Overview 主视图
  */
 interface DashboardOverviewProps {
-  onOpenBuyerInCrm?: (buyerNick: string) => void;
+  onOpenBuyerInCrm?: (buyerNick: string, currentPage: number) => void;
+  /** Back to Overview 时高亮的买家（点击进入 ChatAnalysis 时记录） */
+  lastClickedBuyerNick?: string | null;
+  /** Back to Overview 时跳回那一页 */
+  lastClickedPage?: number;
+  /** 高亮 5 秒后清除 */
+  onClearClickedHighlight?: () => void;
+  /** 触发器：Back to Overview 时自增，让 PriorityAttentionBoard useEffect 重跑 */
+  highlightTrigger?: number;
+  /** App 级 activeTab — 让 PriorityAttentionBoard 知道当前显示的是不是 Overview */
+  appActiveTab?: string;
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
-  onOpenBuyerInCrm
+  onOpenBuyerInCrm,
+  lastClickedBuyerNick = null,
+  lastClickedPage = 1,
+  onClearClickedHighlight,
+  highlightTrigger = 0,
+  appActiveTab,
 }) => {
   // 全局时间范围筛选器
   const [timeRange, setTimeRange] = useState<TimeRange>('1y');
@@ -50,9 +65,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   /**
    * 处理客户行操作
    */
-  const handleRowAction = (buyer: any, actionType: string) => {
+  const handleRowAction = (buyer: any, actionType: string, currentPage?: number) => {
     if (actionType === 'view_details' && buyer?.buyer_nick) {
-      onOpenBuyerInCrm?.(buyer.buyer_nick);
+      onOpenBuyerInCrm?.(buyer.buyer_nick, currentPage ?? 1);
     }
   };
 
@@ -77,9 +92,14 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       {/* Row 2: 关键词分析面板 */}
       <KeywordAnalysisPanel timeRange={timeRange} />
 
-      {/* Row 3: 重点关注客户看板 */}
+      {/* Row 3: 重点关注客户看板 (Back 定位高亮) */}
       <PriorityAttentionBoard
         onRowAction={handleRowAction}
+        highlightBuyerNick={lastClickedBuyerNick}
+        highlightBuyerPage={lastClickedPage}
+        onClearClickedHighlight={onClearClickedHighlight}
+        highlightTrigger={highlightTrigger}
+        appActiveTab={appActiveTab}
       />
 
       {/* Row 4: 情感和意图图表 */}

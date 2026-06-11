@@ -385,14 +385,55 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
 
   // 当买家列表变化时（比如应用新筛选条件），检查当前选中是否仍在列表中
   // 如果不在，自动选择第一个
+  // 但当 initialBuyerNick 被设置时（从 PriorityAttentionBoard 跳来），必须无条件跳到该买家
   useEffect(() => {
     if (initialBuyerNick) {
       const targetSession = filteredSessions.find(s => s.user_nick === initialBuyerNick);
       if (targetSession) {
         setSelectedSession(targetSession);
-        setActiveSubTab(initialSubTab || 'profile');
-        return;
+      } else {
+        // 客户不在当前 filteredSessions 中（被筛选条件排除，例如 channel/buyer_type 筛选不包含）
+        // 构造一个最小可用 session — 后端 API 只需要 user_nick，其他字段后续 profile fetch 会覆盖
+        setSelectedSession({
+          user_nick: initialBuyerNick,
+          profile: {
+            user_nick: initialBuyerNick,
+            avatar_color: 'bg-gray-200 text-gray-800',
+            city: 'Unknown',
+            is_new_customer: false,
+            historical_ltv: 0,
+            historical_gmv: 0,
+            historical_refund: 0,
+            historical_net_sales: 0,
+            refund_rate: 0,
+            total_orders: 0,
+            discount_spend_amount: 0,
+            discount_ratio: 0,
+            l6m_spend: 0,
+            l6m_frequency: 0,
+            l6m_netsales: 0,
+            l6m_orders: 0,
+            l1y_netsales: 0,
+            l1y_orders: 0,
+            l6m_refund_rate: 0,
+            recent_chat_frequency: 0,
+            avg_reply_interval_days: 0,
+            last_interaction_date: undefined,
+            last_chat_date: undefined,
+            tags: [],
+            intent_scores: INTENT_DISTRIBUTION,
+            order_history: [],
+            analysis: { summary: '', key_interests: [], pain_points: [], recommended_action: '', error: undefined }
+          },
+          messages: [],
+          sentimentScore: 0.5,
+          dominantIntent: IntentType.PRE_SALE
+        });
       }
+      // 关键：不论 filteredSessions 是否包含该客户，activeSubTab 都要无条件设置
+      // 否则 activeSubTab 停在初始值（之前切到的 chat/profile），无法正确跳转
+      setActiveSubTab(initialSubTab || 'profile');
+      return;
     }
 
     if (filteredSessions.length > 0) {
