@@ -256,8 +256,21 @@ def build_persona_prompt_v3(
     profile: Dict[str, Any],
     chats: List[Dict[str, Any]],
     orders: List[Dict[str, Any]],
+    is_incremental: bool = False,
 ) -> str:
-    """Build the shared v3 persona prompt for all persona providers."""
+    """Build the shared v3 persona prompt for all persona providers.
+
+    Args:
+        is_incremental: True 表示 chats 仅含"自上次分析以来的新增部分 + 少量历史上下文"
+                       (Round 4 增量优化), prompt 会提示 LLM "不要推翻核心画像"
+    """
+    scope_hint = ''
+    if is_incremental:
+        scope_hint = (
+            '【增量分析说明】以下聊天记录是自上次画像分析以来的**新增部分** + 5 条历史上下文（按时间倒序，最新在前）。\n'
+            '请只基于这部分新聊天更新客户画像的演进趋势（关注点变化、决策风格变化、新增痛点、情绪走向），\n'
+            '**不要推翻**已经稳定的核心画像特征。\n\n'
+        )
     context = build_persona_context(buyer_nick, profile, chats, orders)
     compact_context = {
         "buyer_nick": buyer_nick,
@@ -284,7 +297,7 @@ def build_persona_prompt_v3(
         "external_info": context["external_info"],
     }
 
-    return f"""
+    return scope_hint + f"""
 你是 dunhill 电商客户洞察专家。你的任务不是复述订单数字，而是基于同一套真实数据，提炼客户的关键特征、购买偏好、顾虑痛点和后续运营机会。
 
 统一规则：

@@ -252,12 +252,13 @@ export const apiClient = {
    * 强制刷新AI分析
    * POST /api/v2/buyers/{user_nick}/force-refresh
    */
-  forceRefreshAnalysis: async (userNick: string, refreshType: 'persona' | 'sentiment' | 'all' = 'all') => {
+  forceRefreshAnalysis: async (userNick: string, refreshType: 'persona' | 'sentiment' | 'all' = 'all', opts?: { analysisMode?: 'incremental' | 'full' }) => {
+    const mode = opts?.analysisMode || 'incremental';
     const response = await fetch(
-      `${API_BASE}/buyers/${encodeURIComponent(userNick)}/force-refresh?refresh_type=${refreshType}`,
+      `${API_BASE}/buyers/${encodeURIComponent(userNick)}/force-refresh?refresh_type=${refreshType}&analysis_mode=${mode}`,
       { method: 'POST' }
     );
-    return handleResponse<{ buyer_nick: string; refresh_type: string; message: string }>(response);
+    return handleResponse<{ buyer_nick: string; refresh_type: string; analysis_mode: string; message: string }>(response);
   },
 
   // ========== 场外信息相关 ==========

@@ -455,7 +455,8 @@ class DeepSeekClient:
         buyer_nick: str,
         profile: Dict[str, Any],
         chats: List[Dict],
-        orders: List[Dict]
+        orders: List[Dict],
+        is_incremental: bool = False
     ) -> Dict[str, Any]:
         """
         两阶段分析：证据提取 → 画像推理
@@ -465,6 +466,7 @@ class DeepSeekClient:
             profile: 客户档案数据
             chats: 聊天记录列表
             orders: 订单列表
+            is_incremental: Round 4 增量模式, chats 仅含新增部分 + 少量上下文
 
         Returns:
             {
@@ -528,7 +530,8 @@ class DeepSeekClient:
         external_records = profile.get("external_records", [])
         formatted_external = build_external_info_context(external_records) if external_records else "暂无场外信息记录"
 
-        prompt = EVIDENCE_EXTRACTION_PROMPT.format(
+        _scope = ("【增量分析】以下是自上次分析以来的新增聊天 + 少量历史上下文。请重点关注新增信息。\n\n" if is_incremental else "")
+        prompt = _scope + EVIDENCE_EXTRACTION_PROMPT.format(
             formatted_chats=formatted_chats,
             structured_behavior=formatted_behavior,
             buyer_nick=buyer_nick,
@@ -588,7 +591,7 @@ class DeepSeekClient:
         """
         # Serialize datetime objects before JSON encoding
         evidence_serialized = _serialize_datetime(evidence)
-        prompt = PERSONA_INFERENCE_PROMPT.format(
+        prompt = _scope + PERSONA_INFERENCE_PROMPT.format(
             evidence_json=json.dumps(evidence_serialized, ensure_ascii=False, indent=2)
         )
 
@@ -629,7 +632,8 @@ class DeepSeekClient:
         buyer_nick: str,
         profile: Dict[str, Any],
         chats: List[Dict],
-        orders: List[Dict]
+        orders: List[Dict],
+        is_incremental: bool = False
     ) -> Dict[str, Any]:
         """
         使用Chat模型快速分析（成本优化方案）
@@ -638,6 +642,9 @@ class DeepSeekClient:
         成本: ~¥3 (vs R1的~¥7)
 
         适用于: 中等复杂度（10-20条聊天记录）
+
+        Args:
+            is_incremental: Round 4 增量模式
         """
         # 数据预处理
         chat_insights = extract_chat_insights(chats, buyer_nick)
@@ -697,7 +704,7 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
   "confidence_level": "高/中/低"
 }}
 """
-        prompt = build_persona_prompt_v3(buyer_nick, profile, chats, orders)
+        prompt = build_persona_prompt_v3(buyer_nick, profile, chats, orders, is_incremental=is_incremental)
 
         try:
             response = self.client.chat.completions.create(

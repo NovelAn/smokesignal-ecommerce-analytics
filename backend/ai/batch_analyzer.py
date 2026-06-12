@@ -448,8 +448,10 @@ class BatchAnalyzer:
                 buyer_nick = buyer['buyer_nick']
                 try:
                     db = Database(db_name=db_name)
-                    query, params = BuyerQueries.get_chat_messages(buyer_nick, limit=30)
-                    chats = db.execute_query(query, params)
+                    # Round 4: 增量 chat 读取 (首次 50 / 重刷 20+5=25)
+                    chats, is_inc, since = self.fetch_chats_for_analysis(
+                        buyer_nick, cache_record=buyer, analysis_type='persona'
+                    )
 
                     orders_query = """
                         SELECT
@@ -471,15 +473,13 @@ class BatchAnalyzer:
                         profile=profile_data,
                         chats=chats,
                         orders=orders,
-                        force_refresh=True
+                        force_refresh=True,
+                        is_incremental=is_inc
                     )
 
-                    # orchestrator 内部已经做了 ground_persona_analysis_v3 + cache write，无需重复
+                    # Round 4: 传 actual_chats 给 set_persona (增量模式下用 chats[0].msg_time)
                     if orchestrator.cache_manager and orchestrator._is_valid_analysis(result):
-                        orchestrator.cache_manager.set_persona(buyer_nick, result, profile_data)
-
-                    if orchestrator.cache_manager and orchestrator._is_valid_analysis(result):
-                        orchestrator.cache_manager.set_persona(buyer_nick, result, profile_data)
+                        orchestrator.cache_manager.set_persona(buyer_nick, result, profile_data, actual_chats=chats)
 
                     return result
                 except Exception as e:
@@ -541,6 +541,66 @@ class BatchAnalyzer:
 
         query, params = BuyerQueries.get_chat_messages(buyer_nick, limit, since_msg_time)
         return db.execute_query(query, params)
+
+
+    def fetch_chats_for_analysis(
+        self,
+        buyer_nick: str,
+        cache_record: Optional[Dict[str, Any]] = None,
+        analysis_type: str = "persona",
+        full_limit: int = 50,
+        incremental_new_limit: int = 20,
+        context_window: int = 5,
+    ) -> tuple:
+        """
+        Round 4 增量优化: 统一 chat 读取入口
+
+        首次分析 (cache 缺记录): 全量 full_limit 条
+        重刷 (cache 有记录): 增量 incremental_new_limit 条新消息 + context_window 条历史上下文
+
+        Args:
+            buyer_nick: 买家昵称
+            cache_record: buyer_ai_analysis_cache 记录 (None=首次)
+            analysis_type: "persona" 或 "sentiment" (决定读哪个 last_chat_date 字段)
+            full_limit: 首次分析读取条数上限 (默认 50)
+            incremental_new_limit: 增量新消息条数上限 (默认 20)
+            context_window: 增量时额外读取的历史上下文条数 (默认 5)
+
+        Returns:
+            (chats, is_incremental, since_msg_time)
+        """
+        from datetime import datetime as dt
+
+        last_chat_field = f"{analysis_type}_analyzed_last_chat_date"
+        since = (cache_record or {}).get(last_chat_field)
+
+        # 首次分析: cache 缺记录或字段为 None -> 全量
+        if not since:
+            chats = self.get_buyer_chats(buyer_nick, limit=full_limit)
+            return chats, False, None
+
+        # 增量模式: since 之后的新消息
+        new_chats = self.get_buyer_chats(
+            buyer_nick, limit=incremental_new_limit, since_msg_time=since
+        )
+
+        # 无新消息: 返回空, 调用方应跳过 AI 调用
+        if not new_chats:
+            return [], True, since
+
+        # 额外取 context_window 条历史上下文 (since 之前的)
+        context_chats = []
+        if context_window > 0:
+            all_recent = self.get_buyer_chats(buyer_nick, limit=context_window + len(new_chats))
+            # 过滤: 只要 msg_time <= since 的
+            context_chats = [
+                ch for ch in all_recent
+                if ch.get("msg_time") and str(ch.get("msg_time")) <= str(since)
+            ][:context_window]
+
+        # 合并: 新消息 (DESC) + 历史上下文 (DESC)
+        chats = list(new_chats) + list(context_chats)
+        return chats, True, since
 
     def analyze_single_buyer(
         self,
@@ -1128,16 +1188,20 @@ class BatchAnalyzer:
                     buyer_nick = buyer['buyer_nick']
                     # 增量模式：since_msg_time = cache.sentiment_analyzed_last_chat_date
                     # 首次分析（cache 还没有）since_msg_time 为 None，走全量路径
-                    since = buyer.get('sentiment_analyzed_last_chat_date')
-                    chats = self.get_buyer_chats(buyer_nick, limit=50, since_msg_time=since)
-                    result = self.analyze_single_buyer(buyer_nick, chats, is_incremental=bool(since))
+                    # Round 4: 增量 chat 读取 (20+5=25, 而非 50)
+                    chats, is_incremental_flag, since = self.fetch_chats_for_analysis(
+                        buyer_nick, cache_record=buyer, analysis_type='sentiment',
+                    )
+                    if not chats:
+                        return  # 无新消息, 跳过
+                    result = self.analyze_single_buyer(buyer_nick, chats, is_incremental=is_incremental_flag)
 
                     # 计算增量分析元数据，写入 cache.incremental_* 字段
                     if chats:
                         # chats 已按 msg_time DESC 排序；最末一条是最早的
                         result['incremental_chat_count'] = len(chats)
                         result['incremental_chat_from_date'] = since  # NULL for first-time
-                        result['incremental_chat_to_date'] = chats[-1].get('msg_time')
+                        result['incremental_chat_to_date'] = chats[0].get('msg_time')  # Round 4 bug fix: DESC排序下 chats[0] 是最新
                         # 首次分析时也填 incremental_sentiment_label（视为"首次增量"）
                         result['incremental_sentiment_label'] = result.get('sentiment_label', 'Neutral')
                         result['incremental_sentiment_score'] = result.get('sentiment_score', 0.5)

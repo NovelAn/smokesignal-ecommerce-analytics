@@ -77,16 +77,23 @@ class AICacheManager:
             print(f"[AICacheManager] 获取缓存失败: {e}")
             return None
 
-    def set_persona(self, buyer_nick: str, result: Dict, profile: Dict):
+    def set_persona(self, buyer_nick: str, result: Dict, profile: Dict,
+                    actual_chats: list = None):
         """
         保存画像分析结果 + 数据快照
 
-        使用 INSERT ... ON DUPLICATE KEY UPDATE 支持部分更新
+        Args:
+            actual_chats: Round 4 增量优化 - 传入本次分析实际使用的 chats 列表
+                         (增量模式下用 chats[0].msg_time 而非 profile.last_chat_date)
         """
         try:
             # 获取当前数据快照
             last_purchase = profile.get("last_purchase_date")
-            last_chat = profile.get("last_chat_date")
+            # Round 4: 增量模式下用 actual_chats[0].msg_time, 否则用 profile.last_chat_date
+            if actual_chats and len(actual_chats) > 0:
+                last_chat = actual_chats[0].get("msg_time") or profile.get("last_chat_date")
+            else:
+                last_chat = profile.get("last_chat_date")
 
             insert_sql = """
                 INSERT INTO buyer_ai_analysis_cache (
@@ -285,7 +292,8 @@ class AnalyzerOrchestrator:
         profile: Dict,
         chats: List[Dict],
         orders: List[Dict],
-        force_refresh: bool = False
+        force_refresh: bool = False,
+        is_incremental: bool = False
     ) -> Dict[str, Any]:
         """
         多级降级分析策略
@@ -296,6 +304,7 @@ class AnalyzerOrchestrator:
             chats: 聊天记录列表
             orders: 订单列表
             force_refresh: 是否强制刷新（忽略缓存）
+            is_incremental: Round 4 增量模式 (chats 仅含新增部分 + 少量上下文)
 
         Returns:
             分析结果
@@ -341,7 +350,7 @@ class AnalyzerOrchestrator:
                     chats,
                     self._format_order_summary(profile, orders),
                     orders=orders
-                )
+                , is_incremental=is_incremental)
                 result["analysis_method"] = "MiniMax-M3"
                 result = ground_persona_analysis_v3(result, profile, orders)
                 result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据"
@@ -364,13 +373,13 @@ class AnalyzerOrchestrator:
                     print(f"[L2-DeepSeek-V4-Pro] 使用DeepSeek-V4-Pro深度分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
                     result = self.deepseek.analyze_buyer_persona(
                         buyer_nick, profile, chats, orders
-                    )
+                    , is_incremental=is_incremental)
                     result["analysis_method"] = "deepseek-v4-pro"
                 else:
                     print(f"[L2-DeepSeek-V4-Flash] 使用DeepSeek-V4-Flash快速分析 {buyer_nick} (聊天{chat_count}条, 订单{order_count}条)")
                     result = self.deepseek.analyze_buyer_persona_chat(
                         buyer_nick, profile, chats, orders
-                    )
+                    , is_incremental=is_incremental)
                     result["analysis_method"] = "deepseek-v4-flash"
                 result = ground_persona_analysis_v3(result, profile, orders)
                 result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据(降级)"

@@ -947,11 +947,22 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
 
         db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
 
-        # 并行获取 chats + orders + external_records（3个独立查询）
+        # Round 4: 增量 chat 读取 (首次 50 / 重刷 20+5=25)
         def _fetch_chats():
-            db = Database(db_name=db_name)
-            query, params = BuyerQueries.get_chat_messages(user_nick, limit=30)
-            return db.execute_query(query, params)
+            from backend.ai.batch_analyzer import get_batch_analyzer
+            from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
+
+            cache_record = None
+            orch = get_analyzer_orchestrator()
+            if orch and orch.cache_manager:
+                cache_record = orch.cache_manager.get(user_nick)
+
+            ba = get_batch_analyzer()
+            chats_result, _, _ = ba.fetch_chats_for_analysis(
+                user_nick, cache_record=cache_record, analysis_type="persona",
+                full_limit=50, incremental_new_limit=20, context_window=5,
+            )
+            return chats_result
 
         def _fetch_orders():
             db = Database(db_name=db_name)
@@ -1144,10 +1155,16 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
 async def force_refresh_analysis(
     user_nick: str,
     refresh_type: str = "all",  # "persona" | "sentiment" | "all"
-    reanalyze: bool = Query(True, description="是否立即重新分析")
+    reanalyze: bool = Query(True, description="是否立即重新分析"),
+    analysis_mode: str = Query("incremental", description="分析模式: incremental(默认, 20+5=25) / full(50全量)"),
 ) -> Dict[str, Any]:
     """
     强制刷新AI分析结果
+
+    Round 4 增量优化: analysis_mode 控制 chat 读取策略
+      - "incremental" (默认): 只读 20 条新消息 + 5 条历史上下文
+      - "full": 读 50 条全量 (SettingsView 单客户"重新生成画像"专用)
+    订单 records 不受影响 (始终全量)
 
     使用场景:
     - AI返回了错误结果
@@ -1161,17 +1178,9 @@ async def force_refresh_analysis(
             - "sentiment": 仅刷新情感/意图分析
             - "all": 刷新全部
         reanalyze: 是否在清除缓存后立即重新分析（默认True）
-
-    Returns:
-        {
-            "buyer_nick": str,
-            "refresh_type": str,
-            "cleared": list,
-            "reanalyzed": list,
-            "ai_provider": str,  # 如果重新分析了情感，返回使用的AI模型
-            "message": str
-        }
+        analysis_mode: 分析模式 - incremental(默认) / full
     """
+
     try:
         from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
         from backend.ai.batch_analyzer import get_batch_analyzer
@@ -1200,13 +1209,19 @@ async def force_refresh_analysis(
             db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
             db = Database(db_name=db_name)
 
-            # 获取聊天记录
-            query, params = BuyerQueries.get_chat_messages(user_nick, limit=50)
-            chats = db.execute_query(query, params)
+            # Round 4: 增量 chat 读取 (analysis_mode=full -> 50全量, 否则 20+5=25)
+            if analysis_mode == "full":
+                chat_query, chat_params = BuyerQueries.get_chat_messages(user_nick, limit=50)
+                chats = db.execute_query(chat_query, chat_params)
+                is_incremental = False
+            else:
+                chats, is_incremental, _ = batch_analyzer.fetch_chats_for_analysis(
+                    user_nick, cache_record=None, analysis_type="persona",
+                )
 
             if refresh_type in ["sentiment", "all"]:
-                # 重新进行情感/意图分析
-                result = batch_analyzer.analyze_single_buyer(user_nick, chats)
+                # 重新进行情感/意图分析 (Round 4: is_incremental 标志)
+                result = batch_analyzer.analyze_single_buyer(user_nick, chats, is_incremental=is_incremental)
 
                 # 获取客户档案用于保存
                 profile_query = "SELECT * FROM target_buyers_precomputed WHERE buyer_nick = %s"
@@ -1312,12 +1327,13 @@ async def force_refresh_analysis(
                         buyer_nick=user_nick,
                         profile=profile_data,
                         chats=chats,
-                        orders=orders
+                        orders=orders,
+                        is_incremental=is_incremental,
                     )
 
                     # 保存结果到缓存（仅当 cache 启用时；orchestrator 内部已写过缓存，这里是冗余兜底）
                     if orchestrator.cache_manager:
-                        orchestrator.cache_manager.set_persona(user_nick, ai_result, profile_data)
+                        orchestrator.cache_manager.set_persona(user_nick, ai_result, profile_data, actual_chats=chats)
 
                     reanalyzed.append("画像")
                     persona_method = ai_result.get('analysis_method', 'unknown')
@@ -1333,6 +1349,7 @@ async def force_refresh_analysis(
 
         return {
             "buyer_nick": user_nick,
+            "analysis_mode": analysis_mode,
             "refresh_type": refresh_type,
             "cleared": cleared,
             "reanalyzed": reanalyzed,

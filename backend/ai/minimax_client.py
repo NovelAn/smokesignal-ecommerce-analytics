@@ -42,9 +42,10 @@ class MiniMaxClient:
         profile_data: Dict[str, Any],
         recent_chats: List[Dict[str, Any]],
         order_summary: str = "",
-        orders: List[Dict[str, Any]] | None = None
+        orders: List[Dict[str, Any]] | None = None,
+        is_incremental: bool = False
     ) -> Dict[str, Any]:
-        prompt = build_persona_prompt_v3(user_nick, profile_data, recent_chats, orders or [])
+        prompt = build_persona_prompt_v3(user_nick, profile_data, recent_chats, orders or [], is_incremental=is_incremental)
 
         try:
             _safe_print(f"[MiniMaxClient] Calling model: {self.model}")
