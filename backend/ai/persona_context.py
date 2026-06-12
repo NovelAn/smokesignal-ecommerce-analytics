@@ -257,12 +257,13 @@ def build_persona_prompt_v3(
     chats: List[Dict[str, Any]],
     orders: List[Dict[str, Any]],
     is_incremental: bool = False,
+    max_context_chars: int = 15000,  # full 模式 15000, 增量 8000 (调用方决定)
 ) -> str:
     """Build the shared v3 persona prompt for all persona providers.
 
     Args:
-        is_incremental: True 表示 chats 仅含"自上次分析以来的新增部分 + 少量历史上下文"
-                       (Round 4 增量优化), prompt 会提示 LLM "不要推翻核心画像"
+        is_incremental: True=增量模式 (20+5 条 chat), prompt 提示 LLM 不要推翻核心画像
+        max_context_chars: json.dumps 截断上限 (full=15000, incremental=8000)
     """
     scope_hint = ''
     if is_incremental:
@@ -374,7 +375,7 @@ def build_persona_prompt_v3(
 - pain_or_growth_opportunity: 后续运营需要解决和提升的点。
 
 统一事实包：
-{json.dumps(compact_context, ensure_ascii=False, indent=2, default=str)[:6000]}
+{json.dumps(compact_context, ensure_ascii=False, indent=2, default=str)[:max_context_chars]}
 
 只返回合法 JSON，不要 Markdown，不要解释推理过程。字段必须完整：
 {{

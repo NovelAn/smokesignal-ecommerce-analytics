@@ -705,7 +705,8 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
   "confidence_level": "高/中/低"
 }}
 """
-        prompt = build_persona_prompt_v3(buyer_nick, profile, chats, orders, is_incremental=is_incremental)
+        max_chars = 8000 if is_incremental else 15000
+        prompt = build_persona_prompt_v3(buyer_nick, profile, chats, orders, is_incremental=is_incremental, max_context_chars=max_chars)
 
         try:
             response = self.client.chat.completions.create(
