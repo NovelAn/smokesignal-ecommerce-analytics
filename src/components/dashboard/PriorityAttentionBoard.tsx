@@ -88,6 +88,16 @@ function getSeverityTierBar(tier: number): string {
   }
 }
 
+// 严重度档位的左侧 border (Round 3 Bug #1 修复: 不用独立 td, 避免与 thead 列数对不上)
+function getSeverityTierBorder(tier: number): string {
+  switch (tier) {
+    case 1: return 'border-l-red-600';
+    case 2: return 'border-l-orange-500';
+    case 3: return 'border-l-yellow-400';
+    default: return 'border-l-gray-300';
+  }
+}
+
 interface ChurnRowCellsProps {
   row: ChurnWarningRow;
   canUndo: boolean;
@@ -104,12 +114,8 @@ function ChurnRowCells({ row, canUndo, customer, onStatusChange, onUndo }: Churn
   const reasons = row.selection_reasons ? row.selection_reasons.split(',').filter(Boolean) : [];
   return (
     <>
-      {/* 严重度色条 (左) */}
-      <td className="px-0 py-1 w-1" onClick={(e) => e.stopPropagation()}>
-        <div className={'w-1 h-full rounded-sm ' + getSeverityTierBar(row.severity_tier)} title={'严重度 Tier ' + row.severity_tier} />
-      </td>
-      {/* 客户信息 (复用优先级 tab 的样式) */}
-      <td className="px-3 py-1">
+      {/* 客户信息 (复用优先级 tab 的样式) - 严重度色条改为 border-l, 避免与 thead 列数对不上 (Bug #1) */}
+      <td className={'px-3 py-1 border-l-4 ' + getSeverityTierBorder(row.severity_tier)}>
         <div className="flex flex-col gap-0.5">
           <span className="font-medium text-notion-text truncate max-w-[120px]" title={row.buyer_nick}>
             {row.buyer_nick}
@@ -393,8 +399,9 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
 
   useEffect(() => {
     if (!highlightBuyerNick) return;
-    // 只在 priority tab 触发（churn tab 不需要 highlight，因为行点击行为不同）
-    if (activeTab !== 'priority') return;
+    // Bug #3 修复: 移除 '只 priority tab 触发' 的 gate, churn tab 也要支持 scroll 回原位
+    // (用户场景: 在 priority tab 点了客户 A -> ChatAnalysis -> Back to Overview,
+    //  如果 activeTab 状态被之前的 churn tab 操作污染, 必须仍能滚到 A)
     // 关键 gate：只有用户当前在 Overview 时才跑 scroll + 启动 timer
     // 否则原始 click 时 effect 也会跑（deps highlightBuyerNick 变了），
     // rowRef 一直挂着，5s timer 会在 ChatAnalysis 页面上 fire 把 highlightBuyerNick 清掉
@@ -551,9 +558,21 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
   }, [customers]);
 
   // 显示的数据：加载时用之前的数据，否则用当前数据
-  const displayCustomers = isLoading && prevCustomersRef.current.length > 0
+  const rawDisplayCustomers = isLoading && prevCustomersRef.current.length > 0
     ? prevCustomersRef.current
     : customers;
+
+  // Bug #2 修复: churn tab 客户端 filter (后端 churn-warning API 暂不支持 filter, 客户端过滤避免再发请求)
+  const displayCustomers = useMemo(() => {
+    if (activeTab !== 'churn' || filters.use_default_filter !== false) {
+      return rawDisplayCustomers;
+    }
+    return rawDisplayCustomers.filter((c) => {
+      if (filters.channel?.length && !filters.channel.includes(c.channel)) return false;
+      if (filters.buyer_type?.length && !filters.buyer_type.includes(c.buyer_type)) return false;
+      return true;
+    });
+  }, [rawDisplayCustomers, activeTab, filters]);
 
   const handleExportCSV = useCallback(() => {
     const url = apiClient.getPriorityCustomersCSVUrl(filters);
@@ -1140,40 +1159,50 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
   onReset,
   onClose
 }) => {
+  // Bug #4 修复: 当所有筛选字段都为空时 use_default_filter 应回到 true (避免显示 527 全量)
+  const computeUseDefaultFilter = (filters: PriorityCustomersFilters): boolean => {
+    const filterFields: (keyof PriorityCustomersFilters)[] = [
+      'channel', 'buyer_type', 'follow_priority', 'sentiment_label'
+    ];
+    const hasAny = filterFields.some(f => {
+      const v = filters[f];
+      return Array.isArray(v) ? v.length > 0 : !!v;
+    });
+    if (hasAny) return false;
+    if (filters.has_chat && filters.has_chat !== 'all') return false;
+    return true;
+  };
+
   const handleMultiSelect = (
     field: keyof PriorityCustomersFilters,
     value: string
   ) => {
     setTempFilters(prev => {
-      // If "ALL" is selected, clear this filter
+      const next: PriorityCustomersFilters = { ...prev };
       if (value === 'ALL') {
-        const newFilters = { ...prev };
-        delete newFilters[field];
-        return {
-          ...newFilters,
-          use_default_filter: false
-        };
+        delete next[field];
+      } else {
+        const currentValues = (prev[field] as string[]) || [];
+        const newValues = currentValues.includes(value)
+          ? currentValues.filter(v => v !== value)
+          : [...currentValues, value];
+        (next as Record<string, unknown>)[field] = newValues.length > 0 ? newValues : undefined;
+        if (newValues.length === 0) delete next[field];
       }
-
-      const currentValues = (prev[field] as string[]) || [];
-      const newValues = currentValues.includes(value)
-        ? currentValues.filter(v => v !== value)
-        : [...currentValues, value];
-
-      return {
-        ...prev,
-        [field]: newValues.length > 0 ? newValues : undefined,
-        use_default_filter: false
-      };
+      next.use_default_filter = computeUseDefaultFilter(next);
+      return next;
     });
   };
 
   const handleHasChatChange = (value: string) => {
-    setTempFilters(prev => ({
-      ...prev,
-      has_chat: value === 'ALL' ? undefined : (value as 'true' | 'false'),
-      use_default_filter: false
-    }));
+    setTempFilters(prev => {
+      const next = {
+        ...prev,
+        has_chat: value === 'ALL' ? undefined : (value as 'true' | 'false'),
+      };
+      next.use_default_filter = computeUseDefaultFilter(next);
+      return next;
+    });
   };
 
   // Check if "ALL" should be selected for a field
