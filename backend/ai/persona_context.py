@@ -322,9 +322,8 @@ def build_persona_prompt_v3(
     return scope_hint + f"""
 你是 dunhill 电商客户洞察专家。你的任务不是复述订单数字，而是基于同一套真实数据，提炼客户的关键特征、购买偏好、顾虑痛点和后续运营机会。
 
-【复购频率已预计算】{repurchase_frequency}
-- summary 必含 "复购频率：{repurchase_frequency}" 字段
-- 看到 avg_repurchase_interval_days 数值时直接引用, 禁止自己除法/算日期
+【复购频率已预计算】{_repurchase_freq}
+- summary 必含 "复购频率：{_repurchase_freq}" 字段
 
 
 统一规则：

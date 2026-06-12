@@ -480,7 +480,7 @@ class DeepSeekClient:
         """
         try:
             # 阶段1：证据提取
-            evidence = self._extract_evidence(buyer_nick, profile, chats, orders)
+            evidence = self._extract_evidence(buyer_nick, profile, chats, orders, is_incremental=is_incremental)
             order_behavior = structure_order_behavior(profile, orders)
             order_behavior_serialized = _serialize_datetime(order_behavior)
             category_distribution = _extract_category_distribution(order_behavior_serialized)
@@ -488,7 +488,7 @@ class DeepSeekClient:
             evidence["_authoritative_category_distribution"] = category_distribution
 
             # 阶段2：画像推理
-            persona = self._infer_persona(evidence)
+            persona = self._infer_persona(evidence, is_incremental=is_incremental)
             persona = _sanitize_persona_category_claims(persona, category_distribution, profile, orders)
 
             # 合并结果
@@ -505,7 +505,8 @@ class DeepSeekClient:
         buyer_nick: str,
         profile: Dict,
         chats: List[Dict],
-        orders: List[Dict]
+        orders: List[Dict],
+        is_incremental: bool = False
     ) -> Dict:
         """
         阶段1：提取关键证据
@@ -579,7 +580,7 @@ class DeepSeekClient:
 
         return self._parse_json_response(evidence_text)
 
-    def _infer_persona(self, evidence: Dict) -> Dict:
+    def _infer_persona(self, evidence: Dict, is_incremental: bool = False) -> Dict:
         """
         阶段2：基于证据推断画像
 
