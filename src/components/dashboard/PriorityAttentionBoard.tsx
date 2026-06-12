@@ -137,9 +137,9 @@ function ChurnRowCells({ row, canUndo, customer, onStatusChange, onUndo }: Churn
       {/* Segment 退化 (30D前 → 现在) */}
       <td className="px-2 py-1">
         <div className="flex items-center gap-1">
-          <NotionTag text={row.segment_30d_ago} color="green" size="xs" />
+          <NotionTag text={row.segment_prev} color="green" size="xs" />
           <span className="text-red-500 text-xs">→</span>
-          <NotionTag text={row.segment_now} color={getSegmentDegradationColor(row.segment_30d_ago, row.segment_now)} size="xs" />
+          <NotionTag text={row.segment_now} color={getSegmentDegradationColor(row.segment_prev, row.segment_now)} size="xs" />
         </div>
       </td>
 
@@ -159,7 +159,7 @@ function ChurnRowCells({ row, canUndo, customer, onStatusChange, onUndo }: Churn
       {/* Churn 升级 (30D前 → 现在) */}
       <td className="px-2 py-1">
         <div className="flex items-center gap-1">
-          <NotionTag text={row.churn_risk_30d_ago} color={getChurnRiskColor(row.churn_risk_30d_ago)} size="xs" />
+          <NotionTag text={row.churn_risk_prev} color={getChurnRiskColor(row.churn_risk_prev)} size="xs" />
           <span className="text-red-500 text-xs">→</span>
           <NotionTag text={row.churn_risk_now} color={getChurnRiskColor(row.churn_risk_now)} size="xs" />
         </div>
@@ -346,6 +346,8 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
 }) => {
   // ========== 状态管理 ==========
   const [activeTab, setActiveTab] = useState<'priority' | 'churn'>('priority');
+  // Round 3: 流失预警对比周期可配置 (60/90/180)
+  const [churnWindowDays, setChurnWindowDays] = useState<60 | 90 | 180>(90);
   const [currentPage, setCurrentPage] = useState(1);
 
   // 筛选状态
@@ -471,8 +473,12 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
   const fetchCustomers = useCallback(async () => {
     const offset = (currentPage - 1) * PAGE_SIZE;
     if (activeTab === 'churn') {
-      // 流失预警：返回 data 字段，重命名为 customers 兼容现有渲染逻辑
-      const churnResp = await apiClient.getChurnWarning(PAGE_SIZE, offset);
+      // 流失预警 (Round 3): windowDays 控制对比周期 (60/90/180)
+      const churnResp = await apiClient.getChurnWarning({
+        window: churnWindowDays,
+        limit: PAGE_SIZE,
+        offset,
+      });
       return {
         ...churnResp,
         customers: churnResp.data as unknown as PriorityCustomer[],
@@ -483,7 +489,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
       limit: PAGE_SIZE,
       offset
     });
-  }, [currentPage, filters, activeTab]);
+  }, [currentPage, filters, activeTab, churnWindowDays]);
 
   const {
     data: response,
@@ -728,7 +734,10 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
       title={activeTab === 'priority' ? '需优先跟进的客户' : '流失预警'}
       subtitle={activeTab === 'priority'
         ? `${response?.total || 0} 位客户 | 默认: 紧急/高优先级 或 负面情感`
-        : 'segment 退化、churn 升级，或购买力大幅下降 (近30天对比)'}
+        : (() => {
+            const floor = churnWindowDays === 60 ? '1万' : churnWindowDays === 90 ? '1.5万' : '2万';
+            return `segment/churn 退化 或 购买力下降 ≥ 50% 且 ${churnWindowDays} 天前 l6m ≥ ${floor}`;
+          })()}
       action={
         <div className="flex items-center gap-3">
           {/* 批量工具栏 - Round 1 CRM 误触保护 */}
@@ -773,6 +782,24 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
               className={`px-3 py-1 text-xs rounded transition-colors ${activeTab === 'churn' ? 'bg-white text-gray-900 shadow-sm font-medium' : 'text-gray-600 hover:text-gray-800'}`}
             >流失预警</button>
           </div>
+          {/* Round 3: 流失预警对比周期分段控件 - 仅 churn tab 显示 */}
+          {activeTab === 'churn' && (
+            <div className="flex bg-notion-gray_bg p-0.5 rounded-md border border-notion-border">
+              {[60, 90, 180].map((d) => (
+                <button
+                  key={d}
+                  onClick={() => { setChurnWindowDays(d as 60 | 90 | 180); setCurrentPage(1); }}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-sm transition-all ${
+                    churnWindowDays === d
+                      ? 'bg-white text-blue-700 shadow-sm border border-blue-100'
+                      : 'text-notion-muted hover:text-notion-text'
+                  }`}
+                >
+                  {d}D
+                </button>
+              ))}
+            </div>
+          )}
           {/* 分页器 */}
           {totalPages > 1 && (
             <div className="flex items-center gap-1">

@@ -1,5 +1,5 @@
 -- ============================================
--- 流失预警列表 (Round 2)
+-- 流失预警列表 (Round 3: 对比周期可配置)
 -- ============================================
 -- 用途: PriorityAttentionBoard Tab 2 "流失预警"
 -- 逻辑 (3 个 OR 入选条件):
@@ -13,16 +13,16 @@
 -- 原因: MySQL event snapshot_target_buyers_history 是第二天 13:30 触发
 --       (见 snapshot_target_buyers_history.sql line 460-465)
 --       用 CURDATE() 会导致今天没 snapshot 时整个 JOIN 返回 0 行
--- h_prev fallback: 30D 前没 snapshot 就用最老的 (graceful degradation)
+-- h_prev fallback: window_days 天前没 snapshot 就用最老的 (graceful degradation)
 
 SELECT
     h_now.buyer_nick,
     tb.channel,
     tb.buyer_type,
     tb.vip_level,
-    h_now.rfm_segment_prev AS segment_30d_ago,
+    h_now.rfm_segment_prev AS segment_prev,
     h_now.rfm_segment AS segment_now,
-    h_now.churn_risk_prev AS churn_risk_30d_ago,
+    h_now.churn_risk_prev AS churn_risk_prev,
     h_now.churn_risk AS churn_risk_now,
     ROUND(h_now.l6m_netsales - h_now.l6m_netsales_prev, 2) AS l6m_netsales_change,
     ROUND(
@@ -67,7 +67,7 @@ FROM (
         -- churn 升级: 低/中 → 高
         (h_prev_inner.churn_risk IN ('低', '中') AND h_now_inner.churn_risk = '高') AS _cond_b,
         -- 购买力坍塌: l6m 30D 下降 >= 50 percent 且 30D 前 >= 1万
-        (h_prev_inner.l6m_netsales >= 10000
+        (h_prev_inner.l6m_netsales >= %(l6m_floor)s
          AND (h_now_inner.l6m_netsales - h_prev_inner.l6m_netsales) <= -0.5 * h_prev_inner.l6m_netsales) AS _cond_c
     FROM target_buyers_precomputed_history h_now_inner
     JOIN target_buyers_precomputed_history h_prev_inner
@@ -77,7 +77,7 @@ FROM (
                 (SELECT MAX(snapshot_date) FROM target_buyers_precomputed_history
                     WHERE snapshot_date <= DATE_SUB(
                         (SELECT MAX(snapshot_date) FROM target_buyers_precomputed_history),
-                        INTERVAL 30 DAY
+                        INTERVAL %(window_days)s DAY
                     )),
                 (SELECT MIN(snapshot_date) FROM target_buyers_precomputed_history)
             )

@@ -176,29 +176,55 @@ async def get_dashboard_metrics() -> Dict[str, Any]:
 
 @router.get("/history/churn-warning")
 async def get_churn_warning_list(
+    window: int = Query(90, description="对比周期（天），仅支持 60/90/180，默认 90"),
     limit: int = Query(100, ge=1, le=200, description="最大返回行数"),
     offset: int = Query(0, ge=0, description="分页偏移"),
     include_total: bool = Query(False, description="是否返回总数（Round1 简化：仅返回当页行数）"),
 ) -> Dict[str, Any]:
     """
-    流失预警列表 — 30 天 segment/churn_risk 退化客户 (Round 1 CRM)
+    流失预警列表 — segment/churn 退化 + 购买力坍塌 (Round 3: 对比周期可配置)
 
     用途: PriorityAttentionBoard 组件"流失预警" Tab 调用
 
+    阈值表 (产品配置, 不放进 SQL):
+      60D:  l6m_drop_pct=0.5, l6m_floor_yuan=10000
+      90D:  l6m_drop_pct=0.5, l6m_floor_yuan=15000
+      180D: l6m_drop_pct=0.5, l6m_floor_yuan=20000
+
     返回字段 (ChurnWarningRow):
     - buyer_nick, channel, buyer_type, vip_level
-    - segment_30d_ago, segment_now, churn_risk_30d_ago, churn_risk_now
-    - l6m_netsales_change (近 6 个月净销售额变化)
+    - segment_prev, segment_now, churn_risk_prev, churn_risk_now
+    - l6m_netsales_change, l6m_change_pct
     - last_purchase_date, last_chat_date
+    - selection_reasons, severity_tier
 
-    排序（SQL 内置）:
-    - 第一档: segment 重要→已流失/低价值（最严重退化）
-    - 第二档: churn_risk = 高
-    - 第三档: 其他
+    排序（SQL 内置）: severity_tier ASC, l6m_netsales_change ASC
     """
+    # 参数校验
+    if window not in (60, 90, 180):
+        raise HTTPException(
+            status_code=400,
+            detail=f"window 必须为 60/90/180 之一, 收到 {window}",
+        )
+
+    # 阈值表
+    THRESHOLDS = {
+        60:  {"l6m_drop_pct": 0.5, "l6m_floor_yuan": 10000},
+        90:  {"l6m_drop_pct": 0.5, "l6m_floor_yuan": 15000},
+        180: {"l6m_drop_pct": 0.5, "l6m_floor_yuan": 20000},
+    }
+    thresholds = THRESHOLDS[window]
+
     try:
-        rows = await _run_blocking(analyzer.get_churn_warning, limit=limit, offset=offset)
+        rows = await _run_blocking(
+            analyzer.get_churn_warning,
+            limit=limit, offset=offset,
+            window_days=window,
+            l6m_floor=thresholds["l6m_floor_yuan"],
+        )
         result = {
+            "window_days": window,
+            "applied_thresholds": thresholds,
             "limit": limit,
             "offset": offset,
             "data": rows,

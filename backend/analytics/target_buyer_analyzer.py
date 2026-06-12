@@ -464,10 +464,14 @@ class TargetBuyerAnalyzer:
     # === CRM Round 1 ===
 
     def get_churn_warning(
-        self, limit: int = 100, offset: int = 0
+        self, limit: int = 100, offset: int = 0,
+        window_days: int = 90, l6m_floor: int = 15000,
     ) -> List[Dict[str, Any]]:
-        """获取流失预警列表 (Round 1)."""
-        return self.queries.get_churn_warning(limit, offset)
+        """获取流失预警列表 (Round 3: 对比周期可配置)."""
+        return self.queries.get_churn_warning(
+            limit=limit, offset=offset,
+            window_days=window_days, l6m_floor=l6m_floor,
+        )
 
     def mark_service(
         self, buyer_nick: str, status: str, notes: Optional[str] = None

@@ -607,8 +607,15 @@ export const apiClient = {
 
   // ========== CRM 运营 (Round 1) ==========
 
-  getChurnWarning: async (limit = 100, offset = 0): Promise<ChurnWarningResponse> => {
-    const response = await fetch(`${API_BASE}/history/churn-warning?limit=${limit}&offset=${offset}`);
+  /**
+   * 流失预警列表 (Round 3: 对比周期可配置)
+   * @param opts.window 对比周期, 60/90/180 (默认 90)
+   * @param opts.limit 最大返回行数 (1-200, 默认 100)
+   * @param opts.offset 分页偏移 (默认 0)
+   */
+  getChurnWarning: async (opts: { window?: 60 | 90 | 180; limit?: number; offset?: number } = {}): Promise<ChurnWarningResponse> => {
+    const { window = 90, limit = 100, offset = 0 } = opts;
+    const response = await fetch(`${API_BASE}/history/churn-warning?window=${window}&limit=${limit}&offset=${offset}`);
     return handleResponse<ChurnWarningResponse>(response);
   },
 
@@ -1094,12 +1101,14 @@ export interface ChurnWarningRow {
   channel: string;
   buyer_type: string;
   vip_level: string;
-  segment_30d_ago: string;
+  /** Round 3 重命名: 原 segment_30d_ago, 避免 30 字面误导 (窗口已可配置) */
+  segment_prev: string;
   segment_now: string;
-  churn_risk_30d_ago: string;
+  /** Round 3 重命名: 原 churn_risk_30d_ago */
+  churn_risk_prev: string;
   churn_risk_now: string;
   l6m_netsales_change: number;
-  /** l6m_netsales 30天变化百分比 (可为 null: 30天前为 0) */
+  /** l6m_netsales 窗口内变化百分比 (可为 null: 窗口前为 0) */
   l6m_change_pct: number | null;
   last_purchase_date: string | null;
   last_chat_date: string | null;
@@ -1110,9 +1119,17 @@ export interface ChurnWarningRow {
 }
 
 export interface ChurnWarningResponse {
-  total: number;
+  /** 对比周期 (60/90/180) */
+  window_days: number;
+  /** 当前档位应用的阈值 (产品配置, route 层注入) */
+  applied_thresholds: {
+    l6m_drop_pct: number;
+    l6m_floor_yuan: number;
+  };
   limit: number;
   offset: number;
+  /** include_total=true 时返回, 否则 absent */
+  total?: number;
   data: ChurnWarningRow[];
 }
 

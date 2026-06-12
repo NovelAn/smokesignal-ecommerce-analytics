@@ -703,13 +703,25 @@ class TargetBuyerQueries:
     # === CRM Round 1 ===
 
     def get_churn_warning(
-        self, limit: int = 100, offset: int = 0
+        self, limit: int = 100, offset: int = 0,
+        window_days: int = 90, l6m_floor: int = 15000,
     ) -> List[Dict[str, Any]]:
         """
-        获取流失预警列表 — segment 退化 (30D 前 vs 现在) + churn_risk 上升.
+        获取流失预警列表 — segment/churn 退化 + 购买力坍塌 (Round 3: 对比周期可配置).
+
+        Args:
+            limit: 返回行数
+            offset: 偏移
+            window_days: 对比周期 (60/90/180, 默认 90) - route 层校验后传入
+            l6m_floor: 购买力坍塌基线 yuan (60D=1万/90D=1.5万/180D=2万)
         """
         sql = self._load_sql('get_churn_warning.sql')
-        return self.db.execute_query(sql, {"limit": limit, "offset": offset})
+        return self.db.execute_query(sql, {
+            "limit": limit,
+            "offset": offset,
+            "window_days": window_days,
+            "l6m_floor": l6m_floor,
+        })
 
     def mark_service(
         self, buyer_nick: str, status: str, notes: Optional[str] = None
