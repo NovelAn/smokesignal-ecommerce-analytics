@@ -271,22 +271,45 @@ def build_persona_prompt_v3(
             '请只基于这部分新聊天更新客户画像的演进趋势（关注点变化、决策风格变化、新增痛点、情绪走向），\n'
             '**不要推翻**已经稳定的核心画像特征。\n\n'
         )
+    # R5: 复购频率预计算 — 后端算好, LLM 看到数值直接引用, 禁止自己算
+    _interval = profile.get("avg_repurchase_interval_days")
+    _total_orders = profile.get("total_orders") or 0
+    if _total_orders <= 1 or not _interval or _interval <= 0:
+        _repurchase_freq = "首次购买或数据不足"
+    elif _interval < 60:
+        _repurchase_freq = f"高频（约{_interval:.0f}天/单）"
+    elif _interval < 180:
+        _repurchase_freq = f"中频（约{_interval:.0f}天/单）"
+    elif _interval < 365:
+        _repurchase_freq = f"中低频（约{_interval:.0f}天/单）"
+    else:
+        _repurchase_freq = f"低频（约{_interval:.0f}天/单）"
+
     context = build_persona_context(buyer_nick, profile, chats, orders)
     compact_context = {
         "buyer_nick": buyer_nick,
+        "repurchase_frequency": _repurchase_freq,  # R5 预计算, LLM 直接读
         "profile": {
             key: context["profile"].get(key)
             for key in [
-                "vip_level", "buyer_type", "client_monthly_tag", "city",
-                "historical_gmv", "historical_refund", "historical_net_sales",
-                "total_orders", "total_net_orders", "refund_rate",
-                "rolling_24m_netsales", "rolling_24m_orders",
-                "l6m_gmv", "l6m_netsales", "l6m_orders", "l6m_refund_rate",
-                "l1y_gmv", "l1y_netsales", "l1y_orders", "l1y_refund_rate",
-                "discount_ratio", "discount_sensitivity",
-                "first_purchase_date", "last_purchase_date",
-                "days_since_last_purchase", "avg_repurchase_interval_days",
+                # 销售核心 (3) — 24m 是 VIP 等级依据
+                "rolling_24m_netsales",
+                "l6m_netsales",
+                "l1y_netsales",
+                # 时间 (3) — 后端算好, LLM 不准自己算
+                "last_purchase_date",
+                "days_since_last_purchase",
+                "avg_repurchase_interval_days",
+                # 退款 (1) — 质量硬信号
+                "refund_rate",
+                # 订单 (1) — 复购频次分母
+                "total_orders",
+                # 折扣 (2)
+                "discount_ratio",
+                "discount_sensitivity",
+                # 品类 (3) — 画像核心输出
                 "top_category", "second_category", "third_category",
+                # 风险 (1)
                 "churn_risk",
             ]
         },
@@ -294,11 +317,15 @@ def build_persona_prompt_v3(
         "order_behavior": context["order_behavior"],
         "chat_insights": context["chat_insights"],
         "recent_chats": context["recent_chats"],
-        "external_info": context["external_info"],
     }
 
     return scope_hint + f"""
 你是 dunhill 电商客户洞察专家。你的任务不是复述订单数字，而是基于同一套真实数据，提炼客户的关键特征、购买偏好、顾虑痛点和后续运营机会。
+
+【复购频率已预计算】{repurchase_frequency}
+- summary 必含 "复购频率：{repurchase_frequency}" 字段
+- 看到 avg_repurchase_interval_days 数值时直接引用, 禁止自己除法/算日期
+
 
 统一规则：
 1. 所有结论只能来自下方 JSON 事实包，不能编造数字、商品、聊天内容或退货原因。
@@ -346,7 +373,7 @@ def build_persona_prompt_v3(
 - pain_or_growth_opportunity: 后续运营需要解决和提升的点。
 
 统一事实包：
-{json.dumps(compact_context, ensure_ascii=False, indent=2, default=str)[:12000]}
+{json.dumps(compact_context, ensure_ascii=False, indent=2, default=str)[:6000]}
 
 只返回合法 JSON，不要 Markdown，不要解释推理过程。字段必须完整：
 {{
