@@ -289,6 +289,12 @@ def build_persona_prompt_v3(
     compact_context = {
         "buyer_nick": buyer_nick,
         "repurchase_frequency": _repurchase_freq,  # R5 预计算, LLM 直接读
+        # ⚠️ JSON 顺序 = 截断优先级 (json.dumps 从前往后, 6000 字符后截断)
+        # chat 数据必须在 order 前面: 6000 字符内优先保留聊天洞察 + 最近对话
+        "chat_insights": context["chat_insights"],
+        "recent_chats": context["recent_chats"],
+        "order_facts": context["order_facts"],
+        "order_behavior": context["order_behavior"],
         "profile": {
             key: context["profile"].get(key)
             for key in [
@@ -313,10 +319,6 @@ def build_persona_prompt_v3(
                 "churn_risk",
             ]
         },
-        "order_facts": context["order_facts"],
-        "order_behavior": context["order_behavior"],
-        "chat_insights": context["chat_insights"],
-        "recent_chats": context["recent_chats"],
     }
 
     return scope_hint + f"""
