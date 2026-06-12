@@ -32,7 +32,8 @@ class MiniMaxClient:
         self.client = OpenAI(
             api_key=settings.minimax_api_key,
             base_url=settings.minimax_base_url,
-            http_client=http_client
+            http_client=http_client,
+            max_retries=0  # 429 余额耗尽, 非瞬时限流, 不重试; L1→L2 降级更快
         )
         self.model = settings.minimax_model
 
