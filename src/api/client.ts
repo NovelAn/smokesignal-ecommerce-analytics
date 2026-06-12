@@ -1099,8 +1099,14 @@ export interface ChurnWarningRow {
   churn_risk_30d_ago: string;
   churn_risk_now: string;
   l6m_netsales_change: number;
+  /** l6m_netsales 30天变化百分比 (可为 null: 30天前为 0) */
+  l6m_change_pct: number | null;
   last_purchase_date: string | null;
   last_chat_date: string | null;
+  /** 入选原因, 多个用英文逗号分隔, 例如: "segment退化,churn高风险" */
+  selection_reasons: string;
+  /** 严重程度档位: 1=最严重 (重要→已流失/低价值), 2=中度, 3=轻度, 4=兜底 */
+  severity_tier: number;
 }
 
 export interface ChurnWarningResponse {

@@ -51,6 +51,43 @@ function getChurnRiskColor(risk: string): 'red' | 'orange' | 'green' {
   return 'green';
 }
 
+// RFM segment 等级排名 (M*R*F 越高的 segment 越重要)
+const SEGMENT_RANK: Record<string, number> = {
+  '重要价值客户': 100, '重要保持客户': 90, '重要发展客户': 85, '重要挽留客户': 70,
+  '优质价值客户': 80, '优质保持客户': 75, '优质发展客户': 70, '优质挽留客户': 60,
+  '潜力客户': 50, '待激活客户': 40, '新客户': 45,
+  '低价值客户': 20, '已流失': 10, '无购买记录': 5,
+};
+
+// segment 退化的颜色: 跟 churn_risk 解耦, 按好段位→差段位严重度独立评估
+function getSegmentDegradationColor(segOld: string, segNow: string): 'red' | 'orange' | 'yellow' | 'gray' {
+  if (segOld === segNow) return 'gray';
+  const oldRank = SEGMENT_RANK[segOld] ?? 30;
+  const nowRank = SEGMENT_RANK[segNow] ?? 30;
+  const drop = oldRank - nowRank;
+  if (drop >= 60) return 'red';      // 重要类→已流失/低价值
+  if (drop >= 20) return 'orange';    // 重要类→挽留/潜力
+  return 'yellow';                    // 优质类→任何差 segment
+}
+
+// 入选原因 tag 颜色
+function getSelectionReasonColor(reason: string): 'red' | 'orange' | 'purple' | 'gray' {
+  if (reason === 'segment退化') return 'red';
+  if (reason === 'churn高风险') return 'orange';
+  if (reason === '购买力坍塌') return 'purple';
+  return 'gray';
+}
+
+// 严重度档位的左侧色条 className
+function getSeverityTierBar(tier: number): string {
+  switch (tier) {
+    case 1: return 'bg-red-600';
+    case 2: return 'bg-orange-500';
+    case 3: return 'bg-yellow-400';
+    default: return 'bg-gray-300';
+  }
+}
+
 interface ChurnRowCellsProps {
   row: ChurnWarningRow;
   canUndo: boolean;
@@ -64,8 +101,13 @@ function ChurnRowCells({ row, canUndo, customer, onStatusChange, onUndo }: Churn
   const l6mPositive = l6mChange > 0;
   const l6mZero = l6mChange === 0;
 
+  const reasons = row.selection_reasons ? row.selection_reasons.split(',').filter(Boolean) : [];
   return (
     <>
+      {/* 严重度色条 (左) */}
+      <td className="px-0 py-1 w-1" onClick={(e) => e.stopPropagation()}>
+        <div className={'w-1 h-full rounded-sm ' + getSeverityTierBar(row.severity_tier)} title={'严重度 Tier ' + row.severity_tier} />
+      </td>
       {/* 客户信息 (复用优先级 tab 的样式) */}
       <td className="px-3 py-1">
         <div className="flex flex-col gap-0.5">
@@ -97,7 +139,20 @@ function ChurnRowCells({ row, canUndo, customer, onStatusChange, onUndo }: Churn
         <div className="flex items-center gap-1">
           <NotionTag text={row.segment_30d_ago} color="green" size="xs" />
           <span className="text-red-500 text-xs">→</span>
-          <NotionTag text={row.segment_now} color={getChurnRiskColor(row.churn_risk_now) === 'red' ? 'red' : 'orange'} size="xs" />
+          <NotionTag text={row.segment_now} color={getSegmentDegradationColor(row.segment_30d_ago, row.segment_now)} size="xs" />
+        </div>
+      </td>
+
+      {/* 入选原因 */}
+      <td className="px-2 py-1">
+        <div className="flex flex-wrap gap-1">
+          {reasons.length === 0 ? (
+            <span className="text-notion-muted text-xs">-</span>
+          ) : (
+            reasons.map((r) => (
+              <NotionTag key={r} text={r} color={getSelectionReasonColor(r)} size="xs" />
+            ))
+          )}
         </div>
       </td>
 
@@ -673,7 +728,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
       title={activeTab === 'priority' ? '需优先跟进的客户' : '流失预警'}
       subtitle={activeTab === 'priority'
         ? `${response?.total || 0} 位客户 | 默认: 紧急/高优先级 或 负面情感`
-        : 'segment 退化 + churn_risk 上升 (30天对比)'}
+        : 'segment 退化、churn 升级，或购买力大幅下降 (近30天对比)'}
       action={
         <div className="flex items-center gap-3">
           {/* 批量工具栏 - Round 1 CRM 误触保护 */}
@@ -842,6 +897,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                 <th className="px-3 py-1 font-medium text-notion-muted whitespace-nowrap">客户</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">VIP</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">Segment 变化</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">入选原因</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">Churn 升级</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap text-right">L6M 变化</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">最后购买</th>

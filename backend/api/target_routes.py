@@ -174,6 +174,44 @@ async def get_dashboard_metrics() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=detail)
 
 
+@router.get("/history/churn-warning")
+async def get_churn_warning_list(
+    limit: int = Query(100, ge=1, le=200, description="最大返回行数"),
+    offset: int = Query(0, ge=0, description="分页偏移"),
+    include_total: bool = Query(False, description="是否返回总数（Round1 简化：仅返回当页行数）"),
+) -> Dict[str, Any]:
+    """
+    流失预警列表 — 30 天 segment/churn_risk 退化客户 (Round 1 CRM)
+
+    用途: PriorityAttentionBoard 组件"流失预警" Tab 调用
+
+    返回字段 (ChurnWarningRow):
+    - buyer_nick, channel, buyer_type, vip_level
+    - segment_30d_ago, segment_now, churn_risk_30d_ago, churn_risk_now
+    - l6m_netsales_change (近 6 个月净销售额变化)
+    - last_purchase_date, last_chat_date
+
+    排序（SQL 内置）:
+    - 第一档: segment 重要→已流失/低价值（最严重退化）
+    - 第二档: churn_risk = 高
+    - 第三档: 其他
+    """
+    try:
+        rows = await _run_blocking(analyzer.get_churn_warning, limit=limit, offset=offset)
+        result = {
+            "limit": limit,
+            "offset": offset,
+            "data": rows,
+        }
+        if include_total:
+            # Round1 简化: 不做精确 total（避免多跑一次 COUNT SQL）
+            # 前端如有需要，可通过 response.data.length 估算
+            result["total"] = len(rows)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"流失预警查询失败: {str(e)}")
+
+
 @router.get("/history/pool-summary")
 async def get_history_pool_summary(
     date_from: str = Query(..., description="起始日期 YYYY-MM-DD"),
