@@ -387,8 +387,8 @@ def build_persona_prompt_v3(
     "pain_or_growth_opportunity": "需要解决或提升的关键点"
   }},
   "summary": "2-3句话，自然总结客户类型、忠诚度、核心关注点、活跃度。只保留结论，不输出证据清单，不要逐项罗列品类占比，不要模板化开头",
-  "key_interests": ["3-5个稳定偏好/行为习惯/聊天关注点，每条是洞察不是页面基础字段"],
-  "pain_points": ["2-4个真实痛点或增长障碍，优先来自聊天，其次来自订单行为"],
+  "key_interests": ["2-3 条核心洞察，每条不超过 15 字，不重复 summary 已说过的"],
+  "pain_points": ["1-2 条最严重的，按风险程度排序"],
   "recommended_action": "1-2句话，说明触达时机、话术方向、推荐品类/商品方向",
   "confidence_level": "高/中/低"
 }}
