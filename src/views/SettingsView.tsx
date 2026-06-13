@@ -223,7 +223,8 @@ const SettingsView: React.FC = () => {
       // 调用force-refresh API，刷新persona类型
       const response = await apiClient.forceRefreshAnalysis(
         singleCustomerNick.trim(),
-        'persona' // 只刷新AI画像分析
+        'persona', // 只刷新AI画像分析
+        { analysisMode: 'full' } // 单客户重置: 50条全量
       );
       const message = (response as any).message || 'AI画像分析完成';
 

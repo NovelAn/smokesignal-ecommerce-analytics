@@ -5,7 +5,8 @@
 AI分析: 使用DeepSeek-R1 + 多级降级策略
 """
 from fastapi import APIRouter, HTTPException, Query
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
+from pydantic import BaseModel, Field
 from backend.analytics.target_buyer_analyzer import TargetBuyerAnalyzer
 from backend.database import BuyerQueries
 
@@ -171,6 +172,70 @@ async def get_dashboard_metrics() -> Dict[str, Any]:
         logging.exception("[Dashboard] get_dashboard_metrics failed")
         detail = str(e) or e.__class__.__name__
         raise HTTPException(status_code=500, detail=detail)
+
+
+@router.get("/history/churn-warning")
+async def get_churn_warning_list(
+    window: int = Query(90, description="对比周期（天），仅支持 60/90/180，默认 90"),
+    limit: int = Query(100, ge=1, le=200, description="最大返回行数"),
+    offset: int = Query(0, ge=0, description="分页偏移"),
+    include_total: bool = Query(False, description="是否返回总数（Round1 简化：仅返回当页行数）"),
+) -> Dict[str, Any]:
+    """
+    流失预警列表 — segment/churn 退化 + 购买力坍塌 (Round 3: 对比周期可配置)
+
+    用途: PriorityAttentionBoard 组件"流失预警" Tab 调用
+
+    阈值表 (产品配置, 不放进 SQL):
+      60D:  l6m_drop_pct=0.5, l6m_floor_yuan=10000
+      90D:  l6m_drop_pct=0.5, l6m_floor_yuan=15000
+      180D: l6m_drop_pct=0.5, l6m_floor_yuan=20000
+
+    返回字段 (ChurnWarningRow):
+    - buyer_nick, channel, buyer_type, vip_level
+    - segment_prev, segment_now, churn_risk_prev, churn_risk_now
+    - l6m_netsales_change, l6m_change_pct
+    - last_purchase_date, last_chat_date
+    - selection_reasons, severity_tier
+
+    排序（SQL 内置）: severity_tier ASC, l6m_netsales_change ASC
+    """
+    # 参数校验
+    if window not in (60, 90, 180):
+        raise HTTPException(
+            status_code=400,
+            detail=f"window 必须为 60/90/180 之一, 收到 {window}",
+        )
+
+    # 阈值表
+    THRESHOLDS = {
+        60:  {"l6m_drop_pct": 0.5, "l6m_floor_yuan": 10000},
+        90:  {"l6m_drop_pct": 0.5, "l6m_floor_yuan": 15000},
+        180: {"l6m_drop_pct": 0.5, "l6m_floor_yuan": 20000},
+    }
+    thresholds = THRESHOLDS[window]
+
+    try:
+        rows = await _run_blocking(
+            analyzer.get_churn_warning,
+            limit=limit, offset=offset,
+            window_days=window,
+            l6m_floor=thresholds["l6m_floor_yuan"],
+        )
+        result = {
+            "window_days": window,
+            "applied_thresholds": thresholds,
+            "limit": limit,
+            "offset": offset,
+            "data": rows,
+        }
+        if include_total:
+            # Round1 简化: 不做精确 total（避免多跑一次 COUNT SQL）
+            # 前端如有需要，可通过 response.data.length 估算
+            result["total"] = len(rows)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"流失预警查询失败: {str(e)}")
 
 
 @router.get("/history/pool-summary")
@@ -882,11 +947,22 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
 
         db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
 
-        # 并行获取 chats + orders + external_records（3个独立查询）
+        # Round 4: 增量 chat 读取 (首次 50 / 重刷 20+5=25)
         def _fetch_chats():
-            db = Database(db_name=db_name)
-            query, params = BuyerQueries.get_chat_messages(user_nick, limit=30)
-            return db.execute_query(query, params)
+            from backend.ai.batch_analyzer import get_batch_analyzer
+            from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
+
+            cache_record = None
+            orch = get_analyzer_orchestrator()
+            if orch and orch.cache_manager:
+                cache_record = orch.cache_manager.get(user_nick)
+
+            ba = get_batch_analyzer()
+            chats_result, _, _ = ba.fetch_chats_for_analysis(
+                user_nick, cache_record=cache_record, analysis_type="persona",
+                full_limit=50, incremental_new_limit=20, context_window=5,
+            )
+            return chats_result
 
         def _fetch_orders():
             db = Database(db_name=db_name)
@@ -1079,10 +1155,16 @@ async def _add_ai_analysis(profile: Dict[str, Any]) -> Dict[str, Any]:
 async def force_refresh_analysis(
     user_nick: str,
     refresh_type: str = "all",  # "persona" | "sentiment" | "all"
-    reanalyze: bool = Query(True, description="是否立即重新分析")
+    reanalyze: bool = Query(True, description="是否立即重新分析"),
+    analysis_mode: str = Query("incremental", description="分析模式: incremental(默认, 20+5=25) / full(50全量)"),
 ) -> Dict[str, Any]:
     """
     强制刷新AI分析结果
+
+    Round 4 增量优化: analysis_mode 控制 chat 读取策略
+      - "incremental" (默认): 只读 20 条新消息 + 5 条历史上下文
+      - "full": 读 50 条全量 (SettingsView 单客户"重新生成画像"专用)
+    订单 records 不受影响 (始终全量)
 
     使用场景:
     - AI返回了错误结果
@@ -1096,17 +1178,9 @@ async def force_refresh_analysis(
             - "sentiment": 仅刷新情感/意图分析
             - "all": 刷新全部
         reanalyze: 是否在清除缓存后立即重新分析（默认True）
-
-    Returns:
-        {
-            "buyer_nick": str,
-            "refresh_type": str,
-            "cleared": list,
-            "reanalyzed": list,
-            "ai_provider": str,  # 如果重新分析了情感，返回使用的AI模型
-            "message": str
-        }
+        analysis_mode: 分析模式 - incremental(默认) / full
     """
+
     try:
         from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
         from backend.ai.batch_analyzer import get_batch_analyzer
@@ -1135,13 +1209,19 @@ async def force_refresh_analysis(
             db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
             db = Database(db_name=db_name)
 
-            # 获取聊天记录
-            query, params = BuyerQueries.get_chat_messages(user_nick, limit=50)
-            chats = db.execute_query(query, params)
+            # Round 4: 增量 chat 读取 (analysis_mode=full -> 50全量, 否则 20+5=25)
+            if analysis_mode == "full":
+                chat_query, chat_params = BuyerQueries.get_chat_messages(user_nick, limit=50)
+                chats = db.execute_query(chat_query, chat_params)
+                is_incremental = False
+            else:
+                chats, is_incremental, _ = batch_analyzer.fetch_chats_for_analysis(
+                    user_nick, cache_record=None, analysis_type="persona",
+                )
 
             if refresh_type in ["sentiment", "all"]:
-                # 重新进行情感/意图分析
-                result = batch_analyzer.analyze_single_buyer(user_nick, chats)
+                # 重新进行情感/意图分析 (Round 4: is_incremental 标志)
+                result = batch_analyzer.analyze_single_buyer(user_nick, chats, is_incremental=is_incremental)
 
                 # 获取客户档案用于保存
                 profile_query = "SELECT * FROM target_buyers_precomputed WHERE buyer_nick = %s"
@@ -1247,11 +1327,13 @@ async def force_refresh_analysis(
                         buyer_nick=user_nick,
                         profile=profile_data,
                         chats=chats,
-                        orders=orders
+                        orders=orders,
+                        is_incremental=is_incremental,
                     )
 
-                    # 保存结果到缓存
-                    orchestrator.cache_manager.set_persona(user_nick, ai_result, profile_data)
+                    # 保存结果到缓存（仅当 cache 启用时；orchestrator 内部已写过缓存，这里是冗余兜底）
+                    if orchestrator.cache_manager:
+                        orchestrator.cache_manager.set_persona(user_nick, ai_result, profile_data, actual_chats=chats)
 
                     reanalyzed.append("画像")
                     persona_method = ai_result.get('analysis_method', 'unknown')
@@ -1267,6 +1349,7 @@ async def force_refresh_analysis(
 
         return {
             "buyer_nick": user_nick,
+            "analysis_mode": analysis_mode,
             "refresh_type": refresh_type,
             "cleared": cleared,
             "reanalyzed": reanalyzed,
@@ -1278,6 +1361,93 @@ async def force_refresh_analysis(
         import logging
         logging.error(f"[ForceRefresh] 失败: {e}")
         raise HTTPException(status_code=500, detail=f"强制刷新失败: {str(e)}")
+
+
+# ============================================
+# 客服操作记录 (Round 1 CRM) - service/mark endpoints
+# ============================================
+
+class ServiceMarkRequest(BaseModel):
+    buyer_nick: str
+    status: Literal['pending', 'contacted', 'resolved']
+    notes: Optional[str] = None
+
+
+class ServiceMarkResponse(BaseModel):
+    success: bool
+    affected_rows: int
+    buyer_nick: str
+    previous_status: Optional[str] = None   # 撤销用
+    new_status: str
+
+
+class ServiceMarkBatchRequest(BaseModel):
+    buyer_nicks: List[str] = Field(..., min_length=1, max_length=200)
+    status: Literal['pending', 'contacted', 'resolved']
+    notes: Optional[str] = None
+
+
+class ServiceMarkBatchResponse(BaseModel):
+    success: bool
+    affected_rows: int
+    processed: List[str]
+    failed: List[str] = []
+
+
+@router.post("/service/mark", response_model=ServiceMarkResponse)
+async def mark_customer_service(body: ServiceMarkRequest) -> ServiceMarkResponse:
+    """
+    标记单个客户处理状态 (Round 1 CRM)
+
+    用途：priority-customers 列表的客服操作列调用
+    - status='pending'：表示客户未处理（首次标记或撤销恢复）
+    - status='contacted'：客服已触达，等客户回复
+    - status='resolved'：问题已解决，闭环
+
+    返回 previous_status 用于前端 30 秒撤销。
+    """
+    try:
+        # 查上次状态（撤销用）
+        prev_history = analyzer.get_service_history(body.buyer_nick)
+        previous_status = prev_history[0].get('status') if prev_history else None
+
+        affected = analyzer.mark_service(body.buyer_nick, body.status, body.notes)
+
+        return ServiceMarkResponse(
+            success=True,
+            affected_rows=affected,
+            buyer_nick=body.buyer_nick,
+            previous_status=previous_status,
+            new_status=body.status,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"标记失败: {str(e)}")
+
+
+@router.post("/service/mark-batch", response_model=ServiceMarkBatchResponse)
+async def batch_mark_customer_service(body: ServiceMarkBatchRequest) -> ServiceMarkBatchResponse:
+    """
+    批量标记客户处理状态 (Round 1 CRM)
+
+    用途：priority-customers 列表顶部批量工具栏调用
+    - 最多 200 个/次，避免长事务
+    - partial 失败：失败的 buyer_nick 在 failed 列表返回
+    """
+    processed: List[str] = []
+    failed: List[str] = []
+    for nick in body.buyer_nicks:
+        try:
+            analyzer.mark_service(nick, body.status, body.notes)
+            processed.append(nick)
+        except Exception:
+            failed.append(nick)
+
+    return ServiceMarkBatchResponse(
+        success=len(failed) == 0,
+        affected_rows=len(processed),
+        processed=processed,
+        failed=failed,
+    )
 
 
 @router.post("/buyers/{user_nick}/analyze-async")

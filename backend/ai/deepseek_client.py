@@ -455,7 +455,8 @@ class DeepSeekClient:
         buyer_nick: str,
         profile: Dict[str, Any],
         chats: List[Dict],
-        orders: List[Dict]
+        orders: List[Dict],
+        is_incremental: bool = False
     ) -> Dict[str, Any]:
         """
         两阶段分析：证据提取 → 画像推理
@@ -465,6 +466,7 @@ class DeepSeekClient:
             profile: 客户档案数据
             chats: 聊天记录列表
             orders: 订单列表
+            is_incremental: Round 4 增量模式, chats 仅含新增部分 + 少量上下文
 
         Returns:
             {
@@ -478,7 +480,7 @@ class DeepSeekClient:
         """
         try:
             # 阶段1：证据提取
-            evidence = self._extract_evidence(buyer_nick, profile, chats, orders)
+            evidence = self._extract_evidence(buyer_nick, profile, chats, orders, is_incremental=is_incremental)
             order_behavior = structure_order_behavior(profile, orders)
             order_behavior_serialized = _serialize_datetime(order_behavior)
             category_distribution = _extract_category_distribution(order_behavior_serialized)
@@ -486,7 +488,7 @@ class DeepSeekClient:
             evidence["_authoritative_category_distribution"] = category_distribution
 
             # 阶段2：画像推理
-            persona = self._infer_persona(evidence)
+            persona = self._infer_persona(evidence, is_incremental=is_incremental)
             persona = _sanitize_persona_category_claims(persona, category_distribution, profile, orders)
 
             # 合并结果
@@ -503,7 +505,8 @@ class DeepSeekClient:
         buyer_nick: str,
         profile: Dict,
         chats: List[Dict],
-        orders: List[Dict]
+        orders: List[Dict],
+        is_incremental: bool = False
     ) -> Dict:
         """
         阶段1：提取关键证据
@@ -528,7 +531,8 @@ class DeepSeekClient:
         external_records = profile.get("external_records", [])
         formatted_external = build_external_info_context(external_records) if external_records else "暂无场外信息记录"
 
-        prompt = EVIDENCE_EXTRACTION_PROMPT.format(
+        _scope = ("【增量分析】以下是自上次分析以来的新增聊天 + 少量历史上下文。请重点关注新增信息。\n\n" if is_incremental else "")
+        prompt = _scope + EVIDENCE_EXTRACTION_PROMPT.format(
             formatted_chats=formatted_chats,
             structured_behavior=formatted_behavior,
             buyer_nick=buyer_nick,
@@ -576,7 +580,7 @@ class DeepSeekClient:
 
         return self._parse_json_response(evidence_text)
 
-    def _infer_persona(self, evidence: Dict) -> Dict:
+    def _infer_persona(self, evidence: Dict, is_incremental: bool = False) -> Dict:
         """
         阶段2：基于证据推断画像
 
@@ -588,7 +592,7 @@ class DeepSeekClient:
         """
         # Serialize datetime objects before JSON encoding
         evidence_serialized = _serialize_datetime(evidence)
-        prompt = PERSONA_INFERENCE_PROMPT.format(
+        prompt = _scope + PERSONA_INFERENCE_PROMPT.format(
             evidence_json=json.dumps(evidence_serialized, ensure_ascii=False, indent=2)
         )
 
@@ -629,7 +633,8 @@ class DeepSeekClient:
         buyer_nick: str,
         profile: Dict[str, Any],
         chats: List[Dict],
-        orders: List[Dict]
+        orders: List[Dict],
+        is_incremental: bool = False
     ) -> Dict[str, Any]:
         """
         使用Chat模型快速分析（成本优化方案）
@@ -638,6 +643,9 @@ class DeepSeekClient:
         成本: ~¥3 (vs R1的~¥7)
 
         适用于: 中等复杂度（10-20条聊天记录）
+
+        Args:
+            is_incremental: Round 4 增量模式
         """
         # 数据预处理
         chat_insights = extract_chat_insights(chats, buyer_nick)
@@ -697,7 +705,8 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
   "confidence_level": "高/中/低"
 }}
 """
-        prompt = build_persona_prompt_v3(buyer_nick, profile, chats, orders)
+        max_chars = 8000 if is_incremental else 15000
+        prompt = build_persona_prompt_v3(buyer_nick, profile, chats, orders, is_incremental=is_incremental, max_context_chars=max_chars)
 
         try:
             response = self.client.chat.completions.create(
@@ -818,7 +827,8 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
     def analyze_sentiment_intent(
         self,
         buyer_nick: str,
-        messages: List[str]
+        messages: List[str],
+        is_incremental: bool = False
     ) -> Dict[str, Any]:
         """
         分析客户消息的情感和意图
@@ -826,6 +836,8 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
         Args:
             buyer_nick: 买家昵称
             messages: 客户消息列表
+            is_incremental: True=增量模式（messages 是自上次分析以来的新聊天）；
+                          False=全量模式（messages 是买家全部历史聊天）。
 
         Returns:
             {
@@ -851,9 +863,17 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
                 "complaint_count": 0
             }
 
+        scope_hint = (
+            "以下是**自上次分析以来的新增聊天**（请仅基于以下新增聊天判断情感和意图，不要考虑之前的历史聊天）。"
+            if is_incremental
+            else "以下是买家的全部历史聊天（请基于全部历史聊天判断每条消息的情感和意图）。"
+        )
+
         prompt = f"""分析以下客户消息的情感和意图。
 
-客户消息（最近{len(messages)}条）:
+{scope_hint}
+
+客户消息（{len(messages)}条）:
 {chr(10).join([f'- {msg}' for msg in messages[:20]])}
 
 请分析并返回JSON格式结果：

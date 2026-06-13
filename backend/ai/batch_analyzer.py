@@ -448,8 +448,10 @@ class BatchAnalyzer:
                 buyer_nick = buyer['buyer_nick']
                 try:
                     db = Database(db_name=db_name)
-                    query, params = BuyerQueries.get_chat_messages(buyer_nick, limit=30)
-                    chats = db.execute_query(query, params)
+                    # Round 4: 增量 chat 读取 (首次 50 / 重刷 20+5=25)
+                    chats, is_inc, since = self.fetch_chats_for_analysis(
+                        buyer_nick, cache_record=buyer, analysis_type='persona'
+                    )
 
                     orders_query = """
                         SELECT
@@ -463,46 +465,21 @@ class BatchAnalyzer:
                     orders = db.execute_query(orders_query, [buyer_nick])
 
                     profile_data = self._build_persona_profile_data(buyer_nick, buyer, chats, orders)
-                    if orchestrator.deepseek:
-                        if should_use_deepseek_pro(profile_data, chats, orders):
-                            result = orchestrator.deepseek.analyze_buyer_persona(
-                                buyer_nick=buyer_nick,
-                                profile=profile_data,
-                                chats=chats,
-                                orders=orders
-                            )
-                            result["analysis_method"] = "deepseek-v4-pro"
-                        else:
-                            result = orchestrator.deepseek.analyze_buyer_persona_chat(
-                                buyer_nick=buyer_nick,
-                                profile=profile_data,
-                                chats=chats,
-                                orders=orders
-                            )
-                            result["analysis_method"] = "deepseek-v4-flash"
-                    elif orchestrator.minimax:
-                        result = orchestrator.minimax.analyze_buyer_persona(
-                            buyer_nick,
-                            profile_data,
-                            chats,
-                            orchestrator._format_order_summary(profile_data, orders),
-                            orders=orders
-                        )
-                        result["analysis_method"] = "MiniMax-M2.7"
-                    else:
-                        result = orchestrator.analyze_buyer_persona(
-                            buyer_nick=buyer_nick,
-                            profile=profile_data,
-                            chats=chats,
-                            orders=orders,
-                            force_refresh=True
-                        )
 
-                    from backend.ai.behavior_analyzer import ground_persona_analysis_v3
-                    result = ground_persona_analysis_v3(result, profile_data, orders)
+                    # 统一走 orchestrator（内部 L1=MiniMax-M3 → L2=DeepSeek → L3=Rule-based）
+                    # force_refresh=True 确保 batch 跑过的人都重分析
+                    result = orchestrator.analyze_buyer_persona(
+                        buyer_nick=buyer_nick,
+                        profile=profile_data,
+                        chats=chats,
+                        orders=orders,
+                        force_refresh=True,
+                        is_incremental=is_inc
+                    )
 
+                    # Round 4: 传 actual_chats 给 set_persona (增量模式下用 chats[0].msg_time)
                     if orchestrator.cache_manager and orchestrator._is_valid_analysis(result):
-                        orchestrator.cache_manager.set_persona(buyer_nick, result, profile_data)
+                        orchestrator.cache_manager.set_persona(buyer_nick, result, profile_data, actual_chats=chats)
 
                     return result
                 except Exception as e:
@@ -541,29 +518,131 @@ class BatchAnalyzer:
             task.status = BatchTaskStatus.FAILED
             task.error_message = str(e)
             task.completed_at = datetime.now()
-    def get_buyer_chats(self, buyer_nick: str, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get recent chat messages for a buyer"""
+    def get_buyer_chats(
+        self,
+        buyer_nick: str,
+        limit: int = 50,
+        since_msg_time: Optional[datetime] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent chat messages for a buyer.
+
+        Args:
+            buyer_nick: 买家昵称
+            limit: 返回消息数上限
+            since_msg_time: 增量起点（仅返回该时间之后的聊天）。
+                None 表示读全量历史；提供 datetime 表示增量模式。
+        """
         from backend.database import Database, BuyerQueries
         from backend.config import settings
 
         db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
         db = Database(db_name=db_name)
 
-        query, params = BuyerQueries.get_chat_messages(buyer_nick, limit)
+        query, params = BuyerQueries.get_chat_messages(buyer_nick, limit, since_msg_time)
         return db.execute_query(query, params)
+
+
+    def fetch_chats_for_analysis(
+        self,
+        buyer_nick: str,
+        cache_record: Optional[Dict[str, Any]] = None,
+        analysis_type: str = "persona",
+        full_limit: int = 50,
+        incremental_new_limit: int = 20,
+        context_window: int = 5,
+    ) -> tuple:
+        """
+        Round 4 增量优化: 统一 chat 读取入口
+
+        首次分析 (cache 缺记录): 全量 full_limit 条
+        重刷 (cache 有记录): 增量 incremental_new_limit 条新消息 + context_window 条历史上下文
+
+        Args:
+            buyer_nick: 买家昵称
+            cache_record: buyer_ai_analysis_cache 记录 (None=首次)
+            analysis_type: "persona" 或 "sentiment" (决定读哪个 last_chat_date 字段)
+            full_limit: 首次分析读取条数上限 (默认 50)
+            incremental_new_limit: 增量新消息条数上限 (默认 20)
+            context_window: 增量时额外读取的历史上下文条数 (默认 5)
+
+        Returns:
+            (chats, is_incremental, since_msg_time)
+        """
+        from datetime import datetime as dt
+
+        last_chat_field = f"{analysis_type}_analyzed_last_chat_date"
+        since = (cache_record or {}).get(last_chat_field)
+
+        # 首次分析: cache 缺记录或字段为 None -> 全量
+        if not since:
+            chats = self.get_buyer_chats(buyer_nick, limit=full_limit)
+            return chats, False, None
+
+        # 增量模式: 拿 since 之后所有新消息 (SQL limit=200 兜底防失控)
+        # Python 端按增量条数动态决定截断点 + 历史上下文条数
+        new_chats_raw = self.get_buyer_chats(
+            buyer_nick, limit=200, since_msg_time=since
+        )
+
+        # 无新消息: 返回空, 调用方应跳过 AI 调用
+        if not new_chats_raw:
+            return [], True, since
+
+        # 动态上下文策略: 增量越少, 历史越多 (凑上下文); 增量越多, 历史越少 (最近的更相关)
+        n = len(new_chats_raw)
+        if n <= 3:
+            new_chats = new_chats_raw  # 全部拿 (最多 3)
+            context_n = 15
+        elif n <= 9:
+            new_chats = new_chats_raw
+            context_n = 10
+        elif n <= 19:
+            new_chats = new_chats_raw
+            context_n = 5
+        elif n <= 50:
+            # 中等量 (20-50): 拿全部 (都在 50 截断内), 不拼历史
+            new_chats = new_chats_raw
+            context_n = 0
+        else:
+            # 大量 (50+): 截断到 50, 不拼历史 (最近的 50 条足够)
+            new_chats = new_chats_raw[:incremental_new_limit]
+            context_n = 0
+
+        # 拿历史上下文 (since 之前的)
+        context_chats = []
+        if context_n > 0 and since:
+            context_chats_raw = self.get_buyer_chats(
+                buyer_nick, limit=context_n, since_msg_time=None
+            )
+            context_chats = [
+                ch for ch in context_chats_raw
+                if ch.get("msg_time") and str(ch.get("msg_time")) < str(since)
+            ][:context_n]
+
+        # 合并: 新消息 (DESC) + 历史上下文 (DESC)
+        chats = list(new_chats) + list(context_chats)
+        return chats, True, since
 
     def analyze_single_buyer(
         self,
         buyer_nick: str,
-        chats: List[Dict[str, Any]]
+        chats: List[Dict[str, Any]],
+        is_incremental: bool = False
     ) -> Dict[str, Any]:
         """
         Analyze sentiment and intent for a single buyer
 
-        Uses multi-level fallback:
-        1. Zhipu GLM-4.7 (preferred - monthly subscription)
-        2. DeepSeek-Chat (fallback - pay per token)
-        3. Rule-based (final fallback)
+        统一调用接口（与 DeepSeek / MiniMax 同方法签名）:
+            L1: MiniMax-M3（首选，月订阅制省 token）
+            L2: DeepSeek（备选，按 token 计费）
+            L3: Rule-based（兜底）
+
+        两个模型都暴露同一个 analyze_sentiment_intent(buyer_nick, messages, is_incremental) 接口，
+        返回字段完全一致（sentiment_score / sentiment_label / intent_distribution /
+        dominant_intent / complaint_count）。Python 后处理（_merge_intent_distribution /
+        _dominant_intent / calculate_intent_scores / _extract_keywords）共用一套，保证两个模型
+        输出 schema 100% 一致。
 
         Returns:
             {
@@ -575,7 +654,7 @@ class BatchAnalyzer:
                 "pre_sale_keywords": list,
                 "post_sale_keywords": list,
                 "complaint_count": int,
-                "sentiment_method": str
+                "sentiment_method": str (minimax_m3 / deepseek / rule_based)
             }
         """
         if not chats:
@@ -591,143 +670,103 @@ class BatchAnalyzer:
         if not buyer_messages:
             return self._default_analysis(buyer_nick, "no_buyer_messages")
 
-        result = {
-            "buyer_nick": buyer_nick,
-            "analyzed_at": datetime.now()
-        }
-
-        # Try MiniMax first (preferred)
+        # ===== L1: MiniMax-M3（首选，月订阅制省 token）=====
         if self.minimax_client:
             try:
                 self.rate_limiter.wait()
-                logger.debug(f"[BatchAnalyzer] Analyzing {buyer_nick} with MiniMax")
+                logger.debug(f"[BatchAnalyzer] Analyzing {buyer_nick} with MiniMax-M3 (L1)")
 
-                # Sentiment analysis
-                sentiment_results = self.minimax_client.analyze_sentiment_batch(buyer_messages[:20])
-
-                parse_failed = bool(sentiment_results) and all(
-                    r.get('_parse_failed') for r in sentiment_results
+                ai_result = self.minimax_client.analyze_sentiment_intent(
+                    buyer_nick,
+                    buyer_messages[:20],
+                    is_incremental=is_incremental
                 )
-                sentiment_sources = {
-                    r.get('_source')
-                    for r in sentiment_results
-                    if r.get('_source')
-                }
-
-                if parse_failed:
-                    logger.info(f"[BatchAnalyzer] MiniMax sentiment parse failed for {buyer_nick}, falling through to DeepSeek")
-                    raise Exception("MiniMax sentiment parse failed, trying DeepSeek fallback")
-
-                # Calculate average sentiment
-                if sentiment_results:
-                    avg_score = sum(r.get('score', 0.5) for r in sentiment_results) / len(sentiment_results)
-                    sentiment_labels = [r.get('sentiment', 'Neutral') for r in sentiment_results]
-
-                    # Determine overall label
-                    positive_count = sentiment_labels.count('Positive')
-                    negative_count = sentiment_labels.count('Negative')
-
-                    if positive_count > negative_count and positive_count > len(sentiment_labels) / 2:
-                        overall_label = 'Positive'
-                    elif negative_count > positive_count and negative_count > len(sentiment_labels) / 2:
-                        overall_label = 'Negative'
-                    else:
-                        overall_label = 'Neutral'
-
-                    result['sentiment_score'] = round(avg_score, 2)
-                    result['sentiment_label'] = overall_label
-
-                # Intent analysis
-                self.rate_limiter.wait()
-                intent_dist = self.minimax_client.extract_intent_distribution(buyer_messages)
-
-                intent_parse_failed = intent_dist.pop('_parse_failed', False)
-                intent_source = intent_dist.pop('_source', 'model')
-
-                if intent_parse_failed:
-                    logger.info(f"[BatchAnalyzer] MiniMax intent parse failed for {buyer_nick}, falling through to DeepSeek")
-                    raise Exception("MiniMax intent analysis failed, trying DeepSeek fallback")
-
-                result['intent_distribution'] = intent_dist
-
-                # Determine dominant intent
-                if intent_dist:
-                    result['dominant_intent'] = max(intent_dist.items(), key=lambda x: x[1])[0]
-                else:
-                    result['dominant_intent'] = 'Unknown'
-
-                intent_dist = self._merge_intent_distribution(intent_dist, buyer_messages)
-                result['intent_distribution'] = intent_dist
-                result['dominant_intent'] = self._dominant_intent(intent_dist)
-
-                method_sources = []
-                if sentiment_sources:
-                    method_sources.extend(sorted(sentiment_sources))
-                if intent_source != 'model':
-                    method_sources.append(intent_source)
-                result['sentiment_method'] = (
-                    'minimax_m27'
-                    if not method_sources
-                    else f"minimax_m27_{'+'.join(sorted(set(method_sources)))}"
+                logger.info(f"[BatchAnalyzer] MiniMax-M3 analysis completed for {buyer_nick}")
+                return self._post_process_sentiment(
+                    buyer_nick, buyer_messages, ai_result, method='minimax_m3'
                 )
-                result['complaint_count'] = intent_dist.get('Complaint', 0)
-
-                # Calculate pre_sale_score and post_sale_score from intent_distribution
-                intent_scores = TagCalculator.calculate_intent_scores(intent_dist)
-                result['pre_sale_score'] = intent_scores['pre_sale_score']
-                result['post_sale_score'] = intent_scores['post_sale_score']
-
-                # Extract keywords
-                result['pre_sale_keywords'] = self._extract_keywords(buyer_messages, 'pre_sale')
-                result['post_sale_keywords'] = self._extract_keywords(buyer_messages, 'post_sale')
-
-                return result
 
             except Exception as e:
-                logger.warning(f"[BatchAnalyzer] MiniMax failed for {buyer_nick}: {e}")
+                logger.warning(f"[BatchAnalyzer] MiniMax-M3 failed for {buyer_nick}, fallback to DeepSeek: {e}")
 
-        # Fallback to DeepSeek
+        # ===== L2: DeepSeek（备选，按 token 计费）=====
         if self.deepseek_client:
             try:
                 self.rate_limiter.wait()
-                logger.info(f"[BatchAnalyzer] Analyzing {buyer_nick} with DeepSeek (fallback)")
+                logger.info(f"[BatchAnalyzer] Analyzing {buyer_nick} with DeepSeek (L2 fallback)")
 
-                # 使用DeepSeek进行情感分析
-                deepseek_result = self.deepseek_client.analyze_sentiment_intent(
+                ai_result = self.deepseek_client.analyze_sentiment_intent(
                     buyer_nick,
-                    buyer_messages[:20]
+                    buyer_messages[:20],
+                    is_incremental=is_incremental
                 )
-
-                result['sentiment_score'] = deepseek_result.get('sentiment_score', 0.5)
-                result['sentiment_label'] = deepseek_result.get('sentiment_label', 'Neutral')
-                result['intent_distribution'] = deepseek_result.get('intent_distribution', {})
-                result['intent_distribution'] = self._merge_intent_distribution(
-                    result['intent_distribution'],
-                    buyer_messages
-                )
-                result['dominant_intent'] = deepseek_result.get('dominant_intent', 'Unknown')
-                result['dominant_intent'] = self._dominant_intent(result['intent_distribution'])
-                result['complaint_count'] = deepseek_result.get('complaint_count', 0)
-                result['complaint_count'] = result['intent_distribution'].get('Complaint', 0)
-                result['sentiment_method'] = 'deepseek'
-
-                # Calculate pre_sale_score and post_sale_score from intent_distribution
-                intent_scores = TagCalculator.calculate_intent_scores(result['intent_distribution'])
-                result['pre_sale_score'] = intent_scores['pre_sale_score']
-                result['post_sale_score'] = intent_scores['post_sale_score']
-
-                # Extract keywords
-                result['pre_sale_keywords'] = self._extract_keywords(buyer_messages, 'pre_sale')
-                result['post_sale_keywords'] = self._extract_keywords(buyer_messages, 'post_sale')
-
                 logger.info(f"[BatchAnalyzer] DeepSeek analysis completed for {buyer_nick}")
-                return result
+                return self._post_process_sentiment(
+                    buyer_nick, buyer_messages, ai_result, method='deepseek'
+                )
 
             except Exception as e:
-                logger.warning(f"[BatchAnalyzer] DeepSeek failed for {buyer_nick}: {e}")
+                logger.warning(f"[BatchAnalyzer] DeepSeek failed for {buyer_nick}, fallback to rule-based: {e}")
 
-        # Final fallback to rule-based
+        # ===== L3: Rule-based（兜底）=====
         return self._rule_based_analysis(buyer_nick, buyer_messages)
+
+    def _post_process_sentiment(
+        self,
+        buyer_nick: str,
+        buyer_messages: List[str],
+        ai_result: Dict[str, Any],
+        method: str
+    ) -> Dict[str, Any]:
+        """
+        统一的情感意图后处理（MiniMax 和 DeepSeek 共用）
+
+        输入：AI 客户端返回的 {sentiment_score, sentiment_label, intent_distribution,
+              dominant_intent, complaint_count} 字段（两个客户端已对齐）。
+        输出：补充 _merge_intent_distribution / calculate_intent_scores / _extract_keywords
+              三个本地增强，最终结构完全一致，sentiment_method 由 method 决定。
+
+        Args:
+            buyer_nick: 买家昵称
+            buyer_messages: 买家消息原文列表（用于本地关键词增强）
+            ai_result: AI 返回的原始结果（必须包含 sentiment_score / sentiment_label /
+                       intent_distribution / dominant_intent / complaint_count）
+            method: 'minimax_m3' 或 'deepseek'，写入 sentiment_method 字段
+
+        Returns:
+            完整的 buyer 分析结果 dict
+        """
+        # 1. AI 原始字段
+        intent_dist = dict(ai_result.get('intent_distribution') or {})
+
+        # 2. 本地关键词增强（merge AI 结果与本地强关键词信号，避免 AI 漏判售后/投诉）
+        merged_intent = self._merge_intent_distribution(intent_dist, buyer_messages)
+
+        # 3. 重新计算 dominant_intent（merged 之后为准）
+        dominant_intent = self._dominant_intent(merged_intent)
+
+        # 4. 准备 result
+        result = {
+            "buyer_nick": buyer_nick,
+            "analyzed_at": datetime.now(),
+            "sentiment_score": ai_result.get('sentiment_score', 0.5),
+            "sentiment_label": ai_result.get('sentiment_label', 'Neutral'),
+            "intent_distribution": merged_intent,
+            "dominant_intent": dominant_intent,
+            "complaint_count": merged_intent.get('Complaint', ai_result.get('complaint_count', 0)),
+            "sentiment_method": method,
+        }
+
+        # 5. 计算 pre_sale / post_sale score
+        intent_scores = TagCalculator.calculate_intent_scores(merged_intent)
+        result['pre_sale_score'] = intent_scores['pre_sale_score']
+        result['post_sale_score'] = intent_scores['post_sale_score']
+
+        # 6. 提取关键词（与 buyer_messages 一致，不依赖 AI 返回）
+        result['pre_sale_keywords'] = self._extract_keywords(buyer_messages, 'pre_sale')
+        result['post_sale_keywords'] = self._extract_keywords(buyer_messages, 'post_sale')
+
+        return result
 
     def _dominant_intent(self, intent_dist: Dict[str, int]) -> str:
         """Return dominant canonical intent, ignoring non-intent metadata."""
@@ -1001,7 +1040,14 @@ class BatchAnalyzer:
         Save analysis result to cache table
 
         使用 INSERT ... ON DUPLICATE KEY UPDATE 支持部分更新
-        同时更新情感分析的独立数据快照
+        同时更新情感分析的独立数据快照与增量分析字段
+
+        增量分析元数据由 process_buyer 计算后写入 result:
+            incremental_chat_count, incremental_chat_from_date, incremental_chat_to_date,
+            incremental_sentiment_label, incremental_sentiment_score, incremental_sentiment_analyzed_at
+
+        sentiment_analyzed_last_chat_date 写入值 = incremental_chat_to_date
+        （本次分析覆盖到的最早一条聊天时间；下次增量分析时作为起点）
         """
         from backend.database import Database
         from backend.config import settings
@@ -1012,18 +1058,23 @@ class BatchAnalyzer:
 
             buyer_nick = result.get('buyer_nick')
 
-            # 获取数据快照（情感分析只关心聊天时间）
-            last_chat = profile.get('last_chat_date') if profile else None
+            # 优先用增量分析的"覆盖到的时间"作为下次增量起点
+            # 兜底用 profile 的最后聊天时间（兼容老调用方）
+            last_chat = result.get('incremental_chat_to_date') or (
+                profile.get('last_chat_date') if profile else None
+            )
 
-            # 使用新的表结构（情感分析独立字段）
+            # 使用新的表结构（情感分析独立字段 + 增量分析字段）
             query = """
                 INSERT INTO buyer_ai_analysis_cache (
                     buyer_nick,
                     sentiment_score, sentiment_label, intent_distribution,
                     dominant_intent, pre_sale_keywords, post_sale_keywords,
                     complaint_count, sentiment_method,
-                    sentiment_analyzed_at, sentiment_analyzed_last_chat_date
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    sentiment_analyzed_at, sentiment_analyzed_last_chat_date,
+                    incremental_chat_count, incremental_chat_from_date, incremental_chat_to_date,
+                    incremental_sentiment_label, incremental_sentiment_score, incremental_sentiment_analyzed_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     sentiment_score = VALUES(sentiment_score),
                     sentiment_label = VALUES(sentiment_label),
@@ -1035,6 +1086,12 @@ class BatchAnalyzer:
                     sentiment_method = VALUES(sentiment_method),
                     sentiment_analyzed_at = VALUES(sentiment_analyzed_at),
                     sentiment_analyzed_last_chat_date = VALUES(sentiment_analyzed_last_chat_date),
+                    incremental_chat_count = VALUES(incremental_chat_count),
+                    incremental_chat_from_date = VALUES(incremental_chat_from_date),
+                    incremental_chat_to_date = VALUES(incremental_chat_to_date),
+                    incremental_sentiment_label = VALUES(incremental_sentiment_label),
+                    incremental_sentiment_score = VALUES(incremental_sentiment_score),
+                    incremental_sentiment_analyzed_at = VALUES(incremental_sentiment_analyzed_at),
                     updated_at = CURRENT_TIMESTAMP
             """
 
@@ -1049,7 +1106,14 @@ class BatchAnalyzer:
                 result.get('complaint_count', 0),
                 result.get('sentiment_method', 'unknown'),
                 datetime.now(),
-                last_chat
+                last_chat,
+                # 增量分析字段
+                result.get('incremental_chat_count', 0),
+                result.get('incremental_chat_from_date'),
+                result.get('incremental_chat_to_date'),
+                result.get('incremental_sentiment_label'),
+                result.get('incremental_sentiment_score'),
+                result.get('incremental_sentiment_analyzed_at'),
             ]
 
             db.execute_update(query, params)
@@ -1144,8 +1208,35 @@ class BatchAnalyzer:
 
                 try:
                     buyer_nick = buyer['buyer_nick']
-                    chats = self.get_buyer_chats(buyer_nick, limit=50)
-                    result = self.analyze_single_buyer(buyer_nick, chats)
+                    # 增量模式：since_msg_time = cache.sentiment_analyzed_last_chat_date
+                    # 首次分析（cache 还没有）since_msg_time 为 None，走全量路径
+                    # Round 4: 增量 chat 读取 (20+5=25, 而非 50)
+                    chats, is_incremental_flag, since = self.fetch_chats_for_analysis(
+                        buyer_nick, cache_record=buyer, analysis_type='sentiment',
+                    )
+                    if not chats:
+                        return  # 无新消息, 跳过
+                    result = self.analyze_single_buyer(buyer_nick, chats, is_incremental=is_incremental_flag)
+
+                    # 计算增量分析元数据，写入 cache.incremental_* 字段
+                    if chats:
+                        # chats 已按 msg_time DESC 排序；最末一条是最早的
+                        result['incremental_chat_count'] = len(chats)
+                        result['incremental_chat_from_date'] = since  # NULL for first-time
+                        result['incremental_chat_to_date'] = chats[0].get('msg_time')  # Round 4 bug fix: DESC排序下 chats[0] 是最新
+                        # 首次分析时也填 incremental_sentiment_label（视为"首次增量"）
+                        result['incremental_sentiment_label'] = result.get('sentiment_label', 'Neutral')
+                        result['incremental_sentiment_score'] = result.get('sentiment_score', 0.5)
+                        result['incremental_sentiment_analyzed_at'] = result.get('analyzed_at', datetime.now())
+                    else:
+                        # 没新聊天（不应发生，因 get_buyers_needing_analysis 不会触发）
+                        result['incremental_chat_count'] = 0
+                        result['incremental_chat_from_date'] = None
+                        result['incremental_chat_to_date'] = None
+                        result['incremental_sentiment_label'] = None
+                        result['incremental_sentiment_score'] = None
+                        result['incremental_sentiment_analyzed_at'] = None
+
                     self.save_analysis_result(result, profile=buyer)
                     return result
                 except Exception as e:

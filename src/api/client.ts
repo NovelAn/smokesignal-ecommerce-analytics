@@ -252,12 +252,13 @@ export const apiClient = {
    * 强制刷新AI分析
    * POST /api/v2/buyers/{user_nick}/force-refresh
    */
-  forceRefreshAnalysis: async (userNick: string, refreshType: 'persona' | 'sentiment' | 'all' = 'all') => {
+  forceRefreshAnalysis: async (userNick: string, refreshType: 'persona' | 'sentiment' | 'all' = 'all', opts?: { analysisMode?: 'incremental' | 'full' }) => {
+    const mode = opts?.analysisMode || 'incremental';
     const response = await fetch(
-      `${API_BASE}/buyers/${encodeURIComponent(userNick)}/force-refresh?refresh_type=${refreshType}`,
+      `${API_BASE}/buyers/${encodeURIComponent(userNick)}/force-refresh?refresh_type=${refreshType}&analysis_mode=${mode}`,
       { method: 'POST' }
     );
-    return handleResponse<{ buyer_nick: string; refresh_type: string; message: string }>(response);
+    return handleResponse<{ buyer_nick: string; refresh_type: string; analysis_mode: string; message: string }>(response);
   },
 
   // ========== 场外信息相关 ==========
@@ -604,6 +605,43 @@ export const apiClient = {
     );
     return handleResponse<HistoryBuyerTimelineResponse>(response);
   },
+
+  // ========== CRM 运营 (Round 1) ==========
+
+  /**
+   * 流失预警列表 (Round 3: 对比周期可配置)
+   * @param opts.window 对比周期, 60/90/180 (默认 90)
+   * @param opts.limit 最大返回行数 (1-200, 默认 100)
+   * @param opts.offset 分页偏移 (默认 0)
+   */
+  getChurnWarning: async (opts: { window?: 60 | 90 | 180; limit?: number; offset?: number } = {}): Promise<ChurnWarningResponse> => {
+    const { window = 90, limit = 100, offset = 0 } = opts;
+    const response = await fetch(`${API_BASE}/history/churn-warning?window=${window}&limit=${limit}&offset=${offset}`);
+    return handleResponse<ChurnWarningResponse>(response);
+  },
+
+  markService: async (body: ServiceMarkRequest): Promise<ServiceMarkResponse> => {
+    const response = await fetch(`${API_BASE}/service/mark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return handleResponse<ServiceMarkResponse>(response);
+  },
+
+  batchMarkService: async (body: ServiceMarkBatchRequest): Promise<ServiceMarkBatchResponse> => {
+    const response = await fetch(`${API_BASE}/service/mark-batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return handleResponse<ServiceMarkBatchResponse>(response);
+  },
+
+  getServiceHistory: async (buyerNick: string): Promise<ServiceHistoryResponse> => {
+    const response = await fetch(`${API_BASE}/service/history/${encodeURIComponent(buyerNick)}`);
+    return handleResponse<ServiceHistoryResponse>(response);
+  },
 };
 
 // ========== TypeScript 类型定义 ==========
@@ -905,6 +943,10 @@ export interface PriorityCustomer {
   persona_analyzed_last_purchase_date?: string | null;
   persona_analyzed_last_chat_date?: string | null;
   persona_refresh_required?: boolean;
+  // 客服操作记录 (Round 1 CRM)
+  service_status?: 'pending' | 'contacted' | 'resolved' | null;
+  service_updated_at?: string | null;
+  service_notes?: string | null;
 }
 
 export interface PriorityCustomersFilters {
@@ -1051,4 +1093,87 @@ export interface HistoryBuyerTimelineResponse {
   date_to: string;
   total_rows: number;
   data: HistoryBuyerTimelineRow[];
+}
+
+// ========== CRM Round 1 类型 ==========
+
+export interface ChurnWarningRow {
+  buyer_nick: string;
+  channel: string;
+  buyer_type: string;
+  vip_level: string;
+  /** Round 3 重命名: 原 segment_30d_ago, 避免 30 字面误导 (窗口已可配置) */
+  segment_prev: string;
+  segment_now: string;
+  /** Round 3 重命名: 原 churn_risk_30d_ago */
+  churn_risk_prev: string;
+  churn_risk_now: string;
+  l6m_netsales_change: number;
+  /** l6m_netsales 窗口内变化百分比 (可为 null: 窗口前为 0) */
+  l6m_change_pct: number | null;
+  last_purchase_date: string | null;
+  last_chat_date: string | null;
+  /** 入选原因, 多个用英文逗号分隔, 例如: "segment退化,churn高风险" */
+  selection_reasons: string;
+  /** 严重程度档位: 1=最严重 (重要→已流失/低价值), 2=中度, 3=轻度, 4=兜底 */
+  severity_tier: number;
+}
+
+export interface ChurnWarningResponse {
+  /** 对比周期 (60/90/180) */
+  window_days: number;
+  /** 当前档位应用的阈值 (产品配置, route 层注入) */
+  applied_thresholds: {
+    l6m_drop_pct: number;
+    l6m_floor_yuan: number;
+  };
+  limit: number;
+  offset: number;
+  /** include_total=true 时返回, 否则 absent */
+  total?: number;
+  data: ChurnWarningRow[];
+}
+
+export type ServiceStatus = 'pending' | 'contacted' | 'resolved';
+
+export interface ServiceMarkRequest {
+  buyer_nick: string;
+  status: ServiceStatus;
+  notes?: string;
+}
+
+export interface ServiceMarkResponse {
+  success: boolean;
+  affected_rows: number;
+  buyer_nick: string;
+  previous_status: ServiceStatus | null;
+  new_status: ServiceStatus;
+}
+
+export interface ServiceMarkBatchRequest {
+  buyer_nicks: string[];
+  status: ServiceStatus;
+  notes?: string;
+}
+
+export interface ServiceMarkBatchResponse {
+  success: boolean;
+  affected_rows: number;
+  processed: string[];
+  failed: string[];
+}
+
+export interface ServiceHistoryRow {
+  id: number;
+  buyer_nick: string;
+  status: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceHistoryResponse {
+  buyer_nick: string;
+  total: number;
+  data: ServiceHistoryRow[];
 }
