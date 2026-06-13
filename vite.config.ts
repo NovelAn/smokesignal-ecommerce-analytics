@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => {
             target: 'http://localhost:8000',
             changeOrigin: true,
             secure: false,
+            timeout: 120000,
+            proxyTimeout: 120000,
           },
           '/uploads': {
             target: 'http://localhost:8000',

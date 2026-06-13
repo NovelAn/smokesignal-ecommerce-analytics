@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   LineChart,
   Line,
@@ -112,6 +112,11 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [crmTargetBuyer, setCrmTargetBuyer] = useState<string | null>(null);
   const [crmNavigationToken, setCrmNavigationToken] = useState(0);
+  // Back to Overview 定位: 记录上次点击的 buyer + 页码
+  const [lastClickedBuyerNick, setLastClickedBuyerNick] = useState<string | null>(null);
+  const [lastClickedPage, setLastClickedPage] = useState<number>(1);
+  // Back 触发器：每次需要触发高亮 + 滚动时自增
+  const [highlightTrigger, setHighlightTrigger] = useState(0);
   const [mountedTabs, setMountedTabs] = useState<Record<AppTab, boolean>>({
     overview: true,
     analysis: false,
@@ -125,12 +130,28 @@ export default function App() {
     ));
   }, [activeTab]);
 
-  const openBuyerInCrm = (buyerNick: string) => {
+  const openBuyerInCrm = (buyerNick: string, currentPage: number = 1) => {
     setCrmTargetBuyer(buyerNick);
     setCrmNavigationToken(prev => prev + 1);
     setActiveTab('analysis');
     setIsMobileMenuOpen(false);
+    // 记录点击的 buyer + 当前页（用于 Back 时定位 + scrollIntoView）
+    setLastClickedBuyerNick(buyerNick);
+    setLastClickedPage(currentPage);
+    // 自增触发器，让 PriorityAttentionBoard useEffect 重跑（即使 buyer 相同）
+    setHighlightTrigger(prev => prev + 1);
   };
+
+  // Back to Overview: 切回 overview + 触发下游高亮 effect 重跑
+  const handleBackToOverview = useCallback(() => {
+    setActiveTab('overview');
+    setHighlightTrigger(prev => prev + 1);
+  }, []);
+
+  // useCallback 稳定引用，避免下游 useEffect 反复触发
+  const handleClearClickedHighlight = useCallback(() => {
+    setLastClickedBuyerNick(null);
+  }, []);
 
   const NavTab = ({ id, icon: Icon, label }: { id: AppTab, icon: any, label: string }) => (
     <button
@@ -200,16 +221,23 @@ export default function App() {
           <div className="max-w-[1600px] mx-auto h-full flex flex-col">
             {mountedTabs.overview && (
               <div className={activeTab === 'overview' ? 'contents' : 'hidden'}>
-                <DashboardOverview onOpenBuyerInCrm={openBuyerInCrm} />
+                <DashboardOverview
+                  onOpenBuyerInCrm={openBuyerInCrm}
+                  lastClickedBuyerNick={lastClickedBuyerNick}
+                  lastClickedPage={lastClickedPage}
+                  onClearClickedHighlight={handleClearClickedHighlight}
+                  highlightTrigger={highlightTrigger}
+                  appActiveTab={activeTab}
+                />
               </div>
             )}
             {mountedTabs.analysis && (
               <div className={activeTab === 'analysis' ? 'contents' : 'hidden'}>
                 <ChatAnalysis
                   initialBuyerNick={crmTargetBuyer}
-                  initialSubTab={crmTargetBuyer ? 'chat' : undefined}
+                  initialSubTab={crmTargetBuyer ? 'profile' : undefined}
                   navigationToken={crmNavigationToken}
-                  onBackToOverview={() => setActiveTab('overview')}
+                  onBackToOverview={handleBackToOverview}
                 />
               </div>
             )}

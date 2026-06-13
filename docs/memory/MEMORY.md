@@ -31,12 +31,65 @@
 
 ## 已完成功能
 
-### 2026-06-11
-- ✅ **start-backend.sh 启动失败修复**（main: `08d5785`）
-  - Bug: 脚本 `cd "$(dirname "$0")"` 把自己 cd 进了 `scripts/`，再跑 `python -m backend.main` 找不到兄弟目录的 `backend` 包 → `ModuleNotFoundError: No module named 'backend'`
-  - Fix: `cd "$(dirname "$0")/.."` 回到项目根
-  - 验证: HTTP 200 `/`、`/docs`、`/openapi.json` 全部正常
+### 2026-06-13 (AI 分析优化 Round 4-5)
+- ✅ **Round 4: 增量 AI 分析** (3a71e1f)
+  - 首次 50 条 / 重刷 20+5=25 条, 后续调到 50+动态
+  - helper `fetch_chats_for_analysis(buyer_nick, cache_record, analysis_type)` 统一入口
+  - 动态上下文窗口: 增量越少, 历史越多 (n≤3 拿+15历史, n≤9 拿+10, n≤19 拿+5, n≤50 拿+0, n>50 截到50+0)
+  - 写回 cache 用 `chats[0].msg_time` (DESC 排序下最新) 而非 `chats[-1]`
+  - SQL 已有 `since_msg_time` 支持, 不改 SQL
 
+- ✅ **R5: persona prompt 精简** (677d6a6 + ec39653 + 36fa945)
+  - profile 字段 25→11 (砍 4 基础画像前端已有 + 8 冗余聚合 + 1 时间, 保留 rolling_24m VIP 依据)
+  - compact_context 截断参数化: full=15000, 增量=8000
+  - JSON 顺序重排: chat_insights → recent_chats 在前 (截断优先保留 chat)
+  - 复购频率预计算 helper (`首次购买/高频<60天/中频/中低频/低频`), 禁止 LLM 算
+  - key_interests 2-4 个短语标签 (2-6字), pain_points 1-3 个短语标签
+  - 实测 MiniMax L1 响应 78s→43s
+
+- ✅ **修复 + 防御性**
+  - ca69f2b: 修 R5 引入的两个 f-string NameError (MiniMax + DeepSeek 都失败→L3 兜底)
+  - 60cfbc8: JSON 顺序 chat_first (116 单客户 chat 数据被 order 膨胀挤掉)
+  - 2329f23: 截断参数化 full=15000 / 增量=8000
+  - f92204b: incremental_new_limit 20→50 (男装奢品客户 30-50/周很常见)
+  - ec3385e: 移除"凑单"标签, 改用中性"同日多件"+"连带率高"
+  - bd8b587: 统一 persona prompt 风格 (向 DeepSeek V4 Pro 看齐)
+  - 79e4e3c: MiniMax 429 `max_retries=0` 秒降级 L2
+  - 2e2178a: Vite proxy timeout 30s→120s (DeepSeek 22s+ 不再误报"AI分析失败")
+  - 3c8707e: 增量模式正确读所有新消息 (SQL `LIMIT 200` 兜底, Python 端 `[:50]` 截断)
+  - 8589cd4: 动态上下文窗口 (增量越少, 历史越多)
+
+- ✅ **测试**
+  - python3 -m py_compile: 0 错误
+  - npx tsc --noEmit: 0 错误
+  - 用户验证 2 客户画像质量 "还行, 过的去"
+  - PR #9 已合并到 main
+
+### 2026-06-12 (CRM Round 2 + Round 3 + 4 bug 修复)
+- ✅ **Round 2: 流失预警 3 条件 + 入选原因 UI**
+  - SQL: 加 _cond_a_severe / severity_tier (1-4) / selection_reasons / l6m_change_pct
+  - 保留 MAX(snapshot_date) 兜底, h_prev COALESCE 到 MIN(snapshot_date)
+  - route: GET /api/v2/history/churn-warning (limit/offset/include_total)
+  - 字段命名: segment_30d_ago / churn_risk_30d_ago (Round 3 后会重命名为 _prev)
+
+- ✅ **Round 3: 流失预警对比周期可配置 (60D/90D/180D, 默认 90)**
+  - 业务背景: 男装奢品客群复购周期 3-6 月, 30D 窗口漏季度性消费降级客户
+  - SQL 命名参数化: INTERVAL 30 DAY -> INTERVAL %(window_days)s DAY, l6m_floor 10000 -> %(l6m_floor)s
+  - route 加 window 参数 (60/90/180 校验) + 阈值表 (1万/1.5万/2万)
+  - 段位退化/churn 升级阈值 3 档统一不变, 只有购买力坍塌基线随档位变
+  - 字段重命名: segment_30d_ago -> segment_prev, churn_risk_30d_ago -> churn_risk_prev
+  - response 加 window_days + applied_thresholds 字段
+  - 前端 PriorityAttentionBoard: useState<60|90|180>(90) + 60D/90D/180D 分段控件 + 阈值动态文字
+  - Spec: docs/superpowers/specs/2026-06-12-churn-window-config-design.md
+  - Plan: docs/superpowers/plans/2026-06-12-churn-window-config.md
+
+- ✅ **Round 3 后续 4 bug 修复 (commit e57477e)**
+  - Bug #1 字段错位: ChurnRowCells 内部多 1 个色条 td 跟 thead 8 列对不上, 改用 border-l-4
+  - Bug #2 筛选不生效: churn tab 客户端 filter (后端 churn-warning 不支持 filter, 避免再加 SQL)
+  - Bug #3 scroll to 原位: 删 "只 priority tab 触发" gate, 两个 tab 都跑 scroll 逻辑
+  - Bug #4 跟进客户 527 全量: use_default_filter 派生 (空 filter -> true, 非空 -> false)
+  - TypeScript: 0 错误
+  - 端到端: curl 3 档 + 校验 + 默认值全过
 ### 2026-03-24
 - ✅ **关键词分类优化和统计去重**
   - 移除有包含关系的关键词（长词包含短词 → 只保留短词）
