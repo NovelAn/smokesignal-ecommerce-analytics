@@ -36,9 +36,9 @@
 - Intent 分类扩展（新增 Inventory Inquiry）
 - 定时任务方案设计
 
-**保留现有组件（不做修改）：**
+**保留现有组件（部分扩展）：**
 - 4-Group 指标卡片（Customer Health / Follow-up Priority / Sales Opportunities / Service Quality）
-- Keyword & Issue Analysis 组件（9 大类关键词分析，针对 SMOKER 客户）
+- Keyword & Issue Analysis 组件（扩展：从 9 大类扩到 10 大类，新增「库存查询」类目）
 - Priority List 组件（CRM 行动客户列表）
 
 **不包含：**
@@ -123,7 +123,25 @@ Dashboard Overview
 - 支持客户类型筛选（SMOKER/VIC/BOTH/SEASON/BULK/NON_TARGET）
 - 现有 `KeywordAnalysisPanel` 组件，不做修改
 
-**说明：** 此组件保留现有功能，不参与本次改造。
+**与 Inventory Inquiry 的整合：**
+
+本次新增的 Inventory Inquiry Intent 分类产生的客户数据，需要整合到此关键词分析组件中：
+
+- **数据源：** 来自 `buyer_ai_analysis_cache` 表中 `dominant_intent = 'Inventory Inquiry'` 或 `intent_distribution` 包含 Inventory Inquiry 的客户
+- **整合方式：** 在 9 大类目之外，新增**第 10 类：「库存查询」**
+- **展示位置：** Donut 环形图中作为独立扇区，横向柱状图中作为独立条
+- **数据来源：**
+  - Phase 2（Intent 分类扩展）完成后，新对话自动识别
+  - **不**回填历史数据
+  - 预计 1-2 周后开始有数据展示
+
+**实施说明：**
+- 修改 `backend/ai/keyword_categories.py`，新增第 10 类 `inventory_inquiry`
+- 更新 `KeywordAnalysisPanel.tsx` 组件配置，加入新类目
+- 修改 `backend/api/target_routes.py` 中的 keyword-analysis 接口，聚合 Inventory Inquiry 客户
+- **时间节点：** 在 Phase 2 完成后开始实施，作为 Phase 3 的一部分
+
+**说明：** 此组件保留核心功能，本次改造加入库存查询类目的数据展示。
 
 #### 3.2.1 VIC 群体画像卡片
 
@@ -628,8 +646,10 @@ const [vicPersona, trends, anomalies] = await Promise.all([
 ### Phase 3: API 开发（3-4 天）
 
 1. 实现 5 个新 API 端点
-2. 添加单元测试
-3. 测试缓存策略
+2. 修改 keyword-analysis 接口，聚合 Inventory Inquiry 客户
+3. 更新 `KeywordAnalysisPanel` 组件配置，新增第 10 类「库存查询」
+4. 添加单元测试
+5. 测试缓存策略
 
 ### Phase 4: 前端开发（5-7 天）
 
