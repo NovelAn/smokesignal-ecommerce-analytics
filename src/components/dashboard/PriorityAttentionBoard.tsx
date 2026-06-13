@@ -355,6 +355,8 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
   // Round 3: 流失预警对比周期可配置 (60/90/180)
   const [churnWindowDays, setChurnWindowDays] = useState<60 | 90 | 180>(90);
   const [currentPage, setCurrentPage] = useState(1);
+  // 内部 trigger: 数据加载完后自增, 强制 scroll useEffect 重跑
+  const [scrollTrigger, setScrollTrigger] = useState(0);
 
   // 筛选状态
   const [filters, setFilters] = useState<PriorityCustomersFilters>({
@@ -393,6 +395,8 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
   // ========== Round 1: Back to Overview 高亮定位 ==========
   const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
   const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // 跟踪 customers 长度, 避免 scroll useEffect 提前用 customers (TDZ)
+  const customersLenRef = useRef(0);
   // 整个 PriorityAttentionBoard 的容器 ref — 用作外层 main 滚动的目标点
   // 解决 tr 嵌套在 max-h-[400px] overflow-y-auto 内层时 scrollIntoView 只能滚内层的问题
   const boardRef = useRef<HTMLDivElement>(null);
@@ -411,7 +415,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
     let rowTimer: NodeJS.Timeout | null = null;
     let boardRetry = 0;
     let rowRetry = 0;
-    const MAX_RETRY = 20; // 最多重试 1 秒（20 * 50ms）
+    const MAX_RETRY = 40; // 最多重试 2 秒 (40 * 50ms), 兜底慢加载
 
     // 两步滚动：
     //  1. boardRef.scrollIntoView — 把外层 main 滚到 PriorityAttentionBoard 顶部
@@ -472,7 +476,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
       if (rowTimer) clearTimeout(rowTimer);
       // 注意: 不 clear highlightTimerRef — 让 timer 自己跑完或下次 useEffect 重入时清
     };
-  }, [highlightBuyerNick, highlightBuyerPage, activeTab, onClearClickedHighlight, highlightTrigger, appActiveTab]);
+  }, [highlightBuyerNick, highlightBuyerPage, activeTab, onClearClickedHighlight, highlightTrigger, appActiveTab, scrollTrigger]);
   //  ↑ 移除 currentPage（避免 setCurrentPage 触发 effect re-run 导致 cleanup）
   //  ↑ 加 activeTab（priority tab 切回时重跑 highlight）
 
@@ -549,6 +553,15 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
   const prevCustomersRef = useRef<PriorityCustomer[]>([]);
   const customers = response?.customers || [];
   const hasData = customers.length > 0;
+  // Bug 修复: 数据加载完后自增 scrollTrigger, 触发 scroll useEffect 重跑
+  const prevCustomersLenRef = useRef(0);
+  useEffect(() => {
+    if (customers.length > prevCustomersLenRef.current && highlightBuyerNick) {
+      // 触发 scroll effect 重跑: 通过自增 navigationToken-like trigger
+      setScrollTrigger((prev) => prev + 1);
+    }
+    prevCustomersLenRef.current = customers.length;
+  }, [customers.length, highlightBuyerNick]);
 
   // 当有新数据时，更新ref
   useEffect(() => {

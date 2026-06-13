@@ -1143,7 +1143,7 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
                                 )}
                              </h2>
                              <div className="flex items-center gap-3 text-xs text-notion-muted mt-0.5">
-                                <span className="flex items-center gap-1"><MapPin size={12} /> {currentSession.profile.city || 'Unknown'}</span>
+                                <span className="flex items-center gap-1"><MapPin size={12} /> {buyerProfile?.city ?? currentSession.profile.city ?? '加载中…'}</span>
                              </div>
                              {/* Lifetime Metrics */}
                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs">
