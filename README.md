@@ -238,7 +238,7 @@ For SMOKER customers (Pipes/Lighters buyers):
 
 **Features:**
 - Pre-computed cache for fast aggregation
-- Multi-buyer-type filtering (SMOKER/VIC/BOTH/NON_TARGET)
+- Multi-buyer-type filtering (SMOKER/VIC/BOTH/SEASON/BULK/NON_TARGET)
 - De-duplication rules (remove包含关系)
 - Visualization: Donut chart + horizontal bar chart
 

@@ -298,7 +298,13 @@ Based on **Rolling 24-Month Net Sales**:
 
 - **VIP Level**: V3/V2/V1/V0/Non-VIP (based on Rolling 24M net sales)
 - **Customer Type**: New/Old (from `client_monthly_tag` field)
-- **Buyer Type**: SMOKER/VIC/BOTH/NON_TARGET
+- **Buyer Type**: SMOKER/VIC/BOTH/SEASON/BULK/NON_TARGET
+  - **SMOKER**: Purchased Pipes or Lighters categories
+  - **VIC**: Rolling 24M net sales >= ¥30,000
+  - **BOTH**: Both SMOKER and VIC
+  - **SEASON**: Purchased current season featured products (L3M), not VIC/SMOKER
+  - **BULK**: Large orders (L3M, single order >= 3 items AND >= ¥20,000), not VIC/SMOKER/SEASON
+  - **NON_TARGET**: None of the above
 - **Discount Sensitivity**: High/Medium/Low (based on discount order ratio)
 - **Churn Risk**: High/Medium/Low (based on purchase and chat recency)
 - **Follow Priority**: Urgent/High/Medium/Low (AI-driven)
