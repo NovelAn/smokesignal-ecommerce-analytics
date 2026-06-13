@@ -1085,20 +1085,20 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                   {/* Key Interest */}
                   <td className="px-2 py-1">
                     <span
-                      className="text-notion-text line-clamp-1 max-w-[80px] block"
+                      className="text-notion-text line-clamp-2 max-w-[140px] block text-[10px] leading-tight"
                       title={parseJsonArray(customer.persona_key_interests).join('; ')}
                     >
-                      {parseJsonArray(customer.persona_key_interests)[0] || '-'}
+                      {parseJsonArray(customer.persona_key_interests).slice(0, 3).join(', ') || '-'}
                     </span>
                   </td>
 
                   {/* Pain Point */}
                   <td className="px-2 py-1">
                     <span
-                      className="text-notion-text line-clamp-1 max-w-[80px] block"
+                      className="text-notion-text line-clamp-2 max-w-[140px] block text-[10px] leading-tight"
                       title={parseJsonArray(customer.persona_pain_points).join('; ')}
                     >
-                      {parseJsonArray(customer.persona_pain_points)[0] || '-'}
+                      {parseJsonArray(customer.persona_pain_points).slice(0, 3).join(', ') || '-'}
                     </span>
                   </td>
                   {/* 操作 - Round 1 CRM: 按钮组 + 30秒撤销 */}
