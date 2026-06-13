@@ -592,19 +592,20 @@ class BatchAnalyzer:
         # 动态上下文策略: 增量越少, 历史越多 (凑上下文); 增量越多, 历史越少 (最近的更相关)
         n = len(new_chats_raw)
         if n <= 3:
-            # 极少新消息: 拿全部 + 15 条历史
             new_chats = new_chats_raw  # 全部拿 (最多 3)
             context_n = 15
         elif n <= 9:
-            # 少量新消息: 拿全部 + 10 条历史
             new_chats = new_chats_raw
             context_n = 10
         elif n <= 19:
-            # 中等: 拿全部 + 5 条历史
             new_chats = new_chats_raw
             context_n = 5
+        elif n <= 50:
+            # 中等量 (20-50): 拿全部 (都在 50 截断内), 不拼历史
+            new_chats = new_chats_raw
+            context_n = 0
         else:
-            # 大量新消息 (20+): 截断到最近 20, 不拼历史
+            # 大量 (50+): 截断到 50, 不拼历史 (最近的 50 条足够)
             new_chats = new_chats_raw[:incremental_new_limit]
             context_n = 0
 
