@@ -579,38 +579,45 @@ class BatchAnalyzer:
             chats = self.get_buyer_chats(buyer_nick, limit=full_limit)
             return chats, False, None
 
-        # 增量模式: 拿 since 之后所有新消息 (limit 设大防止截断)
-        # 然后 Python 端再保留最近 incremental_new_limit 条 (DESC)
+        # 增量模式: 拿 since 之后所有新消息 (SQL limit=200 兜底防失控)
+        # Python 端按增量条数动态决定截断点 + 历史上下文条数
         new_chats_raw = self.get_buyer_chats(
             buyer_nick, limit=200, since_msg_time=since
         )
-        # SQL ORDER BY msg_time DESC LIMIT 200, 拿最近 200 条新消息
-        # 然后取前 incremental_new_limit 条
-        new_chats = new_chats_raw[:incremental_new_limit]
 
         # 无新消息: 返回空, 调用方应跳过 AI 调用
-        if not new_chats:
+        if not new_chats_raw:
             return [], True, since
 
-        # 额外取 context_window 条历史上下文 (since 之前的)
-        # SQL 拿 context_window+len(new_chats) 条, 但要拿全表的 since 之前部分
-        # 用反向查询: 取增量窗口 (new_chats 最末一条) 之前的消息
-        if new_chats and context_window > 0:
-            oldest_new_msg_time = new_chats[-1].get("msg_time")
-            if oldest_new_msg_time:
-                # 取 since 之前到 oldest_new 之间的消息 (作为上下文)
-                # 用 SQL: WHERE msg_time < since ORDER BY msg_time DESC LIMIT context_window
-                context_chats_raw = self.get_buyer_chats(
-                    buyer_nick, limit=context_window, since_msg_time=None
-                )
-                context_chats = [
-                    ch for ch in context_chats_raw
-                    if ch.get("msg_time") and str(ch.get("msg_time")) < str(since)
-                ][:context_window]
-            else:
-                context_chats = []
+        # 动态上下文策略: 增量越少, 历史越多 (凑上下文); 增量越多, 历史越少 (最近的更相关)
+        n = len(new_chats_raw)
+        if n <= 3:
+            # 极少新消息: 拿全部 + 15 条历史
+            new_chats = new_chats_raw  # 全部拿 (最多 3)
+            context_n = 15
+        elif n <= 9:
+            # 少量新消息: 拿全部 + 10 条历史
+            new_chats = new_chats_raw
+            context_n = 10
+        elif n <= 19:
+            # 中等: 拿全部 + 5 条历史
+            new_chats = new_chats_raw
+            context_n = 5
         else:
-            context_chats = []
+            # 大量新消息 (20+): 截断到最近 20, 不拼历史
+            new_chats = new_chats_raw[:incremental_new_limit]
+            context_n = 0
+
+        # 拿历史上下文 (since 之前的)
+        context_chats = []
+        if context_n > 0 and since:
+            context_chats_raw = self.get_buyer_chats(
+                buyer_nick, limit=context_n, since_msg_time=None
+            )
+            context_chats = [
+                ch for ch in context_chats_raw
+                if ch.get("msg_time") and str(ch.get("msg_time")) < str(since)
+            ][:context_n]
 
         # 合并: 新消息 (DESC) + 历史上下文 (DESC)
         chats = list(new_chats) + list(context_chats)
