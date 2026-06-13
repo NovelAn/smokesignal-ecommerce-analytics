@@ -36,6 +36,11 @@
 - Intent 分类扩展（新增 Inventory Inquiry）
 - 定时任务方案设计
 
+**保留现有组件（不做修改）：**
+- 4-Group 指标卡片（Customer Health / Follow-up Priority / Sales Opportunities / Service Quality）
+- Keyword & Issue Analysis 组件（9 大类关键词分析，针对 SMOKER 客户）
+- Priority List 组件（CRM 行动客户列表）
+
 **不包含：**
 - Chat & CRM 详情页面修改
 - 数据采集和 ETL 流程修改
@@ -53,6 +58,7 @@ Dashboard Overview
 │   ├── 预设时间段：7D / 15D / 1M / 1Q / 1Y
 │   └── 自定义日期范围选择器
 ├── 4-Group 指标卡片（保留现有）
+├── Keyword & Issue Analysis 组件（保留现有，9 大类关键词分析）
 └── 双 Tab 内容区
     ├── Tab 1: 趋势概览（数据分析）
     │   ├── VIC 群体画像卡片
@@ -94,6 +100,30 @@ Dashboard Overview
 - 所有 API 调用带上 `start_date` 和 `end_date` 参数
 
 ### 3.2 Tab 1: 趋势概览
+
+#### 3.2.0 Keyword & Issue Analysis 组件（保留）
+
+**位置：** 4-Group 指标卡片下方，双 Tab 内容区上方
+
+**功能：** 9 大类关键词分析（针对 SMOKER 客户）
+
+**9 大类目：**
+1. 赠品（Gifts）
+2. 包装（Packaging）
+3. 维修保养（Maintenance）
+4. 退换货（Returns/Exchanges）
+5. 产品推荐咨询（Recommendations）
+6. 产品参数咨询（Specs）
+7. 价格（Price）
+8. 物流（Logistics）
+9. 投诉反馈（Complaints）
+
+**视觉呈现：**
+- Donut 环形图 + 横向柱状图
+- 支持客户类型筛选（SMOKER/VIC/BOTH/SEASON/BULK/NON_TARGET）
+- 现有 `KeywordAnalysisPanel` 组件，不做修改
+
+**说明：** 此组件保留现有功能，不参与本次改造。
 
 #### 3.2.1 VIC 群体画像卡片
 
@@ -611,7 +641,11 @@ const [vicPersona, trends, anomalies] = await Promise.all([
 3. 行动看板 tab：
    - 异常客户预警卡片
    - 库存需求组件
-4. 集成测试
+4. 保留组件集成：
+   - 4-Group 指标卡片（已有）
+   - Keyword & Issue Analysis 组件（已有，9 大类关键词分析）
+   - Priority List 组件（已有）
+5. 集成测试
 
 ### Phase 5: 测试与优化（2-3 天）
 
