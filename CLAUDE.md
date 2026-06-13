@@ -4,14 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SmokeSignal Analytics is a Notion-style CRM dashboard for e-commerce customer service analytics. It visualizes customer sentiment, chat history, purchase behavior, and AI-powered customer insights for e-commerce operations (specifically Taobao/Tmall).
+SmokeSignal Analytics is a Notion-style CRM dashboard for luxury e-commerce customer service analytics. It visualizes customer sentiment, chat history, purchase behavior, and AI-powered customer insights for Taobao/Tmall operations (specifically dunhill China).
 
 **Tech Stack:**
 
-- **Frontend**: React 19.2.3 + TypeScript + Vite 6.2.0 + Recharts 3.6.0
-- **Backend**: FastAPI (Python) + MySQL/PostgreSQL
-- **AI**: Multi-model pipeline (DeepSeek-V3.2 primary + Zhipu GLM-4.7 fallback + Rule-based fallback) for persona and sentiment/intent analysis
-- **Data Source**: Playwright-based crawler from Qianniu Workbench (Taobao/Tmall)
+- **Frontend**: React 19 + TypeScript + Vite 6 + Recharts 3.6
+- **Backend**: FastAPI (Python) + MySQL 8.0+
+- **AI**: 3-tier intelligent routing (MiniMax M3 → DeepSeek V4 Pro/Flash → Rule-based) with 84% cost savings
+- **Data Source**: Playwright-based crawler from Qianniu Workbench
 
 ## Common Development Commands
 
@@ -21,7 +21,7 @@ SmokeSignal Analytics is a Notion-style CRM dashboard for e-commerce customer se
 # Install dependencies
 npm install
 
-# Start dev server (runs on http://localhost:3000)
+# Start dev server (http://localhost:3000)
 npm run dev
 
 # Build for production
@@ -34,15 +34,15 @@ npm run preview
 ### Backend Development
 
 ```bash
-# Start backend server (runs on http://localhost:8000)
+# Start backend server (http://localhost:8000)
 ./scripts/start-backend.sh  # Linux/Mac
 scripts\start-backend.bat   # Windows
 
 # Or directly with Python
 python -m backend.main
 
-# Run backend with uvicorn (from backend directory)
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# Run with uvicorn
+python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Testing
@@ -60,12 +60,15 @@ python tests/integration/test_api_integration.py
 ### Database Operations
 
 ```bash
-# Deploy target buyers precomputed table (creates table, stored procedure, and daily update event)
+# Deploy target buyers precomputed table (creates table, stored procedures, events, partitions)
 ./scripts/deploy_mysql.sh  # Linux/Mac
 # Note: Update database credentials in the script first
 
 # Manual refresh of precomputed data
-mysql -u username -p database_name -e "CALL refresh_target_buyers_precomputed();"
+mysql -u username -p database_name -e "CALL refresh_target_buyers_asof(CURDATE());"
+
+# Create daily snapshot
+mysql -u username -p database_name -e "CALL snapshot_target_buyers_history();"
 ```
 
 ## Architecture
@@ -79,60 +82,179 @@ Playwright Crawler (chat-history-crawler project)
     ↓
 MySQL Database (dunhill_t01_trade_line VIEW, chat_history table)
     ↓
-FastAPI Backend (Buyer Analysis + Target Buyer Optimization)
+FastAPI Backend (Target Buyer Analysis + AI Persona + Keyword Analysis)
     ↓
-React Frontend (Dashboard)
+React Frontend (Dashboard Overview + Chat & CRM + Configuration)
 ```
 
 ### Backend Architecture
 
-**Two-Tier API System:**
+**API Structure:**
 
-1. **v1 API (`/api/v1/*`)** - Real-time queries from VIEW
-   - Direct queries to `dunhill_t01_trade_line` VIEW
-   - Slow performance (10-30 seconds per query)
-   - Used for: Legacy functionality, real-time data needs
-2. **v2 API (`/api/v2/*`)** - Precomputed table (OPTIMIZED) ⭐
-   - Uses `target_buyers_precomputed` table
-   - **10-50x faster** performance (< 0.5 seconds)
-   - Auto-updates daily at 11:00 AM via MySQL event
-   - Filters for high-value customers: Smoker (Pipes/Lighters) + VIC (Rolling 24M >= 30K)
-   - **Preferred for all new development**
+All production APIs use `/api/v2/*` prefix (v1 deprecated):
+
+- `/api/v2/buyers/*` - Customer profiles, lists, filtering
+- `/api/v2/dashboard/*` - Metrics, trends, YoY comparison
+- `/api/v2/ai/*` - Persona analysis, sentiment/intent, batch operations
+- `/api/v2/history/*` - Time-series trends (pool summary, segment trends, VIP trends)
+- `/api/v2/priority-customers` - CRM actionable list (churn warning + high-value opportunities)
+- `/api/v2/keyword-analysis` - 9-category keyword aggregation for SMOKER customers
+- `/api/v2/external/*` - Offline consumption and private domain communication tracking
 
 **Key Backend Components:**
 
-- `backend/analytics/target_buyer_analyzer.py` - Optimized analyzer using precomputed table
-- `backend/analytics/buyer_analyzer.py` - Legacy analyzer (slow)
+- `backend/api/target_routes.py` - Main API routes (2,683 lines)
+- `backend/api/external_routes.py` - External records API
+- `backend/analytics/target_buyer_analyzer.py` - Customer analytics engine (precomputed table)
+- `backend/analytics/keyword_categories.py` - 9-category keyword taxonomy
 - `backend/database/target_buyer_queries.py` - SQL query loader (loads from .sql files)
-- `backend/database/queries.py` - Legacy query builder
-- `backend/api/target_routes.py` - v2 API routes (prefix: `/api/v2`)
-- `backend/ai/analyzer_orchestrator.py` - Persona orchestration with multi-level fallback and cache
-- `backend/ai/deepseek_client.py` - Primary AI client for persona and sentiment/intent
-- `backend/ai/zhipu_client.py` - Fallback AI client (GLM-4.7)
-- `backend/ai/batch_analyzer.py` - Batch sentiment/intent analysis pipeline
+- `backend/ai/analyzer_orchestrator.py` - Multi-model orchestration with fallback
+- `backend/ai/model_selection.py` - Intelligent model routing (complexity scoring)
+- `backend/ai/minimax_client.py` - MiniMax M3 client (L1 - primary)
+- `backend/ai/deepseek_client.py` - DeepSeek V4 Pro/Flash client (L2 - backup)
+- `backend/ai/rule_based_analyzer.py` - Rule-based fallback (L3)
 
-### SQL File Organization
+### AI Model Architecture
 
-**SQL queries are stored as separate files** (not embedded in Python code):
+**3-Tier Intelligent Routing with Cost Optimization:**
 
-- `backend/database/sql/target_buyers/*.sql` - 10 optimized query files for v2 API
-- `backend/database/sql/create_target_buyers_precomputed.sql` - Table creation + stored procedure + auto-update event
-- `backend/database/sql/*.sql` - Various database scripts and fixes
+```
+┌─────────────────────────────────────────────────────────────┐
+│  L1: MiniMax-M3 (Primary - Monthly Subscription)           │
+│  • All persona analysis attempts start here                 │
+│  • ¥0 per call (unlimited within plan)                      │
+│  • max_retries=0 for fast fallback on 429                   │
+└─────────────────────────────────────────────────────────────┘
+                              │ Fallback (429/timeout/error)
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  L2: DeepSeek V4 (Backup - Pay-per-token)                  │
+│  • DeepSeek-V4-Pro: Complex (≥30 messages / high-value)    │
+│    - Two-stage reasoning (evidence → persona)               │
+│    - Cost: ~¥7/analysis                                     │
+│  • DeepSeek-V4-Flash: Simple (10-20 messages)              │
+│    - Single-pass analysis                                   │
+│    - Cost: ~¥3/analysis                                     │
+└─────────────────────────────────────────────────────────────┘
+                              │ Fallback (API error)
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  L3: Rule-Based Engine (Final Fallback)                    │
+│  • Pure Python logic, 100% availability                     │
+│  • Zero cost                                                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Cost Optimization Strategy (84% savings):**
+
+1. **Intelligent Model Routing** (model_selection.py):
+   - Complexity scoring based on chat count, customer value, order diversity
+   - VIC/V3/V2 customers → DeepSeek Pro (highest quality)
+   - 10-20 chats → DeepSeek Flash (balanced)
+   - <10 chats or no chats → MiniMax (low cost)
+
+2. **Incremental Analysis** (analyzer_orchestrator.py):
+   - First-time: 50 recent chats
+   - Refresh: 20 new + 5 historical context (dynamic window)
+   - Cache invalidation: snapshot-based (analyzed_last_purchase_date / analyzed_last_chat_date)
+   - No TTL - only re-analyze when data changes
+
+3. **Context Optimization**:
+   - Profile fields: 25 → 11 (-56% reduction)
+   - Chat-first JSON ordering (prevents truncation)
+   - Max context: 15K chars (full) / 8K chars (incremental)
+
+4. **Performance Benchmarks**:
+   - MiniMax M3: 43s (after Round 5 optimization, was 78s)
+   - DeepSeek V4 Flash: 3-5s
+   - DeepSeek V4 Pro: 7-10s (two-stage reasoning)
+
+### Database Architecture
+
+**Core Tables:**
+
+1. **target_buyers_precomputed** - Main 360° customer view
+   - Historical metrics: GMV, refunds, net sales, orders, refund rate
+   - Time windows: Rolling 24M (VIP calculation), L6M, L1Y
+   - Chat metrics: frequency, last contact date, total messages
+   - Smart tags: VIP level, discount sensitivity, churn risk, category preferences
+   - RFM segmentation: recency/frequency/monetary scores + 13 segments
+   - AI analysis: sentiment_label, dominant_intent (from cache table)
+   - Auto-updates: Daily at 11:00 AM via MySQL event
+
+2. **target_buyers_precomputed_history** - Daily snapshots (partitioned by month)
+   - Enables YoY comparison and trend analysis
+   - Partition maintenance: auto-cleanup old partitions
+   - Stored procedure: `refresh_target_buyers_asof(date)`
+
+3. **buyer_ai_analysis_cache** - AI analysis results
+   - Persona: summary, key_interests, pain_points, recommended_action
+   - Sentiment: score, label, dominant_intent
+   - Separate timestamps for persona vs sentiment (independent refresh)
+   - Snapshot fields: analyzed_last_purchase_date, analyzed_last_chat_date
+
+4. **keyword_analysis_cache** - Pre-aggregated keyword counts (9 categories)
+   - Buyer-type filtering (SMOKER/VIC/BOTH/NON_TARGET)
+   - Category distribution cache
+   - Message count metadata
+
+5. **customer_service_log** - CRM operations tracking
+   - Status: pending/contacted/resolved
+   - Follow-up timestamps and notes
+
+6. **ai_api_cost_log** - Cost monitoring
+   - Tracks API calls per model (MiniMax/DeepSeek-Pro/DeepSeek-Flash)
+   - Token usage and estimated costs
+
+**SQL File Organization:**
+
+SQL queries are stored as separate files (not embedded in Python code):
+
+- `backend/database/sql/target_buyers/*.sql` - Optimized queries for v2 API
+- `backend/database/sql/create_target_buyers_precomputed.sql` - Table + procedures + events
+- `backend/database/sql/*.sql` - Schema migrations and fixes
 
 **Pattern**: SQL files use `[[CONDITION]]` syntax for optional WHERE clauses, dynamically removed by `TargetBuyerQueries` class.
 
+**Performance:**
+
+| Operation | Time | Optimization |
+|-----------|------|--------------|
+| All buyers list | < 0.5s | Indexed buyer_nick + vip_level + churn_risk |
+| Single buyer profile | < 0.1s | Primary key lookup |
+| Dashboard metrics | < 0.1s | Aggregation on indexed columns |
+| YoY comparison | < 0.2s | Partitioned history table |
+
 ### Frontend Architecture
 
-**Single-Page Application Structure:**
+**App Structure:**
 
-- `src/App.tsx` - Main app with 3 views: Dashboard Overview, Chat & CRM, Configuration
-- `src/components/common/NotionCard.tsx` - Reusable card component
-- `src/components/common/NotionTag.tsx` - Tag component with color variants
-- Uses Recharts for all visualizations (Line, Bar, Pie, Radar charts)
+- `src/App.tsx` - Main app shell with routing
+- `src/views/DashboardOverview.tsx` - Main dashboard (metrics + charts + priority list)
+- `src/views/ChatAnalysis.tsx` - Customer 360° detail page
+- `src/views/SettingsView.tsx` - Configuration panel
+- `src/views/ExternalInfoConfig.tsx` - Offline data management
+
+**Dashboard Components** (src/components/dashboard/):
+
+- `MetricCards.tsx` - 4-group operational metrics (customer health, follow-up priority, sales opportunities, service quality)
+- `KeywordAnalysisPanel.tsx` - SMOKER keyword cloud (9 categories: 赠品/包装/维修保养/退换货/产品推荐咨询/产品参数咨询/价格/物流/投诉反馈)
+- `PriorityAttentionBoard.tsx` - CRM actionable customer list with tabs:
+  - Priority customers (high-value opportunities)
+  - Churn warning (3-condition severity tiers, configurable 60D/90D/180D windows)
+- `SentimentCharts.tsx` - Sentiment distribution visualization
+- `YoYCompareChart.tsx` - Year-over-year comparison
+- `HistoryTrendsSection.tsx` - Time-series trends
+
+**Common Components** (src/components/common/):
+
+- `NotionCard.tsx`, `NotionTag.tsx` - Notion-style UI primitives
+- `SearchBar.tsx`, `StatusButtonGroup.tsx` - Reusable controls
+- `ConfirmDialog.tsx`, `ErrorAlert.tsx`, `LoadingState.tsx` - Interaction patterns
 
 **State Management**: Local component state with React hooks (useState, useMemo)
 
-**Styling**: Tailwind CSS with Notion-inspired design tokens (defined inline in App.tsx)
+**Styling**: Tailwind CSS with Notion-inspired design tokens (low-saturation pastels)
 
 ## Target Buyers Optimization (Key Feature)
 
@@ -143,16 +265,6 @@ The v2 API focuses on **high-value customers only**, dramatically improving perf
 - **Smoker Buyers**: Purchased Pipes or Lighters categories
 - **VIC Buyers**: Rolling 24-month net sales >= 30,000
 - **BOTH**: Customers who are both Smoker and VIC (core high-value segment)
-
-### Precomputed Data
-
-The `target_buyers_precomputed` table contains:
-
-- Historical metrics: GMV, refunds, net sales, orders, refund rate
-- Time-based metrics: Rolling 24M (VIP calculation), L6M, L1Y
-- Chat metrics: Communication frequency, last contact date
-- Smart tags: VIP level (V3/V2/V1/V0), discount sensitivity, churn risk, category preferences
-- Auto-updates: Daily at 11:00 AM via MySQL event scheduler
 
 ### VIP Level Calculation
 
@@ -166,11 +278,12 @@ Based on **Rolling 24-Month Net Sales**:
 
 ### Performance Gains
 
-| Operation         | v1 (VIEW) | v2 (Precomputed) | Improvement |
-| ----------------- | --------- | ---------------- | ----------- |
-| Buyer list        | 10-30s    | < 0.5s           | **20-60x**  |
-| Dashboard metrics | 5-15s     | < 0.1s           | **50-150x** |
-| Buyer details     | 2-5s      | < 0.1s           | **20-50x**  |
+| Operation | Before (v1 VIEW) | After (v2 Precomputed) | Improvement |
+|-----------|------------------|------------------------|-------------|
+| Buyer list | 10-30s | < 0.5s | **20-60x** |
+| Dashboard metrics | 5-15s | < 0.1s | **50-150x** |
+| Buyer details | 2-5s | < 0.1s | **20-50x** |
+| AI analysis (cached) | 60-90s | < 0.5s | **120-180x** |
 
 ## Database Configuration
 
@@ -185,39 +298,47 @@ Based on **Rolling 24-Month Net Sales**:
 
 - **VIP Level**: V3/V2/V1/V0/Non-VIP (based on Rolling 24M net sales)
 - **Customer Type**: New/Old (from `client_monthly_tag` field)
+- **Buyer Type**: SMOKER/VIC/BOTH/NON_TARGET
 - **Discount Sensitivity**: High/Medium/Low (based on discount order ratio)
 - **Churn Risk**: High/Medium/Low (based on purchase and chat recency)
+- **Follow Priority**: Urgent/High/Medium/Low (AI-driven)
 - **Category Preference**: Top 3 product categories by order count
+- **RFM Segment**: 13 segments (Champions, Loyal Customers, Potential Loyalists, etc.)
 
 See `docs/架构设计/数据模型设计.md` for complete tag system design.
 
 ### AI Persona Analysis
 
-Persona analysis uses a multi-level strategy:
-
-- **Primary**: DeepSeek (Reasoner/Chat by scenario)
-- **Fallback**: Zhipu GLM-4.7
-- **Final fallback**: Rule-based analyzer
-
 Output fields:
 
 - **summary**: 2-3 sentence customer persona
-- **key\_interests**: Array of interest points
-- **pain\_points**: Array of pain points
-- **recommended\_action**: Specific sales recommendation
+- **key_interests**: Array of interest points (e.g., "高端烟斗收藏", "奢侈品消费偏好")
+- **pain_points**: Array of pain points (e.g., "尺码选择困难", "物流时效期望高")
+- **recommended_action**: Specific sales recommendation (e.g., "推荐限量版烟斗新品")
+- **method**: Analysis method used (MiniMax-M3 / DeepSeek-V4-Pro / DeepSeek-V4-Flash / Rule-based)
 
 ### Sentiment & Intent Analysis
 
-Sentiment/intent uses a batch pipeline:
-
-- **Primary**: Zhipu GLM-4.7
-- **Fallback**: DeepSeek sentiment-intent analysis
-- **Final fallback**: Rule-based analysis
-
 Output includes:
 
-- **sentiment\_label / sentiment\_score**
-- **intent\_distribution / dominant\_intent**
+- **sentiment_label**: Positive/Neutral/Negative
+- **sentiment_score**: 0.0-1.0 (confidence)
+- **dominant_intent**: Pre-sale Inquiry / Post-sale Support / Logistics / Usage Guide / Complaint
+- **intent_distribution**: JSON object with intent percentages
+
+### Keyword Analysis (9 Categories)
+
+For SMOKER customers (Pipes/Lighters buyers):
+
+1. **赠品** (Gifts) - Gift requests, complimentary items
+2. **包装** (Packaging) - Packaging quality, gift wrapping
+3. **维修保养** (Maintenance) - Repair, cleaning, care instructions
+4. **退换货** (Returns/Exchanges) - Return/exchange requests
+5. **产品推荐咨询** (Product Recommendations) - Product suggestions, alternatives
+6. **产品参数咨询** (Product Specs) - Size, material, specifications
+7. **价格** (Price) - Pricing, discounts, promotions
+8. **物流** (Logistics) - Shipping, delivery, tracking
+9. **投诉反馈** (Complaints) - Quality issues, service complaints
 
 ## Important Conventions
 
@@ -232,9 +353,9 @@ When adding new queries:
 
 ### API Versioning
 
-- **New features**: Use `/api/v2/*` routes (precomputed table)
-- **Legacy**: `/api/v1/*` routes (slow, will be deprecated)
-- **Frontend**: Default to v2 APIs, only use v1 if v2 doesn't support the feature
+- **Production**: Use `/api/v2/*` routes (precomputed table)
+- **Deprecated**: `/api/v1/*` routes (slow, legacy VIEW queries)
+- **Frontend**: Always use v2 APIs
 
 ### Database Updates
 
@@ -245,7 +366,7 @@ When adding new queries:
 ### Code Organization
 
 - **Backend**: Feature-based modules (`analytics/`, `database/`, `api/`, `ai/`)
-- **Frontend**: Currently single-file (App.tsx), plan to refactor
+- **Frontend**: View-based organization (`views/`, `components/dashboard/`, `components/common/`)
 - **SQL**: Separated by feature (`target_buyers/` for optimized queries)
 
 ## Development Workflow
@@ -253,18 +374,57 @@ When adding new queries:
 1. **New Feature Development**:
    - Create SQL query file in `backend/database/sql/target_buyers/`
    - Add query method to `TargetBuyerQueries` class
-   - Add business logic method to `TargetBuyerAnalyzer` class
+   - Add business logic to `TargetBuyerAnalyzer` class
    - Add API endpoint to `backend/api/target_routes.py` (v2 prefix)
+   - Create/update frontend components in `src/components/`
    - Update frontend to call new v2 endpoint
-2. **Performance Optimization**:
-   - Always use precomputed table approach for new features
+
+2. **AI Analysis Enhancement**:
+   - Update prompts in `backend/ai/prompts/`
+   - Adjust model selection logic in `backend/ai/model_selection.py`
+   - Test fallback chain (MiniMax → DeepSeek → Rule-based)
+   - Monitor cost via `ai_api_cost_log` table
+
+3. **Performance Optimization**:
+   - Always use precomputed table for new features
    - Monitor query execution times with `EXPLAIN`
    - Add indexes to `target_buyers_precomputed` table if needed
-3. **Database Schema Changes**:
+   - Consider partitioning for large history tables
+
+4. **Database Schema Changes**:
    - Write migration SQL script
    - Update `create_target_buyers_precomputed.sql` if changing precomputed table
-   - Test stored procedure `refresh_target_buyers_precomputed()`
-   - Verify auto-update event is working
+   - Test stored procedure `refresh_target_buyers_asof(date)`
+   - Verify auto-update event is working (daily at 11:00 AM)
+
+## Recent Features (June 2026)
+
+### Round 4-5: Incremental AI Analysis Optimization
+
+- **Incremental mode**: First-time 50 chats / Refresh 20+5=25 chats
+- **Dynamic context window**: More new messages → less historical context
+- **Performance**: 45% faster for MiniMax (78s → 43s)
+- **Prompt optimization**: 25 → 11 profile fields, chat-first JSON ordering
+
+### Round 2-3: Churn Warning Enhancement
+
+- **3-condition logic**: Segment degradation + churn risk升级 + purchase power collapse
+- **Configurable windows**: 60D/90D/180D (default 90D)
+- **Severity tiers**: 1-4 with selection reasons display
+- **Thresholds**: 60D=¥10K, 90D=¥15K, 180D=¥20K
+
+### March 2026: Keyword Analysis Module
+
+- **9-category taxonomy** for SMOKER customers
+- **Pre-computed cache** for fast aggregation
+- **Multi-buyer-type filtering** (SMOKER/VIC/BOTH/NON_TARGET)
+- **De-duplication rules** (remove包含关系)
+
+### February 2026: Priority Attention Board
+
+- **Exportable customer list** with CSV export
+- **Two tabs**: Priority customers + Churn warning
+- **AI-driven follow-up priority**: Urgent/High/Medium/Low
 
 ## Security Considerations
 
@@ -272,10 +432,12 @@ When adding new queries:
 - Error handling with specific exception types
 - Environment variables for sensitive data (API keys, database credentials)
 - Type safety: TypeScript on frontend, type hints on backend
+- No secrets in code, logs, or version control
 
 ## Documentation
 
 - **Complete docs**: `docs/README.md`
+- **AI analysis optimization**: `docs/plans/2026-02-24-ai-optimization-summary.md`
 - **Target buyers feature**: `docs/用户文档/目标买家功能总结.md`
 - **Deployment guide**: `docs/部署运维/目标买家部署指南.md`
 - **Data model**: `docs/架构设计/数据模型设计.md`
@@ -285,9 +447,9 @@ When adding new queries:
 
 ### UI/Visual Modifications Priority
 
-**对于所有前端视觉相关的修改，优先调用** **`frontend-design`** **skill**：
+**对于所有前端视觉相关的修改，优先调用 `frontend-design` skill**：
 
-当任务涉及以下内容时，应首先使用frontend-design skill：
+当任务涉及以下内容时，应首先使用 frontend-design skill：
 
 - UI组件布局调整
 - 样式和颜色修改
@@ -348,4 +510,3 @@ docs/memory/
 Memory 文件位于 `docs/memory/`，应参与版本控制：
 - 完成重要功能后，提交 memory 更新
 - 提交信息示例：`docs: update memory for keyword analysis optimization`
-
