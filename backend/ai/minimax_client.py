@@ -9,6 +9,7 @@ from typing import Dict, List, Any
 from openai import OpenAI
 from backend.config import settings
 from backend.ai.persona_context import build_persona_prompt_v3
+from backend.ai.prompts.sentiment_intent_prompt import build_sentiment_intent_prompt
 
 
 def _safe_print(message: str):
@@ -279,7 +280,6 @@ class MiniMaxClient:
                 "complaint_count": 0
             }
 
-        from backend.ai.prompts.sentiment_intent_prompt import build_sentiment_intent_prompt
         prompt = build_sentiment_intent_prompt(messages, is_incremental=is_incremental)
 
         try:

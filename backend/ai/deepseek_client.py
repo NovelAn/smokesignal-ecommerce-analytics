@@ -21,6 +21,7 @@ def _safe_print(message: str):
 from backend.ai.prompts.evidence_extraction import EVIDENCE_EXTRACTION_PROMPT
 from backend.ai.prompts.persona_inference import PERSONA_INFERENCE_PROMPT
 from backend.ai.prompts.domain_knowledge import build_external_info_context
+from backend.ai.prompts.sentiment_intent_prompt import build_sentiment_intent_prompt
 from backend.ai.data_extractor import extract_chat_insights
 from backend.ai.behavior_analyzer import build_order_facts, structure_order_behavior
 from backend.ai.persona_context import build_persona_prompt_v3
@@ -864,7 +865,6 @@ summary必须是结论摘要，不要罗列年度品类清单或完整证据。�
                 "complaint_count": 0
             }
 
-        from backend.ai.prompts.sentiment_intent_prompt import build_sentiment_intent_prompt
         prompt = build_sentiment_intent_prompt(messages, is_incremental=is_incremental)
 
         try:
