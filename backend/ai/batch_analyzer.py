@@ -24,6 +24,7 @@ import threading
 
 from backend.analytics.tag_calculator import TagCalculator
 from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
+from backend.ai.keyword_matcher import analyze_rule_based
 from backend.ai.model_selection import should_use_deepseek_pro
 
 logger = logging.getLogger(__name__)
@@ -892,99 +893,14 @@ class BatchAnalyzer:
         buyer_nick: str,
         messages: List[str]
     ) -> Dict[str, Any]:
-        """Rule-based sentiment and intent analysis (final fallback)"""
-        positive_words = ['好', '喜欢', '满意', '感谢', '谢谢', '不错', '很好', '棒', '赞']
-        negative_words = ['差', '不好', '失望', '投诉', '退货', '退款', '问题', '坏的', '不喜欢']
+        """Rule-based sentiment and intent analysis (final fallback).
 
-        pre_sale_keywords = ['价格', '多少钱', '有货', '尺寸', '颜色', '款式', '推荐', '新款', '上市']
-        post_sale_keywords = ['退货', '换货', '维修', '保修', '发票', '物流', '快递', '收到']
-
-        # 投诉关键词分类
-        # 强投诉词：明确的投诉行为
-        strong_complaint_keywords = ['投诉', '差评', '举报', '315', '消费者协会', '工商', '找经理']
-        # 不满情绪词：对产品/服务表达不满（核心投诉信号）
-        dissatisfaction_keywords = [
-            '太差', '质量差', '很差', '垃圾', '骗子', '骗人', '假的', '假货', '欺骗',
-            '失望', '不满', '不满意', '太慢', '态度差', '服务差', '差的', '不好用',
-            '质量太差', '质量不好', '做工差', '掉色', '褪色', '破损', '坏了', '有问题',
-            '差劲', '太差了', '质量太差了', '差评', '给差评'
-        ]
-        # 功能性请求词（单独出现不算投诉，只是正常的售后需求）
-        functional_keywords = ['退款', '退货', '换货', '催促', '发货', '收到货', '物流']
-
-        all_text = ' '.join(messages).lower()
-
-        positive_count = sum(1 for word in positive_words if word in all_text)
-        negative_count = sum(1 for word in negative_words if word in all_text)
-
-        pre_sale_count = sum(1 for word in pre_sale_keywords if word in all_text)
-        post_sale_count = sum(1 for word in post_sale_keywords if word in all_text)
-
-        # 投诉计数逻辑：
-        # 1. 强投诉词出现1个 = 1次投诉（明确的投诉行为，如"我要投诉"）
-        # 2. 不满情绪词出现1个 = 1次投诉（表达了对产品/服务的不满，如"质量太差了"）
-        # 3. 但如果只有功能性请求词（退款/催发货），没有不满情绪词，不算投诉
-        strong_matches = [kw for kw in strong_complaint_keywords if kw in all_text]
-        dissatisfaction_matches = [kw for kw in dissatisfaction_keywords if kw in all_text]
-        functional_matches = [kw for kw in functional_keywords if kw in all_text]
-
-        complaint_count = 0
-        if len(strong_matches) >= 1:
-            # 强投诉词出现，直接算投诉（如"我要投诉"、"差评"）
-            complaint_count = 1
-        elif len(dissatisfaction_matches) >= 1:
-            # 有不满情绪词，算投诉（如"质量太差了"、"垃圾产品"、"太失望了"）
-            complaint_count = 1
-        # 如果只有功能性请求词（退款/催发货），没有不满情绪，不算投诉
-        # 例如："我要退款" 不算投诉，只是正常的售后请求
-        # 例如："质量太差了，我要退款" 算投诉，因为有不满情绪词"太差"
-
-        # Calculate sentiment score
-        total_sentiment = positive_count + negative_count
-        if total_sentiment > 0:
-            sentiment_score = positive_count / total_sentiment
-        else:
-            sentiment_score = 0.5
-
-        # Determine sentiment label
-        if sentiment_score >= 0.6:
-            sentiment_label = 'Positive'
-        elif sentiment_score <= 0.4:
-            sentiment_label = 'Negative'
-        else:
-            sentiment_label = 'Neutral'
-
-        # Determine dominant intent
-        intent_dist = {
-            "Pre-sale Inquiry": pre_sale_count,
-            "Post-sale Support": post_sale_count,
-            "Logistics": 0,
-            "Usage Guide": 0,
-            "Complaint": complaint_count
-        }
-
-        if max(intent_dist.values()) > 0:
-            dominant_intent = max(intent_dist.items(), key=lambda x: x[1])[0]
-        else:
-            dominant_intent = 'Unknown'
-
-        # Calculate pre_sale_score and post_sale_score from intent_distribution
-        intent_scores = TagCalculator.calculate_intent_scores(intent_dist)
-
-        return {
-            "buyer_nick": buyer_nick,
-            "sentiment_score": round(sentiment_score, 2),
-            "sentiment_label": sentiment_label,
-            "intent_distribution": intent_dist,
-            "dominant_intent": dominant_intent,
-            "pre_sale_score": intent_scores['pre_sale_score'],
-            "post_sale_score": intent_scores['post_sale_score'],
-            "pre_sale_keywords": [],
-            "post_sale_keywords": [],
-            "complaint_count": complaint_count,
-            "sentiment_method": "rule_based",
-            "analyzed_at": datetime.now()
-        }
+        Delegates to keyword_matcher.analyze_rule_based — the neutral-default model
+        aligned with the AI prompt standards. Word lists and scoring logic live in
+        backend/ai/keyword_matcher.py (jieba whole-token matching; functional/polite
+        words are neutral, not scored).
+        """
+        return analyze_rule_based(buyer_nick, messages)
 
     def _default_analysis(self, buyer_nick: str, reason: str) -> Dict[str, Any]:
         """Return default analysis when no data available"""
