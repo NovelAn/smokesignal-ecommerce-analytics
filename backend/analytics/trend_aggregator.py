@@ -57,7 +57,7 @@ class TrendAggregator:
             SELECT DATE_FORMAT(snapshot_date, '%%Y-%%m') AS month,
                    SUM(CASE WHEN buyer_type='SMOKER' THEN 1 ELSE 0 END) AS SMOKER,
                    SUM(CASE WHEN buyer_type='VIC' THEN 1 ELSE 0 END) AS VIC,
-                   SUM(CASE WHEN buyer_type='BOTH' THEN 1 ELSE 0 END) AS BOTH
+                   SUM(CASE WHEN buyer_type='BOTH' THEN 1 ELSE 0 END) AS `BOTH`
             FROM target_buyers_precomputed_history
             WHERE snapshot_date >= DATE_SUB(CURDATE(), INTERVAL %s MONTH)
             GROUP BY DATE_FORMAT(snapshot_date, '%%Y-%%m')

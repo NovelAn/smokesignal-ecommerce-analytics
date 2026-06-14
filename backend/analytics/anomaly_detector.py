@@ -10,6 +10,32 @@ from typing import Dict, List, Optional
 from datetime import date, datetime
 
 
+def _coerce_to_date(value) -> Optional[date]:
+    """将多种日期表示统一转为 date，无法解析时返回 None。
+
+    支持：
+      - date / datetime（直接取 .date()）
+      - 'YYYY-MM-DD'
+      - 'YYYY-MM-DD HH:MM:SS'（截取日期部分）
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        # 截取 'YYYY-MM-DD HH:MM:SS' 的日期部分
+        date_part = s.split(" ")[0]
+        for fmt in ("%Y-%m-%d",):
+            try:
+                return datetime.strptime(date_part, fmt).date()
+            except ValueError:
+                continue
+    return None
+
+
 class AnomalyDetector:
     """异常客户检测器"""
 
@@ -68,8 +94,9 @@ class AnomalyDetector:
         last_purchase = customer.get("last_purchase_date")
         if not last_purchase:
             return None
-        if isinstance(last_purchase, str):
-            last_purchase = datetime.strptime(last_purchase, "%Y-%m-%d").date()
+        last_purchase = _coerce_to_date(last_purchase)
+        if last_purchase is None:
+            return None
         days_since = (date.today() - last_purchase).days
         if days_since > 180:
             return self._base_record(
