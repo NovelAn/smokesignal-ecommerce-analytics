@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.config import settings
 from backend.api import target_router, external_router
 from backend.api.insights_routes import router as insights_router
+from backend.api.action_routes import router as action_router
 
 # Create FastAPI app
 app = FastAPI(
@@ -44,6 +45,7 @@ app.add_middleware(
 app.include_router(target_router)  # v2.0 routes with /api/v2 prefix
 app.include_router(external_router)  # External records routes with /api/v2/external prefix
 app.include_router(insights_router)  # Insights routes with /api/v2/insights prefix
+app.include_router(action_router)  # Action routes with /api/v2/action prefix
 
 # Serve uploaded files
 import os
