@@ -35,8 +35,24 @@ def test_single_day_period():
 
 
 def test_compare_metrics_structure():
-    """compare_metrics 返回正确结构（DB 方法用占位实现）"""
-    comparator = PeriodComparator()
+    """compare_metrics 返回真实查询值与变化率。"""
+    class FakeQueries:
+        def get_period_comparison_metrics(self, start_date, end_date):
+            if start_date == date(2026, 5, 1):
+                return {
+                    "new_vic": 12,
+                    "churn_warning": 7,
+                    "vip_upgrades": 5,
+                    "sentiment_negative": 3,
+                }
+            return {
+                "new_vic": 8,
+                "churn_warning": 4,
+                "vip_upgrades": 5,
+                "sentiment_negative": 0,
+            }
+
+    comparator = PeriodComparator(queries=FakeQueries())
     import asyncio
 
     result = asyncio.run(
@@ -53,3 +69,10 @@ def test_compare_metrics_structure():
             "change",
             "change_pct",
         }
+    assert result["metrics"]["new_vic"] == {
+        "current": 12,
+        "previous": 8,
+        "change": 4,
+        "change_pct": 50.0,
+    }
+    assert result["metrics"]["sentiment_negative"]["change_pct"] == 0.0

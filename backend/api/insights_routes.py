@@ -38,7 +38,7 @@ async def get_period_comparison(
         raise HTTPException(status_code=500, detail=f"时间对比查询失败: {str(e)}")
 
 
-@router.get("/anomaly-alerts")
+@router.get("/anomaly-alerts", deprecated=True)
 async def get_anomaly_alerts():
     """检测高价值客户中的异常信号（情感负向 / 购买间隔 / 沟通频次）。"""
     try:

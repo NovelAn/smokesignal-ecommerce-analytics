@@ -4,11 +4,22 @@ Aggregates VIC pool size, active rate, and high-risk trends
 from target_buyers_precomputed_history snapshots.
 """
 
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 
 class TrendAggregator:
     """客户趋势数据聚合器"""
+
+    def __init__(self, queries: Optional[Any] = None):
+        self.queries = queries
+
+    def _get_queries(self):
+        if self.queries is None:
+            from backend.database import Database
+            from backend.database.target_buyer_queries import TargetBuyerQueries
+
+            self.queries = TargetBuyerQueries(Database())
+        return self.queries
 
     def format_vic_pool_trend(self, raw_data: List[Dict]) -> List[Dict]:
         """格式化 VIC 池规模趋势（按买家类型分层）。
@@ -47,58 +58,10 @@ class TrendAggregator:
         - churn_risk 值为中文（'高'/'中'/'低'）。
         - sentiment_trend 暂为空（历史表无情感字段）。
         """
-        from backend.database import Database
-
-        db = Database()
-
-        # VIC 池规模趋势（按 buyer_type 分层）
-        pool_data = db.execute_query(
-            """
-            SELECT DATE_FORMAT(snapshot_date, '%%Y-%%m') AS month,
-                   SUM(CASE WHEN buyer_type='SMOKER' THEN 1 ELSE 0 END) AS SMOKER,
-                   SUM(CASE WHEN buyer_type='VIC' THEN 1 ELSE 0 END) AS VIC,
-                   SUM(CASE WHEN buyer_type='BOTH' THEN 1 ELSE 0 END) AS `BOTH`
-            FROM target_buyers_precomputed_history
-            WHERE snapshot_date >= DATE_SUB(CURDATE(), INTERVAL %s MONTH)
-            GROUP BY DATE_FORMAT(snapshot_date, '%%Y-%%m')
-            ORDER BY month
-            """,
-            (months,),
-        )
-
-        # VIC 活跃率趋势（当月有购买 = 活跃）
-        active_raw = db.execute_query(
-            """
-            SELECT month, COUNT(*) AS total_vic,
-                   SUM(is_active) AS active_vic
-            FROM (
-                SELECT DATE_FORMAT(snapshot_date, '%%Y-%%m') AS month,
-                       CASE WHEN DATE_FORMAT(last_purchase_date, '%%Y-%%m')
-                                = DATE_FORMAT(snapshot_date, '%%Y-%%m')
-                            THEN 1 ELSE 0 END AS is_active
-                FROM target_buyers_precomputed_history
-                WHERE buyer_type IN ('VIC', 'BOTH')
-                  AND snapshot_date >= DATE_SUB(CURDATE(), INTERVAL %s MONTH)
-            ) t
-            GROUP BY month
-            ORDER BY month
-            """,
-            (months,),
-        )
-
-        # 高风险客户趋势（churn_risk 中文值）
-        risk_data = db.execute_query(
-            """
-            SELECT DATE_FORMAT(snapshot_date, '%%Y-%%m') AS month,
-                   COUNT(*) AS high_risk_count
-            FROM target_buyers_precomputed_history
-            WHERE churn_risk = '高'
-              AND snapshot_date >= DATE_SUB(CURDATE(), INTERVAL %s MONTH)
-            GROUP BY DATE_FORMAT(snapshot_date, '%%Y-%%m')
-            ORDER BY month
-            """,
-            (months,),
-        )
+        queries = self._get_queries()
+        pool_data = queries.get_vic_pool_trend(months)
+        active_raw = queries.get_vic_active_rate_trend(months)
+        risk_data = queries.get_high_risk_trend(months)
 
         return {
             "vic_pool_trend": self.format_vic_pool_trend(pool_data),

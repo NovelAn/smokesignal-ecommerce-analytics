@@ -5,6 +5,7 @@ Database-dependent get_customer_trends() is excluded (integration-level).
 """
 
 import pytest
+import asyncio
 
 from backend.analytics.trend_aggregator import TrendAggregator
 
@@ -92,3 +93,25 @@ class TestFormatActiveRateTrend:
         ]
         result = aggregator.format_active_rate_trend(raw)
         assert [r["month"] for r in result] == ["2026-01", "2026-02", "2026-03"]
+
+
+def test_get_customer_trends_uses_query_provider():
+    class FakeQueries:
+        def get_vic_pool_trend(self, months):
+            assert months == 6
+            return [{"month": "2026-05", "SMOKER": 300, "VIC": 80, "BOTH": 30}]
+
+        def get_vic_active_rate_trend(self, months):
+            assert months == 6
+            return [{"month": "2026-05", "total_vic": 110, "active_vic": 44}]
+
+        def get_high_risk_trend(self, months):
+            assert months == 6
+            return [{"month": "2026-05", "high_risk_count": 9}]
+
+    result = asyncio.run(TrendAggregator(queries=FakeQueries()).get_customer_trends(6))
+
+    assert result["vic_pool_trend"][0]["SMOKER"] == 300
+    assert result["vic_active_rate_trend"][0]["active_rate"] == 40.0
+    assert result["high_risk_trend"][0]["high_risk_count"] == 9
+    assert result["sentiment_trend"] == []

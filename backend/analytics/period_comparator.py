@@ -1,9 +1,20 @@
 from datetime import date, timedelta
-from typing import Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 class PeriodComparator:
     """时间对比计算器 — 计算等长对比期并对比关键指标变化"""
+
+    def __init__(self, queries: Optional[Any] = None):
+        self.queries = queries
+
+    def _get_queries(self):
+        if self.queries is None:
+            from backend.database import Database
+            from backend.database.target_buyer_queries import TargetBuyerQueries
+
+            self.queries = TargetBuyerQueries(Database())
+        return self.queries
 
     def calculate_comparison_period(
         self,
@@ -26,15 +37,16 @@ class PeriodComparator:
         current_start: date,
         current_end: date,
     ) -> Dict:
-        """对比当期与对比期的关键指标（new_vic / churn_warning / vip_upgrades / sentiment_negative）。
-
-        当前 _query_period_metrics 为占位实现，返回零值。
-        真实指标需要 target_buyers_precomputed_history 快照对比，后续接入。
-        """
+        """对比当期与对比期的真实快照指标。"""
         comp_start, comp_end = self.calculate_comparison_period(current_start, current_end)
 
-        current_metrics = self._query_period_metrics(current_start, current_end)
-        previous_metrics = self._query_period_metrics(comp_start, comp_end)
+        queries = self._get_queries()
+        current_metrics = queries.get_period_comparison_metrics(
+            current_start, current_end
+        )
+        previous_metrics = queries.get_period_comparison_metrics(
+            comp_start, comp_end
+        )
 
         metrics: Dict[str, Dict] = {}
         for metric_name in [
@@ -64,21 +76,4 @@ class PeriodComparator:
                 "end_date": comp_end.isoformat(),
             },
             "metrics": metrics,
-        }
-
-    def _query_period_metrics(
-        self,
-        start_date: date,
-        end_date: date,
-    ) -> Dict:
-        """查询指定时间段的指标。
-
-        占位实现：真实指标需从 target_buyers_precomputed_history 快照对比得出，
-        涉及 VIP 等级/流失标签的时间序列，后续接入。当前返回零值占位。
-        """
-        return {
-            "new_vic": 0,
-            "churn_warning": 0,
-            "vip_upgrades": 0,
-            "sentiment_negative": 0,
         }

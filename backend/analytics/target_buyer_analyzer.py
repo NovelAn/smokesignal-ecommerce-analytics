@@ -139,6 +139,19 @@ class TargetBuyerAnalyzer:
         """
         return self.queries.get_dashboard_metrics()
 
+    def get_keyword_analysis(
+        self,
+        start_date: str,
+        end_date: str,
+        buyer_types: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        from backend.analytics.keyword_analyzer import KeywordAnalyzer
+
+        rows = self.queries.get_keyword_messages(start_date, end_date, buyer_types)
+        return KeywordAnalyzer().analyze_messages(rows, category=category, limit=limit)
+
     def get_buyers_by_type(
         self,
         buyer_type: str,
@@ -474,12 +487,17 @@ class TargetBuyerAnalyzer:
         )
 
     def mark_service(
-        self, buyer_nick: str, status: str, notes: Optional[str] = None
+        self,
+        buyer_nick: str,
+        status: str,
+        notes: Optional[str] = None,
+        workstream: str = "priority",
     ) -> int:
         """标记客户处理状态 (Round 1). UPSERT customer_service_log."""
-        return self.queries.mark_service(buyer_nick, status, notes)
+        return self.queries.mark_service(buyer_nick, status, notes, workstream)
 
-    def get_service_history(self, buyer_nick: str) -> List[Dict[str, Any]]:
+    def get_service_history(
+        self, buyer_nick: str, workstream: str = "priority"
+    ) -> List[Dict[str, Any]]:
         """获取某客户的所有处理记录 (Round 1)."""
-        return self.queries.get_service_history(buyer_nick)
-
+        return self.queries.get_service_history(buyer_nick, workstream)

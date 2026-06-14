@@ -18,9 +18,9 @@ SELECT
     SUM(CASE WHEN buyer_type = 'BOTH' THEN 1 ELSE 0 END) as both_smoker_vic,
 
     -- 情感分布（客户健康度）
-    SUM(CASE WHEN sentiment_label = 'Positive' THEN 1 ELSE 0 END) as positive_sentiment_count,
-    SUM(CASE WHEN sentiment_label = 'Neutral' THEN 1 ELSE 0 END) as neutral_sentiment_count,
-    SUM(CASE WHEN sentiment_label = 'Negative' THEN 1 ELSE 0 END) as negative_sentiment_count,
+    SUM(CASE WHEN COALESCE(ai.sentiment_label, tb.sentiment_label) = 'Positive' THEN 1 ELSE 0 END) as positive_sentiment_count,
+    SUM(CASE WHEN COALESCE(ai.sentiment_label, tb.sentiment_label) = 'Neutral' THEN 1 ELSE 0 END) as neutral_sentiment_count,
+    SUM(CASE WHEN COALESCE(ai.sentiment_label, tb.sentiment_label) = 'Negative' THEN 1 ELSE 0 END) as negative_sentiment_count,
 
     -- 跟进优先级分布
     SUM(CASE WHEN follow_priority = '紧急' THEN 1 ELSE 0 END) as urgent_priority_count,
@@ -37,5 +37,6 @@ SELECT
     SUM(CASE WHEN churn_risk = '低' THEN 1 ELSE 0 END) as low_churn_count,
 
     -- 最后更新时间
-    MAX(updated_at) as last_updated
-FROM target_buyers_precomputed;
+    MAX(GREATEST(tb.updated_at, COALESCE(ai.updated_at, tb.updated_at))) as last_updated
+FROM target_buyers_precomputed tb
+LEFT JOIN buyer_ai_analysis_cache ai ON ai.buyer_nick = tb.buyer_nick;

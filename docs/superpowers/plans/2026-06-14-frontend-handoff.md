@@ -17,7 +17,7 @@
 
 ---
 
-## 1. 已交付的 5 个 API（全部 200，真实数据验证）
+## 1. 已交付的 API（2026-06-14 后端复核）
 
 ### 1.1 `GET /api/v2/insights/vic-persona`
 ```jsonc
@@ -50,9 +50,9 @@
   }
 }
 ```
-**已知限制**：`metrics` 当前全是 **0（占位 stub）**——真实同/环比需 `target_buyers_precomputed_history` 快照对比，是后端待办。前端先按结构渲染（数字会是 0），后端补数据后自动生效。校验：`start_date > end_date` 返回 400。
+**状态更新（2026-06-14）：** 已接入真实历史快照首尾对比，不再返回固定 0。情感转负使用 AI 增量分析时间统计；如果周期内没有真实增量负面记录，该项为 0。
 
-### 1.3 `GET /api/v2/insights/anomaly-alerts`
+### 1.3 `GET /api/v2/insights/anomaly-alerts`（deprecated）
 ```jsonc
 {
   "anomalies": [              // 最多 50 条
@@ -69,8 +69,7 @@
   "total_count": int          // 实际总数（可能 > 50）
 }
 ```
-**注意**：`last_purchase_date`/`last_chat_date` 是完整时间戳字符串，前端展示时可截到日期。
-**已知限制**：`sentiment_negative` 规则的 `previous_sentiment` 暂以 "Positive" 为基线（无历史快照对比），所以会偏高；待 history 接入后修正。
+**状态更新（2026-06-14）：** 独立异常卡已从 Overview 移除，真实风险信号统一进入 `PriorityAttentionBoard → 流失预警`。此接口仅为兼容保留，并在 OpenAPI 标记 deprecated。
 
 ### 1.4 `GET /api/v2/insights/customer-trends?months=N`（默认 6，范围 1-24）
 ```jsonc
@@ -87,7 +86,7 @@
   "sentiment_trend": []       // ⚠️ 恒为空，history 表无情感字段
 }
 ```
-**已知限制**：`sentiment_trend` 恒空（后端无数据源）。`active_rate` 基于"当月有购买"（history 表无聊天列）。
+**状态更新（2026-06-14）：** 客户池、活跃率和高风险趋势改为每月最后一个快照日，已修复按日快照重复累计问题。`sentiment_trend` 仍为空（历史表无情感字段）；`active_rate` 基于“当月有购买”。
 
 ### 1.5 `GET /api/v2/action/inventory-inquiries` ⭐（结构已变更，与前端计划不同）
 ```jsonc
@@ -135,12 +134,11 @@
 
 ## 3. 已知后端待办（不影响前端开发，前端按现状渲染即可）
 
-1. `period-comparison` 真实指标（需 history 快照对比）
-2. `anomaly-alerts` 的 previous_sentiment 真实对比（需 history）
-3. `vic-persona` 兴趣/痛点聚合优化（TF-IDF/去重，当前原始词频）
-4. `customer-trends.sentiment_trend` 数据源（history 无情感字段）
-5. Inventory Inquiry 的 AI 回填（Task 1 prompt 上线后自然积累，1-2 周）
-6. Task 2 库存 intent 准确率测试待用户手动执行（花 ¥，需 API keys）
+1. `vic-persona` 兴趣/痛点聚合优化（TF-IDF/去重，当前原始词频）
+2. `customer-trends.sentiment_trend` 数据源（history 无情感字段）
+3. 沟通频率骤降（需先为历史快照补齐可比较聊天字段）
+4. Inventory Inquiry 的 AI 回填（Task 1 prompt 上线后自然积累，1-2 周）
+5. Task 2 库存 intent 准确率测试待用户手动执行（花 ¥，需 API keys）
 
 ---
 

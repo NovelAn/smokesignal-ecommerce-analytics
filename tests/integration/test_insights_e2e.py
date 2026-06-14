@@ -1,10 +1,10 @@
 """
-Overview 改造 - 5 个新 API 的端到端测试
+Overview 改造 - 4 个活跃 API 的端到端测试
 
 覆盖：
-- dashboard 概览工作流（vic-persona → period-comparison → anomaly-alerts → customer-trends → inventory-inquiries）
+- dashboard 概览工作流（vic-persona → period-comparison → customer-trends → inventory-inquiries）
 - 返回数据类型一致性
-- 性能（5 个 API 合计 < 5s）
+- 性能（4 个活跃 API 合计 < 5s）
 
 注意：依赖真实 DB（aliyunDB），从本机直连可通。
 """
@@ -18,7 +18,7 @@ client = TestClient(app)
 
 
 def test_dashboard_overview_apis_workflow():
-    """验证 5 个新 API 的完整工作流"""
+    """验证 4 个活跃 API 的完整工作流"""
     # 1. VIC 群体画像
     response = client.get("/api/v2/insights/vic-persona")
     assert response.status_code == 200
@@ -36,19 +36,13 @@ def test_dashboard_overview_apis_workflow():
     assert comparison["current_period"]["start_date"] == "2026-05-01"
     assert comparison["comparison_period"]["end_date"] == "2026-04-30"
 
-    # 3. 异常客户预警
-    response = client.get("/api/v2/insights/anomaly-alerts")
-    assert response.status_code == 200
-    anomalies = response.json()
-    assert "anomalies" in anomalies
-
-    # 4. 客户趋势
+    # 3. 客户趋势
     response = client.get("/api/v2/insights/customer-trends?months=6")
     assert response.status_code == 200
     trends = response.json()
     assert "vic_pool_trend" in trends
 
-    # 5. 库存需求
+    # 4. 库存需求
     response = client.get("/api/v2/action/inventory-inquiries")
     assert response.status_code == 200
     inventory = response.json()
@@ -74,7 +68,6 @@ def test_apis_performance_under_5s():
     endpoints = [
         "/api/v2/insights/vic-persona",
         "/api/v2/insights/period-comparison?start_date=2026-05-01&end_date=2026-05-31",
-        "/api/v2/insights/anomaly-alerts",
         "/api/v2/insights/customer-trends?months=6",
         "/api/v2/action/inventory-inquiries",
     ]
@@ -83,5 +76,5 @@ def test_apis_performance_under_5s():
         r = client.get(url)
         assert r.status_code == 200
     elapsed = time.time() - start
-    print(f"\n5 APIs total: {elapsed:.2f}s")
+    print(f"\n4 APIs total: {elapsed:.2f}s")
     assert elapsed < 5.0

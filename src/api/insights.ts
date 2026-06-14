@@ -1,0 +1,70 @@
+import type {
+  CustomerTrends,
+  InventoryInquiries,
+  PeriodComparison,
+  VicPersona,
+} from '../types/insights';
+
+const API_BASE = '/api/v2';
+let inventoryInquiriesPromise: Promise<InventoryInquiries> | null = null;
+
+async function fetchJson<T>(url: string, errorPrefix: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    const message = typeof detail?.detail === 'string' ? detail.detail : response.statusText;
+    throw new Error(`${errorPrefix}: ${message || response.status}`);
+  }
+  return response.json();
+}
+
+export function fetchVicPersona(signal?: AbortSignal): Promise<VicPersona> {
+  return fetchJson(`${API_BASE}/insights/vic-persona`, 'VIC 群体画像查询失败', signal);
+}
+
+export function fetchPeriodComparison(
+  startDate: string,
+  endDate: string,
+  signal?: AbortSignal,
+): Promise<PeriodComparison> {
+  const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  return fetchJson(
+    `${API_BASE}/insights/period-comparison?${params}`,
+    '时间对比查询失败',
+    signal,
+  );
+}
+
+export function fetchCustomerTrends(months = 6, signal?: AbortSignal): Promise<CustomerTrends> {
+  return fetchJson(
+    `${API_BASE}/insights/customer-trends?months=${months}`,
+    '趋势数据查询失败',
+    signal,
+  );
+}
+
+export function fetchInventoryInquiries(signal?: AbortSignal): Promise<InventoryInquiries> {
+  if (!inventoryInquiriesPromise) {
+    inventoryInquiriesPromise = fetchJson<InventoryInquiries>(
+      `${API_BASE}/action/inventory-inquiries`,
+      '库存需求查询失败',
+      signal,
+    ).catch((error) => {
+      inventoryInquiriesPromise = null;
+      throw error;
+    });
+  }
+  return inventoryInquiriesPromise;
+}
+
+export async function fetchDashboardOverview(startDate: string, endDate: string) {
+  const [vicPersona, periodComparison, customerTrends, inventoryInquiries] =
+    await Promise.all([
+      fetchVicPersona(),
+      fetchPeriodComparison(startDate, endDate),
+      fetchCustomerTrends(),
+      fetchInventoryInquiries(),
+    ]);
+
+  return { vicPersona, periodComparison, customerTrends, inventoryInquiries };
+}

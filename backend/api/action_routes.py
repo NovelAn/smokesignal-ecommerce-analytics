@@ -103,9 +103,16 @@ async def get_inventory_inquiries():
         enrich_rows = db.execute_query(
             f"""
             SELECT tb.buyer_nick, tb.vip_level, tb.last_chat_date,
-                   ai.dominant_intent, ai.intent_distribution, ai.sentiment_label
+                   ai.dominant_intent, ai.intent_distribution, ai.sentiment_label,
+                   ai.updated_at AS ai_updated_at,
+                   csl.status AS service_status,
+                   csl.notes AS service_notes,
+                   csl.updated_at AS service_updated_at
             FROM target_buyers_precomputed tb
             LEFT JOIN buyer_ai_analysis_cache ai ON tb.buyer_nick = ai.buyer_nick
+            LEFT JOIN customer_service_log csl
+              ON tb.buyer_nick = csl.buyer_nick
+             AND csl.workstream = 'inventory'
             WHERE tb.buyer_nick IN ({placeholders})
             """,
             buyer_nicks,
@@ -116,6 +123,15 @@ async def get_inventory_inquiries():
         for buyer, info in grouped.items():
             e = enrich_map.get(buyer, {})
             ai_row = ai_map.get(buyer, {})
+            service_status = e.get("service_status") or "pending"
+            service_updated_at = e.get("service_updated_at")
+            latest_inventory_event = info.get("last_inventory_msg_time") or e.get("ai_updated_at")
+            if (
+                service_status in {"contacted", "resolved"}
+                and service_updated_at
+                and (not latest_inventory_event or latest_inventory_event <= service_updated_at)
+            ):
+                continue
             # 优先用 ai_set 的意图数据，否则用 enrich（两者同源，取非空）
             intent_dist = ai_row.get("intent_distribution") or e.get("intent_distribution")
             if isinstance(intent_dist, str):
@@ -131,6 +147,9 @@ async def get_inventory_inquiries():
                 "intent_distribution": intent_dist or {},
                 "sentiment_label": (ai_row.get("sentiment_label") or e.get("sentiment_label")) or "Unknown",
                 "detected_by": detected_by.get(buyer, "keyword"),
+                "service_status": service_status,
+                "service_notes": e.get("service_notes") or "",
+                "service_updated_at": str(service_updated_at) if service_updated_at else None,
             })
 
         # 排序：先按最近提问时间倒序，再按 VIP 等级稳定排序（同级保留时间倒序）

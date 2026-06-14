@@ -46,3 +46,8 @@ def test_get_anomaly_alerts():
     data = response.json()
     assert "anomalies" in data
     assert "total_count" in data
+
+
+def test_anomaly_alerts_is_marked_deprecated_in_openapi():
+    operation = app.openapi()["paths"]["/api/v2/insights/anomaly-alerts"]["get"]
+    assert operation["deprecated"] is True

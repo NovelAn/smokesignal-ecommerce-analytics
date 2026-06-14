@@ -68,6 +68,55 @@ class TestAggregatePainPoints:
         assert result == []
 
 
+class TestSemanticAggregation:
+    """语义主题应合并近义标签，并按客户去重。"""
+
+    def test_interest_themes_merge_synonyms_and_count_each_customer_once(self):
+        analyzer = VicPersonaAnalyzer()
+        personas = [
+            {
+                "buyer_nick": "vic1",
+                "key_interests": ["成衣主导", "梭织外套", "WOVEN OUTERWEAR梭织外套"],
+            },
+            {"buyer_nick": "vic2", "key_interests": ["男士成衣主导"]},
+            {"buyer_nick": "vic3", "key_interests": ["烟斗收藏"]},
+        ]
+
+        result = analyzer.aggregate_interest_themes(personas)
+
+        apparel = next(item for item in result if item["keyword"] == "成衣偏好")
+        assert apparel["count"] == 2
+        assert apparel["percentage"] == pytest.approx(66.7, abs=0.1)
+        assert "成衣主导" in apparel["examples"]
+
+    def test_pain_themes_merge_vip_risk_synonyms(self):
+        analyzer = VicPersonaAnalyzer()
+        personas = [
+            {"buyer_nick": "vic1", "pain_points": ["VIP漏升", "VIP漏升风险"]},
+            {"buyer_nick": "vic2", "pain_points": ["会员等级与消费不匹配"]},
+        ]
+
+        result = analyzer.aggregate_pain_themes(personas)
+
+        vip_risk = next(item for item in result if item["keyword"] == "VIP 等级不匹配")
+        assert vip_risk["count"] == 2
+        assert vip_risk["percentage"] == 100.0
+
+    def test_build_group_result_includes_summary_and_reduction_counts(self):
+        analyzer = VicPersonaAnalyzer()
+        personas = [
+            {"buyer_nick": "vic1", "key_interests": ["成衣主导", "梭织外套"], "pain_points": ["流失风险"]},
+            {"buyer_nick": "vic2", "key_interests": ["男士成衣主导"], "pain_points": ["缺少聊天记录"]},
+        ]
+
+        result = analyzer.build_group_result(personas)
+
+        assert result["summary"]["headline"]
+        assert result["summary"]["bullets"]
+        assert result["raw_label_count"] == 5
+        assert result["aggregated_theme_count"] < result["raw_label_count"]
+
+
 class TestExtractMotivations:
     """购买动机模式提取测试"""
 

@@ -1,8 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { PriorityCustomer, ServiceStatus } from '../../api/client';
+import type { ServiceStatus } from '../../api/client';
+
+interface ServiceStatusRecord {
+  service_status?: ServiceStatus | null;
+}
 
 interface StatusButtonGroupProps {
-  buyer: PriorityCustomer;
+  buyer: ServiceStatusRecord;
   /** 父组件处理实际 API 调用 + confirm 弹窗 + 30秒撤销 state */
   onChange: (newStatus: ServiceStatus) => void;
   /** 该 buyer 是否处于"30 秒可撤销"状态，父组件控制 */

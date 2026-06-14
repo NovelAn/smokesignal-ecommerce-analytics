@@ -1,153 +1,113 @@
-/**
- * Dashboard Overview 视图组件
- *
- * 显示整体业务指标和分析图表
- *
- * 包含：
- * - 时间范围筛选器
- * - 指标卡片（MetricCards）
- * - 关键词分析面板（KeywordAnalysisPanel）
- * - 重点关注客户看板（PriorityAttentionBoard）
- * - 情感和意图图表（SentimentCharts）
- */
-
-import React, { useState, useCallback } from 'react';
-import { apiClient, DashboardMetrics } from '../api/client';
+import { useEffect, useState } from 'react';
+import { Activity, ClipboardCheck } from 'lucide-react';
+import { apiClient, type DashboardMetrics } from '../api/client';
 import { useDataFetchingWithRetry } from '../hooks/useDataFetching';
+import { TimeRangeFilter } from '../components/common/TimeRangeFilter';
 import { MetricCards } from '../components/dashboard/MetricCards';
 import { KeywordAnalysisPanel } from '../components/dashboard/KeywordAnalysisPanel';
 import { PriorityAttentionBoard } from '../components/dashboard/PriorityAttentionBoard';
-import { SentimentCharts } from '../components/dashboard/SentimentCharts';
-import { YoYCompareChart } from '../components/dashboard/YoYCompareChart';
+import { VicPersonaCard } from '../components/dashboard/VicPersonaCard';
+import { PeriodComparisonCard } from '../components/dashboard/PeriodComparisonCard';
+import { CustomerTrendsGrid } from '../components/dashboard/CustomerTrendsGrid';
+import { InventoryInquiriesCard } from '../components/dashboard/InventoryInquiriesCard';
+import { fetchInventoryInquiries } from '../api/insights';
 
-type TimeRange = '7d' | '15d' | '30d' | '90d' | '1y';
+type OverviewTab = 'trends' | 'actions';
 
-/**
- * Dashboard Overview 主视图
- */
 interface DashboardOverviewProps {
   onOpenBuyerInCrm?: (buyerNick: string, currentPage: number) => void;
-  /** Back to Overview 时高亮的买家（点击进入 ChatAnalysis 时记录） */
   lastClickedBuyerNick?: string | null;
-  /** Back to Overview 时跳回那一页 */
   lastClickedPage?: number;
-  /** 高亮 5 秒后清除 */
   onClearClickedHighlight?: () => void;
-  /** 触发器：Back to Overview 时自增，让 PriorityAttentionBoard useEffect 重跑 */
   highlightTrigger?: number;
-  /** App 级 activeTab — 让 PriorityAttentionBoard 知道当前显示的是不是 Overview */
   appActiveTab?: string;
 }
 
-export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
+export function DashboardOverview({
   onOpenBuyerInCrm,
   lastClickedBuyerNick = null,
   lastClickedPage = 1,
   onClearClickedHighlight,
   highlightTrigger = 0,
   appActiveTab,
-}) => {
-  // 全局时间范围筛选器
-  const [timeRange, setTimeRange] = useState<TimeRange>('1y');
-
-  // ========== 获取 Dashboard 指标数据 ==========
-  const {
-    data: metrics,
-    isLoading: metricsLoading,
-    error: metricsError,
-  } = useDataFetchingWithRetry<DashboardMetrics>(
+}: DashboardOverviewProps) {
+  const [activeTab, setActiveTab] = useState<OverviewTab>('trends');
+  const { data: metrics, isLoading, error } = useDataFetchingWithRetry<DashboardMetrics>(
     () => apiClient.getDashboardMetrics(),
-    2 // 重试2次
+    2,
   );
 
-  // ========== 事件处理 ==========
+  useEffect(() => {
+    void fetchInventoryInquiries();
+  }, []);
 
-  /**
-   * 处理客户行操作
-   */
-  const handleRowAction = (buyer: any, actionType: string, currentPage?: number) => {
-    if (actionType === 'view_details' && buyer?.buyer_nick) {
-      onOpenBuyerInCrm?.(buyer.buyer_nick, currentPage ?? 1);
-    }
-  };
-
-  // ========== 渲染 ==========
+  const openBuyer = (buyerNick: string, page = 1) => onOpenBuyerInCrm?.(buyerNick, page);
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      {/* 全局时间范围筛选器 */}
-      <TimeRangeFilter
-        currentRange={timeRange}
-        onRangeChange={setTimeRange}
-      />
+    <div className="space-y-5 animate-in fade-in duration-500">
+      <TimeRangeFilter />
 
-      {/* Row 1: 指标卡片 */}
       <MetricCards
         metrics={metrics!}
-        isLoading={metricsLoading}
-        error={metricsError}
+        isLoading={isLoading}
+        error={error}
         onRetry={() => window.location.reload()}
       />
 
-      {/* Row 2: 关键词分析面板 */}
-      <KeywordAnalysisPanel timeRange={timeRange} />
+      <KeywordAnalysisPanel />
 
-      {/* Row 3: 重点关注客户看板 (Back 定位高亮) */}
-      <PriorityAttentionBoard
-        onRowAction={handleRowAction}
-        highlightBuyerNick={lastClickedBuyerNick}
-        highlightBuyerPage={lastClickedPage}
-        onClearClickedHighlight={onClearClickedHighlight}
-        highlightTrigger={highlightTrigger}
-        appActiveTab={appActiveTab}
-      />
+      <section className="rounded-sm border border-notion-border bg-white shadow-sm">
+        <div className="flex items-center gap-1 border-b border-notion-border bg-notion-gray_bg/30 px-2 pt-2" role="tablist" aria-label="Overview sections">
+          <TabButton active={activeTab === 'trends'} onClick={() => setActiveTab('trends')} icon={<Activity size={15} />}>
+            趋势概览
+          </TabButton>
+          <TabButton active={activeTab === 'actions'} onClick={() => setActiveTab('actions')} icon={<ClipboardCheck size={15} />}>
+            行动看板
+          </TabButton>
+        </div>
 
-      {/* Row 4: 情感和意图图表 */}
-      <SentimentCharts timeRange={timeRange} />
-
-      {/* Row 5: 同期对比分析 (CRM Round 1) */}
-      <YoYCompareChart />
+        <div className="p-4 lg:p-5">
+          {activeTab === 'trends' ? (
+            <div className="space-y-5" role="tabpanel">
+              <VicPersonaCard />
+              <PeriodComparisonCard />
+              <CustomerTrendsGrid />
+            </div>
+          ) : (
+            <div className="space-y-5" role="tabpanel">
+              <InventoryInquiriesCard onOpenBuyer={openBuyer} />
+              <PriorityAttentionBoard
+                onRowAction={(buyer, actionType, currentPage) => {
+                  if (actionType === 'view_details' && buyer?.buyer_nick) openBuyer(buyer.buyer_nick, currentPage ?? 1);
+                }}
+                highlightBuyerNick={lastClickedBuyerNick}
+                highlightBuyerPage={lastClickedPage}
+                onClearClickedHighlight={onClearClickedHighlight}
+                highlightTrigger={highlightTrigger}
+                appActiveTab={appActiveTab}
+              />
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
-};
-
-/**
- * 时间范围筛选器组件
- */
-interface TimeRangeFilterProps {
-  currentRange: TimeRange;
-  onRangeChange: (range: TimeRange) => void;
 }
 
-const TimeRangeFilter: React.FC<TimeRangeFilterProps> = ({
-  currentRange,
-  onRangeChange,
-}) => {
-  const ranges: Array<{ id: TimeRange; label: string }> = [
-    { id: '7d', label: '7 Days' },
-    { id: '15d', label: '15 Days' },
-    { id: '30d', label: '1 Mo' },
-    { id: '90d', label: '1 Qtr' },
-    { id: '1y', label: '1 Yr' },
-  ];
-
+function TabButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex justify-end">
-      <div className="flex bg-notion-gray_bg p-0.5 rounded-md border border-notion-border shadow-sm">
-        {ranges.map((range) => (
-          <button
-            key={range.id}
-            onClick={() => onRangeChange(range.id)}
-            className={`px-4 py-2 text-sm font-medium rounded-sm transition-all ${
-              currentRange === range.id
-                ? 'bg-white text-blue-700 shadow-sm border border-blue-100'
-                : 'text-notion-muted hover:text-notion-text'
-            }`}
-          >
-            {range.label}
-          </button>
-        ))}
-      </div>
-    </div>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 rounded-t px-4 py-2.5 text-sm font-medium transition-colors ${
+        active
+          ? 'border border-b-white border-notion-border bg-white text-notion-text -mb-px'
+          : 'border border-transparent text-notion-muted hover:bg-white/60 hover:text-notion-text'
+      }`}
+    >
+      {icon}{children}
+    </button>
   );
-};
+}
