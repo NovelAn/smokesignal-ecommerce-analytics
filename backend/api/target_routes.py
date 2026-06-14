@@ -2458,7 +2458,42 @@ async def get_keyword_analysis(
                 # 转换 Decimal 为 int
                 category_counts[row['category']] += int(row['count'])
 
-        # 计算百分比
+        # 第 10 类：库存查询（AI intent 来源，按买家计数，区别于上面 9 类的消息计数）
+        # 数据源：buyer_ai_analysis_cache.dominant_intent / intent_distribution
+        # buyer_type 过滤通过 target_buyers_precomputed 关联（ALL 时跳过 join）
+        inventory_count = 0
+        try:
+            if 'ALL' in buyer_type_list:
+                inv_query = """
+                    SELECT COUNT(*) AS c
+                    FROM buyer_ai_analysis_cache ai
+                    WHERE ai.dominant_intent = 'Inventory Inquiry'
+                       OR JSON_EXTRACT(ai.intent_distribution, '$."Inventory Inquiry"') > 0.3
+                """
+                inv_rows = db.execute_query(inv_query)
+            else:
+                placeholders = ','.join(['%s'] * len(buyer_type_list))
+                inv_query = f"""
+                    SELECT COUNT(*) AS c
+                    FROM buyer_ai_analysis_cache ai
+                    JOIN target_buyers_precomputed tb ON tb.buyer_nick = ai.buyer_nick
+                    WHERE tb.buyer_type IN ({placeholders})
+                      AND (ai.dominant_intent = 'Inventory Inquiry'
+                           OR JSON_EXTRACT(ai.intent_distribution, '$."Inventory Inquiry"') > 0.3)
+                """
+                inv_rows = db.execute_query(inv_query, buyer_type_list)
+            if inv_rows:
+                inventory_count = int(inv_rows[0]['c'])
+        except Exception:
+            # 库存查询为可选增强，失败不应影响主 9 类返回
+            inventory_count = 0
+
+        # 追加库存查询到 category_counts（与上面 9 类消息计数语义不同，当前为 0 时
+        # 不影响分布；待 AI 数据积累后自然显现）
+        if inventory_count > 0:
+            category_counts["库存查询"] = inventory_count
+
+        # 计算百分比（库存查询已并入 category_counts，统一一次重算，donut 口径一致）
         total_category_count = sum(category_counts.values())
         for cat_name, count in sorted(category_counts.items(), key=lambda x: -x[1]):
             percentage = round(count / total_category_count * 100, 1) if total_category_count > 0 else 0
@@ -2467,6 +2502,11 @@ async def get_keyword_analysis(
                 "value": count,
                 "percentage": percentage
             })
+
+        # 即使 inventory_count=0（无 AI 回填数据），也在分布末尾声明该类目存在
+        # （前端可显示「暂无」），不破坏 donut 百分比
+        if inventory_count == 0:
+            category_distribution.append({"name": "库存查询", "value": 0, "percentage": 0.0})
 
         # 获取关键词
         keyword_query_parts = []
