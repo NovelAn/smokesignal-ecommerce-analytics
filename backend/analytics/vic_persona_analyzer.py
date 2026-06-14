@@ -92,13 +92,13 @@ class VicPersonaAnalyzer:
         query = """
             SELECT
                 tb.buyer_nick,
-                ai.key_interests,
-                ai.pain_points,
-                ai.recommended_action
+                ai.persona_key_interests AS key_interests,
+                ai.persona_pain_points AS pain_points,
+                ai.persona_recommended_action AS recommended_action
             FROM target_buyers_precomputed tb
             JOIN buyer_ai_analysis_cache ai ON tb.buyer_nick = ai.buyer_nick
             WHERE tb.buyer_type IN ('VIC', 'BOTH')
-              AND ai.key_interests IS NOT NULL
+              AND ai.persona_key_interests IS NOT NULL
         """
         personas = db.execute_query(query)
 
