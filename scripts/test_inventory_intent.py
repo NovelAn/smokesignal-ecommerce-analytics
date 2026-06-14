@@ -25,13 +25,14 @@ async def find_test_samples():
     db = Database()
 
     # 构建 LIKE 条件
-    conditions = " OR ".join([f"message_content LIKE '%{kw}%'" for kw in INVENTORY_KEYWORDS])
+    # chat_history 真实列名：user_nick(买家) / sender_nick(发送方) / content(正文)
+    conditions = " OR ".join([f"content LIKE '%{kw}%'" for kw in INVENTORY_KEYWORDS])
 
     query = f"""
-    SELECT DISTINCT buyer_nick, COUNT(*) as msg_count
+    SELECT DISTINCT user_nick AS buyer_nick, COUNT(*) as msg_count
     FROM chat_history
-    WHERE sender = 'buyer' AND ({conditions})
-    GROUP BY buyer_nick
+    WHERE sender_nick = user_nick AND ({conditions})
+    GROUP BY user_nick
     ORDER BY msg_count DESC
     LIMIT 20
     """
