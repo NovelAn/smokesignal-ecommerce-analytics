@@ -36,7 +36,8 @@ async def get_inventory_inquiries():
       - last_chat_date / dominant_intent / intent_distribution / sentiment_label：AI 增强
       - detected_by："ai" | "keyword" | "both"（来源：AI 检测 / 关键词兜底 / 两者）
 
-    排序：VIP 等级降序（V3→Non-VIP）→ 最近库存提问时间降序。
+    排序：按库存需求发出日期（last_inventory_msg_time）降序——最近的需求排最前。
+    原因：客户最后聊天起算超 2 周即无法主动旺旺触达，最近发出需求的最可能仍在触达窗口。
     """
     try:
         db = Database()
@@ -152,10 +153,10 @@ async def get_inventory_inquiries():
                 "service_updated_at": str(service_updated_at) if service_updated_at else None,
             })
 
-        # 排序：先按最近提问时间倒序，再按 VIP 等级稳定排序（同级保留时间倒序）
-        vip_order = {"V3": 1, "V2": 2, "V1": 3, "V0": 4}
+        # 排序：纯按库存需求发出日期（last_inventory_msg_time）降序。
+        # 业务原因：客户最后聊天起算超过 2 周即无法主动旺旺触达，最近发出需求的客户
+        # 最可能仍在触达窗口内，应优先处理 → 最新日期排最前。无提问时间的（AI-only）排末尾。
         inquiries.sort(key=lambda x: x["last_inventory_msg_time"] or "", reverse=True)
-        inquiries.sort(key=lambda x: vip_order.get(x["vip_level"], 5))
 
         return {"inquiries": inquiries, "total_count": len(inquiries)}
     except Exception as e:
