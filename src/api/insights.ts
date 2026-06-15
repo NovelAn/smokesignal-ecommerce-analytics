@@ -32,9 +32,13 @@ export function fetchVicPersona(
 export function fetchPeriodComparison(
   startDate: string,
   endDate: string,
+  comparisonStartDate?: string | null,
+  comparisonEndDate?: string | null,
   signal?: AbortSignal,
 ): Promise<PeriodComparison> {
   const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  if (comparisonStartDate) params.set('comparison_start_date', comparisonStartDate);
+  if (comparisonEndDate) params.set('comparison_end_date', comparisonEndDate);
   return fetchJson(
     `${API_BASE}/insights/period-comparison?${params}`,
     '时间对比查询失败',

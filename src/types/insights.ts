@@ -103,4 +103,7 @@ export interface TimeRange {
   start_date: string;
   end_date: string;
   preset: TimeRangePreset;
+  /** 自定义对比期（可选，留空则后端自动算等长前期） */
+  comparison_start_date?: string | null;
+  comparison_end_date?: string | null;
 }

@@ -5,7 +5,7 @@ import type { TimeRange, TimeRangePreset } from '../types/insights';
 interface TimeRangeContextValue {
   timeRange: TimeRange;
   setPreset: (preset: Exclude<TimeRangePreset, 'custom'>) => void;
-  setCustomRange: (start: string, end: string) => void;
+  setCustomRange: (start: string, end: string, compStart?: string, compEnd?: string) => void;
 }
 
 export const TimeRangeContext = createContext<TimeRangeContextValue | null>(null);
@@ -46,12 +46,24 @@ export function TimeRangeProvider({ children }: { children: ReactNode }) {
     setTimeRange(calculateRange(preset));
   }, []);
 
-  const setCustomRange = useCallback((start: string, end: string) => {
-    if (!start || !end || start > end) {
-      throw new Error('开始日期不能晚于结束日期');
-    }
-    setTimeRange({ start_date: start, end_date: end, preset: 'custom' });
-  }, []);
+  const setCustomRange = useCallback(
+    (start: string, end: string, compStart?: string, compEnd?: string) => {
+      if (!start || !end || start > end) {
+        throw new Error('开始日期不能晚于结束日期');
+      }
+      if (compStart && compEnd && compStart > compEnd) {
+        throw new Error('对比期开始日期不能晚于结束日期');
+      }
+      setTimeRange({
+        start_date: start,
+        end_date: end,
+        preset: 'custom',
+        comparison_start_date: compStart || null,
+        comparison_end_date: compEnd || null,
+      });
+    },
+    [],
+  );
 
   const value = useMemo(
     () => ({ timeRange, setPreset, setCustomRange }),

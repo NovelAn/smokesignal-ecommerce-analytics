@@ -24,7 +24,13 @@ export function PeriodComparisonCard() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetchPeriodComparison(timeRange.start_date, timeRange.end_date, controller.signal)
+    fetchPeriodComparison(
+      timeRange.start_date,
+      timeRange.end_date,
+      timeRange.comparison_start_date,
+      timeRange.comparison_end_date,
+      controller.signal,
+    )
       .then(setData)
       .catch((requestError) => {
         if (requestError?.name !== 'AbortError') {

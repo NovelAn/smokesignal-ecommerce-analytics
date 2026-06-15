@@ -36,9 +36,16 @@ class PeriodComparator:
         self,
         current_start: date,
         current_end: date,
+        comp_start: Optional[date] = None,
+        comp_end: Optional[date] = None,
     ) -> Dict:
-        """对比当期与对比期的真实快照指标。"""
-        comp_start, comp_end = self.calculate_comparison_period(current_start, current_end)
+        """对比当期与对比期的真实快照指标。
+
+        comp_start/comp_end 为外部指定对比期（自定义两周期对比，支持同比/不等长）；
+        未传则自动算等长前期（紧邻当期前一天）。
+        """
+        if comp_start is None or comp_end is None:
+            comp_start, comp_end = self.calculate_comparison_period(current_start, current_end)
 
         queries = self._get_queries()
         current_metrics = queries.get_period_comparison_metrics(

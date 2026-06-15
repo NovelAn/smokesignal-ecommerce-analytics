@@ -4,6 +4,7 @@ v2 routes exposing VIC group persona, period-over-period comparison,
 at-risk customer detection, and customer trend data.
 """
 from datetime import date
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -33,12 +34,25 @@ async def get_vic_persona(buyer_type: str = Query("VIC", description="VIC（含B
 async def get_period_comparison(
     start_date: date = Query(..., description="当期开始日期"),
     end_date: date = Query(..., description="当期结束日期"),
+    comparison_start_date: Optional[date] = Query(None, description="对比期开始日期（可选，留空自动算等长前期）"),
+    comparison_end_date: Optional[date] = Query(None, description="对比期结束日期（可选）"),
 ):
-    """对比当期 (T1) 与等长对比期 (T0) 的关键指标变化。"""
+    """对比当期 (T1) 与对比期 (T0) 的关键指标变化。
+
+    未传对比期 → 自动算等长前期（紧邻当期前一天）；
+    传了 comparison_start/end → 用自定义对比期（支持同比/不等长）。
+    """
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date 不能大于 end_date")
+    if comparison_start_date and comparison_end_date and comparison_start_date > comparison_end_date:
+        raise HTTPException(status_code=400, detail="comparison_start_date 不能大于 comparison_end_date")
     try:
-        return await PeriodComparator().compare_metrics(start_date, end_date)
+        return await PeriodComparator().compare_metrics(
+            start_date,
+            end_date,
+            comp_start=comparison_start_date,
+            comp_end=comparison_end_date,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"时间对比查询失败: {str(e)}")
 

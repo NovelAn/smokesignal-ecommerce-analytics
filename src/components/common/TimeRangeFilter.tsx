@@ -16,16 +16,20 @@ export function TimeRangeFilter() {
   const [showCustom, setShowCustom] = useState(timeRange.preset === 'custom');
   const [customStart, setCustomStart] = useState(timeRange.start_date);
   const [customEnd, setCustomEnd] = useState(timeRange.end_date);
+  const [compStart, setCompStart] = useState(timeRange.comparison_start_date ?? '');
+  const [compEnd, setCompEnd] = useState(timeRange.comparison_end_date ?? '');
   const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     setCustomStart(timeRange.start_date);
     setCustomEnd(timeRange.end_date);
-  }, [timeRange.end_date, timeRange.start_date]);
+    setCompStart(timeRange.comparison_start_date ?? '');
+    setCompEnd(timeRange.comparison_end_date ?? '');
+  }, [timeRange.comparison_end_date, timeRange.comparison_start_date, timeRange.end_date, timeRange.start_date]);
 
   const applyCustomRange = () => {
     try {
-      setCustomRange(customStart, customEnd);
+      setCustomRange(customStart, customEnd, compStart || undefined, compEnd || undefined);
       setValidationError(null);
     } catch (error) {
       setValidationError(error instanceof Error ? error.message : '日期范围无效');
@@ -76,11 +80,12 @@ export function TimeRangeFilter() {
       </div>
 
       {showCustom && (
-        <div className="flex flex-col gap-2 border-t border-notion-border bg-notion-gray_bg/40 px-4 py-3 sm:flex-row sm:items-end">
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-2 border-t border-notion-border bg-notion-gray_bg/40 px-4 py-3">
+          <span className="text-xs font-semibold uppercase tracking-wider text-notion-text">当期</span>
           <label className="text-xs text-notion-muted">
-            <span className="mb-1 block">开始日期</span>
+            <span className="mb-1 block">开始</span>
             <input
-              aria-label="开始日期"
+              aria-label="当期开始日期"
               type="date"
               value={customStart}
               max={customEnd}
@@ -89,13 +94,36 @@ export function TimeRangeFilter() {
             />
           </label>
           <label className="text-xs text-notion-muted">
-            <span className="mb-1 block">结束日期</span>
+            <span className="mb-1 block">结束</span>
             <input
-              aria-label="结束日期"
+              aria-label="当期结束日期"
               type="date"
               value={customEnd}
               min={customStart}
               onChange={(event) => setCustomEnd(event.target.value)}
+              className="rounded border border-notion-border bg-white px-2.5 py-1.5 text-sm text-notion-text"
+            />
+          </label>
+          <span className="text-xs font-semibold uppercase tracking-wider text-notion-muted">对比期 <span className="font-normal opacity-70">(可选·留空自动算等长前期)</span></span>
+          <label className="text-xs text-notion-muted">
+            <span className="mb-1 block">开始</span>
+            <input
+              aria-label="对比期开始日期"
+              type="date"
+              value={compStart}
+              max={compEnd || undefined}
+              onChange={(event) => setCompStart(event.target.value)}
+              className="rounded border border-notion-border bg-white px-2.5 py-1.5 text-sm text-notion-text"
+            />
+          </label>
+          <label className="text-xs text-notion-muted">
+            <span className="mb-1 block">结束</span>
+            <input
+              aria-label="对比期结束日期"
+              type="date"
+              value={compEnd}
+              min={compStart || undefined}
+              onChange={(event) => setCompEnd(event.target.value)}
               className="rounded border border-notion-border bg-white px-2.5 py-1.5 text-sm text-notion-text"
             />
           </label>
