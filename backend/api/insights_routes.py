@@ -16,12 +16,17 @@ router = APIRouter(prefix="/api/v2/insights", tags=["insights"])
 
 
 @router.get("/vic-persona")
-async def get_vic_persona():
-    """聚合 VIC 群体画像：兴趣、痛点、购买动机。"""
+async def get_vic_persona(buyer_type: str = Query("VIC", description="VIC（含BOTH）或 SMOKER（含BOTH）")):
+    """聚合高价值客户群体画像：兴趣、痛点、购买动机。
+
+    buyer_type=VIC → VIC + BOTH；buyer_type=SMOKER → SMOKER + BOTH（BOTH 同时属于两者）。
+    """
+    if buyer_type.upper() not in ("VIC", "SMOKER"):
+        raise HTTPException(status_code=400, detail="buyer_type 只支持 VIC 或 SMOKER")
     try:
-        return await VicPersonaAnalyzer().analyze_vic_group()
+        return await VicPersonaAnalyzer().analyze_vic_group(buyer_type=buyer_type.upper())
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"VIC 群体画像查询失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"群体画像查询失败: {str(e)}")
 
 
 @router.get("/period-comparison")

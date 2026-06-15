@@ -7,36 +7,64 @@ import { LoadingSpinner } from '../common/LoadingState';
 
 const MAX_THEME_COUNT = 8;
 
+type BuyerType = 'VIC' | 'SMOKER';
+
+const PERSONA_LABELS: Record<BuyerType, { title: string; eyebrow: string }> = {
+  VIC: { title: 'VIC 群体画像', eyebrow: 'VIC cohort intelligence' },
+  SMOKER: { title: 'SMOKER 群体画像', eyebrow: 'Smoker cohort intelligence' },
+};
+
 export function VicPersonaCard() {
+  const [buyerType, setBuyerType] = useState<BuyerType>('VIC');
   const [data, setData] = useState<VicPersona | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchVicPersona(controller.signal)
+    setLoading(true);
+    fetchVicPersona(buyerType, controller.signal)
       .then(setData)
       .catch((requestError) => {
         if (requestError?.name !== 'AbortError') {
-          setError(requestError instanceof Error ? requestError.message : 'VIC 群体画像加载失败');
+          setError(requestError instanceof Error ? requestError.message : '群体画像加载失败');
         }
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, []);
+  }, [buyerType]);
 
   if (loading) return <CardShell><LoadingSpinner /></CardShell>;
   if (error) return <CardShell><ErrorAlert message={error} /></CardShell>;
   if (!data) return null;
+
+  const labels = PERSONA_LABELS[buyerType];
 
   return (
     <CardShell>
       <div className="mb-5 flex flex-col gap-2 border-b border-notion-border pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-orange-700">
-            <Crown size={14} /> VIC cohort intelligence
+            <Crown size={14} /> {labels.eyebrow}
           </div>
-          <h2 className="text-lg font-semibold text-notion-text">VIC 群体画像</h2>
+          <h2 className="text-lg font-semibold text-notion-text">{labels.title}</h2>
+          {/* VIC / SMOKER 切换（BOTH 同时属于两者，故两个画像都含 BOTH） */}
+          <div className="mt-2 inline-flex rounded border border-notion-border bg-notion-gray_bg/40 p-0.5">
+            {(['VIC', 'SMOKER'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setBuyerType(t)}
+                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                  buyerType === t
+                    ? 'bg-notion-text text-white shadow-sm'
+                    : 'text-notion-muted hover:text-notion-text'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="text-sm text-notion-muted">
           当前样本 <strong className="font-serif text-2xl font-medium text-notion-text">{data.total_vic_count}</strong> 人

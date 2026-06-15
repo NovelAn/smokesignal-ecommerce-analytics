@@ -141,14 +141,21 @@ class VicPersonaAnalyzer:
             "aggregated_theme_count": len(interests) + len(pain_points),
         }
 
-    async def analyze_vic_group(self) -> Dict:
-        """分析所有 VIC 客户的群体画像（查询真实 DB）。
+    async def analyze_vic_group(self, buyer_type: str = "VIC") -> Dict:
+        """分析高价值客户群体的画像（查询真实 DB）。
+
+        Args:
+            buyer_type: "VIC"（默认，含 BOTH）或 "SMOKER"（含 BOTH）。
+                        BOTH 同时是 VIC 也是 SMOKER，故两个画像都包含它。
 
         Returns:
             包含 total_vic_count, key_interests, key_pain_points,
             purchase_motivations 的字典。
         """
         from backend.database import Database
+
+        # BOTH 同时属于 VIC 和 SMOKER；选 VIC 画像纳入 VIC+BOTH，选 SMOKER 纳入 SMOKER+BOTH
+        types = ("SMOKER", "BOTH") if buyer_type.upper() == "SMOKER" else ("VIC", "BOTH")
 
         db = Database()
         query = """
@@ -159,10 +166,10 @@ class VicPersonaAnalyzer:
                 ai.persona_recommended_action AS recommended_action
             FROM target_buyers_precomputed tb
             JOIN buyer_ai_analysis_cache ai ON tb.buyer_nick = ai.buyer_nick
-            WHERE tb.buyer_type IN ('VIC', 'BOTH')
+            WHERE tb.buyer_type IN (%(t0)s, %(t1)s)
               AND ai.persona_key_interests IS NOT NULL
         """
-        personas = db.execute_query(query)
+        personas = db.execute_query(query, {"t0": types[0], "t1": types[1]})
 
         return self.build_group_result(personas)
 

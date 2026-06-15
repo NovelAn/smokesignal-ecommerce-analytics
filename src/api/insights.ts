@@ -18,8 +18,15 @@ async function fetchJson<T>(url: string, errorPrefix: string, signal?: AbortSign
   return response.json();
 }
 
-export function fetchVicPersona(signal?: AbortSignal): Promise<VicPersona> {
-  return fetchJson(`${API_BASE}/insights/vic-persona`, 'VIC 群体画像查询失败', signal);
+export function fetchVicPersona(
+  buyerType: 'VIC' | 'SMOKER' = 'VIC',
+  signal?: AbortSignal,
+): Promise<VicPersona> {
+  return fetchJson(
+    `${API_BASE}/insights/vic-persona?buyer_type=${buyerType}`,
+    '群体画像查询失败',
+    signal,
+  );
 }
 
 export function fetchPeriodComparison(
