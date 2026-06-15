@@ -218,7 +218,7 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 overflow-hidden bg-white relative">
         <div className="h-full overflow-y-auto p-4 lg:p-6 scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent">
-          <div className="max-w-[1600px] mx-auto h-full flex flex-col">
+          <div className="max-w-[1920px] mx-auto h-full flex flex-col">
             {mountedTabs.overview && (
               <div className={activeTab === 'overview' ? 'contents' : 'hidden'}>
                 <DashboardOverview

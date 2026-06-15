@@ -27,7 +27,7 @@ export interface PeriodMetric {
   current: number;
   previous: number;
   change: number;
-  change_pct: number;
+  change_pct: number | null;
 }
 
 export interface PeriodComparison {

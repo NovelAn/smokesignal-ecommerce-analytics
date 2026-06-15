@@ -58,12 +58,14 @@ class PeriodComparator:
             current_val = current_metrics.get(metric_name, 0)
             previous_val = previous_metrics.get(metric_name, 0)
             change = current_val - previous_val
-            change_pct = (change / previous_val * 100) if previous_val > 0 else 0.0
+            # previous=0 时无法算百分比：change>0 是纯新增（返回 None，前端显示"新增"），
+            # change=0 则无变化。None 比 0.0% 准确，避免"新增 5 (0.0%)"的误导。
+            change_pct = (change / previous_val * 100) if previous_val > 0 else None
             metrics[metric_name] = {
                 "current": current_val,
                 "previous": previous_val,
                 "change": change,
-                "change_pct": round(change_pct, 1),
+                "change_pct": round(change_pct, 1) if change_pct is not None else None,
             }
 
         return {

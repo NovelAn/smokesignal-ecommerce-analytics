@@ -1,8 +1,8 @@
 # Overview 改造 — 前端交接文档（Phase 4）
 
-**日期：** 2026-06-14
-**后端状态：** Phase 2-3 完成（11/11 任务 + 库存纳入逻辑修正），40 测试全过，5 个新 API 已对真实 DB 验证
-**前端计划：** 见 `docs/superpowers/plans/2026-06-14-overview-redesign-frontend.md`（15 个任务）
+**日期：** 2026-06-14（2026-06-15 验收复核 + 修复）
+**状态：** 后端 Phase 2-3 + 前端 Phase 4 均完成。5 模块真实数据验收通过（anomaly 已砍）。Overview 相关 55 测试全过。已修 VIP 升级显示 bug + 宽屏留白。
+**前端计划：** 见 `docs/superpowers/plans/2026-06-14-overview-redesign-frontend.md`（15 任务，已实施）
 
 > ⚠️ **本文档的 API 契约是真实跑出来的，优先级高于前端计划里的假设。** 前端计划写于后端实现前，部分响应结构已变化（尤其库存端点）。以下为准。
 
@@ -22,20 +22,22 @@
 ### 1.1 `GET /api/v2/insights/vic-persona`
 ```jsonc
 {
-  "total_vic_count": int,              // 当前 ~116
-  "key_interests": [                   // ⚠️ 当前 313 条，未去重/未 TF-IDF，含 AI 生成的长句
-    {"keyword": "高频复购", "count": int, "percentage": float}
+  "total_vic_count": int,              // 实测 111
+  "key_interests": [                   // ✅ 已聚合为 ~10 个语义主题（非原始词频）
+    {"keyword": "成衣偏好", "count": 56, "percentage": 50.5, "examples": ["成衣主导", "梭织外套"]}
   ],
-  "key_pain_points": [                 // ⚠️ 当前 212 条，同上
-    {"keyword": "...", "count": int, "percentage": float}
+  "key_pain_points": [                 // ✅ 已聚合为 ~9 个主题
+    {"keyword": "留存与流失风险", "count": 78, "percentage": 70.3, "examples": ["..."]}
   ],
   "purchase_motivations": [            // 4 个固定 pattern
     {"pattern": "新品尝鲜者", "count": int}   // 复购老客户/新品尝鲜者/价格敏感型/品质追求者
-  ]
+  ],
+  "summary": { "headline": "...", "bullets": ["..."] },  // 群体结论
+  "raw_label_count": int,              // 原始标签数（313），已归并为主题
+  "aggregated_theme_count": int        // 归并后主题数
 }
 ```
-**前端建议**：兴趣/痛点只展示 Top N（如 15-20），按 count 降序；可加"展开更多"。
-**已知限制**：聚合是原始词频，未做显著性/去重，长句较多。属后端待优化项（TF-IDF/聚类），前端先 Top-N 兜底。
+**前端现状（2026-06-15 复核）**：已是主题级聚合，`VicPersonaCard` 渲染 Top 8 主题 chip（兴趣/痛点）+ 动机条形 + summary。**无需 Top-N 兜底，质量良好。** 原始词频归并已在 `vic_persona_analyzer._aggregate_themes` 完成。
 
 ### 1.2 `GET /api/v2/insights/period-comparison?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`
 ```jsonc
@@ -43,14 +45,14 @@
   "current_period":  {"start_date": "2026-05-01", "end_date": "2026-05-31"},
   "comparison_period": {"start_date": "2026-03-31", "end_date": "2026-04-30"},  // 自动算等长前期
   "metrics": {
-    "new_vic":          {"current": int, "previous": int, "change": int, "change_pct": float},
+    "new_vic":          {"current": int, "previous": int, "change": int, "change_pct": float | null},
     "churn_warning":    {...同上},
     "vip_upgrades":     {...同上},
     "sentiment_negative": {...同上}
   }
 }
 ```
-**状态更新（2026-06-14）：** 已接入真实历史快照首尾对比，不再返回固定 0。情感转负使用 AI 增量分析时间统计；如果周期内没有真实增量负面记录，该项为 0。
+**状态更新（2026-06-15 复核）：** **3/4 指标真实有效**（非 stub）。实测 30 天窗口（5-14~6-14）：new_vic 9(+28.6%)、churn_warning 31(**+1450% 真实预警信号**，前期仅 2)、vip_upgrades 5。`change_pct` 当 `previous=0` 时返回 **`null`**（前端 `MetricCard` 显示"新增 N"而非误导性的"0.0%"）；`previous=0 & change=0` 也为 null（前端不显示百分比）。`sentiment_negative=0` 是 AI 增量情感覆盖稀疏所致（见 §3），**非 bug**。
 
 ### 1.3 `GET /api/v2/insights/anomaly-alerts`（deprecated）
 ```jsonc
@@ -121,35 +123,56 @@
 
 ---
 
-## 2. 前端计划需调整的点
+## 2. 前端验收结果（2026-06-15 真实数据复核）
 
-| 前端计划任务 | 调整 |
-|---|---|
-| Task 6 (InventoryInquiries 组件) | 字段已变（见 1.5）。必须渲染 `inventory_questions`（提问原文，最有行动价值）、`detected_by` 标签、`question_count`。**不要**按 `dominant_intent==='Inventory Inquiry'` 过滤 |
-| VIC 群体画像 | key_interests/key_pain_points 数量很多（200-300），需 Top-N + 展开 |
-| 时间对比卡片 | 数字当前是 0（stub），按结构渲染即可，后端补数据后生效 |
-| 趋势图 sentiment | sentiment_trend 恒空，图表需做空态处理 |
+**5 模块全部通过验收**（anomaly 已按用户决定砍掉，详见 1.3）：
 
----
+| 模块 | 状态 | 说明 |
+|---|---|---|
+| VIC 群体画像 | ✅ 完成 | 10 兴趣主题 + 9 痛点主题 + summary，质量良好 |
+| 时间对比 | ✅ 3/4 真实 | new_vic/churn/vip 真实；sentiment=0 是数据稀疏非 bug |
+| 客户趋势 | ✅ 完成 | 池规模/活跃率/高风险 3 图真实，情感图空态正常 |
+| 库存需求 | ✅ 完成 | 21 客户 + 提问原文 + detected_by，纳入逻辑正确 |
+| ~~异常预警~~ | 🗑️ 砍掉 | 与 PriorityAttentionBoard 冗余，真实风险走「流失预警」|
 
-## 3. 已知后端待办（不影响前端开发，前端按现状渲染即可）
-
-1. `vic-persona` 兴趣/痛点聚合优化（TF-IDF/去重，当前原始词频）
-2. `customer-trends.sentiment_trend` 数据源（history 无情感字段）
-3. 沟通频率骤降（需先为历史快照补齐可比较聊天字段）
-4. Inventory Inquiry 的 AI 回填（Task 1 prompt 上线后自然积累，1-2 周）
-5. Task 2 库存 intent 准确率测试待用户手动执行（花 ¥，需 API keys）
+**已修复的前端问题（本次 2026-06-15）：**
+1. VIP 升级 `previous=0` 时显示 `0.0%` 误导 → 后端返回 `null`，前端显示"新增 N"（`MetricCard.tsx`）
+2. 宽屏留白 → `App.tsx` 全局 `max-w-[1600px]` → `max-w-[1920px]`（Overview 组件本身布局正确，留白来自全局限宽居中）
 
 ---
 
-## 4. 启动新会话的第一步
+## 3. sentiment 数据稀疏（制约 3 处，**非代码 bug**）
+
+2026-06-15 实测 `buyer_ai_analysis_cache`：567 客户中 **428 个(75%) sentiment_label 为 NULL**，仅 131 Neutral / 6 Negative / 2 Positive；`incremental_sentiment_label` 仅 8 条且全在 6/13。**5 月期间 0 条增量情感** → 以下 3 处的 0/空是数据覆盖问题，不是 Overview 代码问题：
+
+1. `period-comparison.sentiment_negative=0`（周期内无增量负面记录）
+2. ~~`anomaly-alerts.sentiment_negative`~~（模块已砍）
+3. `customer-trends.sentiment_trend=[]`（history 表无情感字段，前端已做空态提示）
+
+**根因**：AI 情感分析覆盖度不足。根治需给更多客户跑 sentiment（成本 + 时间，且月度趋势需按月持续跑），属独立的数据工程，不在 Overview 范围。用户已选择**接受现状如实标注**（前端不造假，随 AI 日常分析自然积累）。
+
+---
+
+## 4. 仍挂起的后端项（不阻塞前端）
+
+1. Inventory Inquiry 的 AI 回填（Task 1 prompt 上线后自然积累，1-2 周；当前 21 条全 keyword 来源）
+2. Task 2 库存 intent 准确率测试待用户手动执行（花 ¥，需 API keys）
+3. ~~vic-persona 聚合优化~~ ✅ 已完成（主题归并）
+4. ~~period 真实环比~~ ✅ 已完成（3/4 真实）
+5. ~~沟通频率骤降~~ 随 anomaly 模块砍掉，不再需要
+
+---
+
+## 5. 复现 / 验证命令
 
 ```bash
 cd /Users/novel/Projects/smokesignal-ecommerce-analytics/.claude/worktrees/feature+overview-redesign
-# 读两份文档：
-#   docs/superpowers/plans/2026-06-14-overview-redesign-frontend.md  （15 任务主体）
-#   docs/superpowers/plans/2026-06-14-frontend-handoff.md            （本文档，API 真实契约）
-# 验证后端在跑：
-/Users/novel/Projects/smokesignal-ecommerce-analytics/.venv/bin/python -m backend.main &
-curl -s http://localhost:8000/api/v2/action/inventory-inquiries | python -m json.tool | head
+# 后端（reload 模式，改后端代码自动重载）
+API_RELOAD=true /Users/novel/Projects/smokesignal-ecommerce-analytics/.venv/bin/python -m backend.main &
+# 前端（端口冲突时会自动换，如 3001）
+npm run dev
+# 验证 period 返回 null（VIP previous=0）
+curl -s "http://localhost:8000/api/v2/insights/period-comparison?start_date=2026-05-14&end_date=2026-06-14" | python -m json.tool
+# 后端测试（避开顶层改 stdio 的旧脚本）
+/Users/novel/Projects/smokesignal-ecommerce-analytics/.venv/bin/python -m pytest tests/analytics/ tests/api/test_action_routes.py tests/api/test_insights_routes.py tests/integration/test_insights_e2e.py -q
 ```

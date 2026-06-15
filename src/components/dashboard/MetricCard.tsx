@@ -6,7 +6,7 @@ interface MetricCardProps {
   value: string | number;
   subtitle?: string;
   change?: number;
-  changePct?: number;
+  changePct?: number | null;
   icon?: ReactNode;
 }
 
@@ -27,7 +27,9 @@ export function MetricCard({ title, value, subtitle, change, changePct, icon }: 
           <span className={`inline-flex items-center gap-1 text-xs font-medium tabular-nums ${changeColor}`}>
             <ChangeIcon size={13} />
             {Math.abs(change)}
-            {changePct !== undefined && ` (${Math.abs(changePct).toFixed(1)}%)`}
+            {changePct === null
+              ? direction > 0 && ' · 新增'
+              : changePct !== undefined && ` (${Math.abs(changePct).toFixed(1)}%)`}
           </span>
         )}
       </div>

@@ -75,4 +75,5 @@ def test_compare_metrics_structure():
         "change": 4,
         "change_pct": 50.0,
     }
-    assert result["metrics"]["sentiment_negative"]["change_pct"] == 0.0
+    # sentiment_negative previous=0 → 无基线，change_pct 返回 None（前端显示"新增"而非误导性 0.0%）
+    assert result["metrics"]["sentiment_negative"]["change_pct"] is None
