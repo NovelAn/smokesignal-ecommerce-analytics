@@ -62,7 +62,8 @@ SENTIMENT_INTENT_PROMPT = """分析以下客户消息的情感和意图。
    - ✅ "这个有没有L码" → Pre-sale Inquiry
    - ✅ "新款什么时候上架" → Pre-sale Inquiry
    - ✅ "这件和那件有什么区别" → Pre-sale Inquiry
-   - ❌ "这个还有货吗" → Inventory Inquiry（单纯库存查询）
+   - ✅ "这个还有货吗" → Pre-sale Inquiry（单纯库存确认，非缺货/补货诉求）
+   - ✅ "是现货吗" → Pre-sale Inquiry（库存确认）
 
 2. Post-sale Support（售后支持）- 收到产品后的问题反馈、退换货咨询、保修维修
    - 关键词：退货、换货、退款、小了、大了、不合适、颜色不对、发错货、质量问题
@@ -84,25 +85,30 @@ SENTIMENT_INTENT_PROMPT = """分析以下客户消息的情感和意图。
    - 负面评价词：太差/质量差/很差/垃圾/骗子/假货/欺骗/失望/不满/态度差/服务差
    - ❌ 单纯退换货不算投诉，❌ 语气词不算不满，❌ 询问不算投诉
 
-6. Inventory Inquiry（库存查询）- 单纯询问产品是否有货、库存情况
-   - 关键词（作为主要意图）：有货吗、还有吗、库存、缺货、断货、什么时候补货
+6. Inventory Inquiry（库存需求）- 客户表达**缺货/补货/调货**诉求：已知或疑心没货，问何时补货、能否调货、还会不会上架
+   - 关键词（作为主要意图）：没货、断货、缺货、补货、没现货、什么时候补货、什么时候有货、还会上架吗
    - 判断依据：
-     * 消息核心目的是查询库存状态
-     * 没有询问产品细节、推荐、价格等其他售前信息
-     * 可能包含简单的产品指代（"这个""那个""XX款"）
-   - ✅ "这个还有货吗" → Inventory Inquiry
-   - ✅ "XX款现在有库存吗" → Inventory Inquiry
-   - ✅ "什么时候补货" → Inventory Inquiry
-   - ✅ "缺货了吗" → Inventory Inquiry
-   - ❌ "这个L码有货吗，材质怎么样" → Pre-sale Inquiry（包含其他售前咨询）
-   - ❌ "推荐一个有货的款" → Pre-sale Inquiry（核心是推荐，不是库存查询）
+     * 客户已知缺货或担心缺货，带有明确的补货/调货/恢复购买诉求
+     * 单纯的"有没有货/是现货吗"库存确认**不算**（客户只是下单前确认，无缺货诉求）→ 归 Pre-sale Inquiry
+     * 客服自动回复/快捷短语（如"X年生肖X现货"）**不算**
+   - ✅ "这个41没货了，什么时候补货" → Inventory Inquiry
+   - ✅ "缺货了吗，还能买到吗" → Inventory Inquiry
+   - ✅ "能帮补货39码吗" → Inventory Inquiry
+   - ✅ "下个月会补货吗" → Inventory Inquiry
+   - ❌ "这个还有货吗" → Pre-sale Inquiry（单纯库存确认，无缺货/补货诉求）
+   - ❌ "是现货吗 / 有没有现货" → Pre-sale Inquiry（库存确认）
+   - ❌ "2026马年生肖烟斗现货" → Pre-sale Inquiry（客服自动回复/快捷短语，非客户咨询）
+   - ❌ "推荐一个有货的款" → Pre-sale Inquiry（核心是推荐）
 
 【重要】intent_distribution 的数值 = 属于该类别的消息条数（不是分数），所有类别的数值之和应等于消息总数。
 
 【示例】：
 - "推荐一款春季外套" → Neutral(0.5), Pre-sale Inquiry
-- "这个还有货吗" → Neutral(0.5), Inventory Inquiry
-- "这个有没有现货" → Neutral(0.5), Inventory Inquiry
+- "这个还有货吗" → Neutral(0.5), Pre-sale Inquiry（库存确认，非缺货诉求）
+- "是现货吗" → Neutral(0.5), Pre-sale Inquiry（库存确认）
+- "41没货了，什么时候补货" → Neutral(0.5), Inventory Inquiry（缺货+补货诉求）
+- "能帮补货39码吗" → Neutral(0.5), Inventory Inquiry
+- "2026马年生肖烟斗现货" → Neutral(0.5), Pre-sale Inquiry（客服自动回复）
 - "质量太差了" → Negative(0.2), Complaint
 - "我要投诉你们" → Negative(0.2), Complaint
 - "小了，我要退货" → Neutral(0.5), Post-sale Support（正常退货≠投诉）
