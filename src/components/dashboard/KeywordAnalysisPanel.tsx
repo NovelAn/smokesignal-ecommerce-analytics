@@ -23,6 +23,7 @@ import {
 import { Database, X, RefreshCw, Loader2 } from 'lucide-react';
 import { NotionCard } from '../common/NotionCard';
 import { apiClient, BuyerTypeForKeyword, KeywordAnalysisResponse } from '../../api/client';
+import { useTimeRange } from '../../hooks/useTimeRange';
 
 // ============================================================
 // 设计系统：Notion 风格颜色（低饱和度 pastel）
@@ -38,6 +39,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   '价格': '#FAF1F5',       // 淡粉色 - 价格
   '物流': '#E7F3F8',       // 淡蓝色 - 物流
   '投诉反馈': '#FDEBEC',   // 淡红色 - 投诉
+  '库存查询': '#E6F6F5',   // 淡青色 - 库存需求
 };
 
 // 图表边框颜色（比背景稍深）
@@ -51,6 +53,7 @@ const CATEGORY_STROKES: Record<string, string> = {
   '价格': '#F9A8D4',
   '物流': '#93C5FD',
   '投诉反馈': '#FCA5A5',
+  '库存查询': '#67C7C2',
 };
 
 const DEFAULT_COLOR = '#F1F1EF';
@@ -79,6 +82,7 @@ export const KeywordAnalysisPanel: React.FC<KeywordAnalysisPanelProps> = () => {
   const [data, setData] = useState<KeywordAnalysisResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { timeRange } = useTimeRange();
 
   // ============================================================
   // 数据加载
@@ -91,6 +95,8 @@ export const KeywordAnalysisPanel: React.FC<KeywordAnalysisPanelProps> = () => {
         buyer_types: selectedBuyerTypes,
         category: selectedCategory || undefined,
         limit: 15,
+        start_date: timeRange.start_date,
+        end_date: timeRange.end_date,
       });
       setData(result);
     } catch (err) {
@@ -98,7 +104,7 @@ export const KeywordAnalysisPanel: React.FC<KeywordAnalysisPanelProps> = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedBuyerTypes, selectedCategory]);
+  }, [selectedBuyerTypes, selectedCategory, timeRange.end_date, timeRange.start_date]);
 
   useEffect(() => {
     loadData();
@@ -186,6 +192,11 @@ export const KeywordAnalysisPanel: React.FC<KeywordAnalysisPanelProps> = () => {
         </div>
       }
     >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[10px] text-notion-muted">
+        <span>{data?.data_source === 'chat_history_live' ? '实时聊天数据' : '聊天数据'} · {timeRange.start_date} 至 {timeRange.end_date}</span>
+        {data?.last_message_at && <span>最近消息 {data.last_message_at.slice(0, 16).replace('T', ' ')}</span>}
+      </div>
+
       {/* 筛选器 - 标签式设计 */}
       <div className="flex items-center gap-3 mb-4 pb-3 border-b border-notion-border">
         <span className="text-xs text-notion-muted shrink-0">客户类型</span>

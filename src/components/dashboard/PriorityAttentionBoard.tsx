@@ -72,6 +72,7 @@ function getSegmentDegradationColor(segOld: string, segNow: string): 'red' | 'or
 
 // 入选原因 tag 颜色
 function getSelectionReasonColor(reason: string): 'red' | 'orange' | 'purple' | 'gray' {
+  if (reason === '情感转负') return 'red';
   if (reason === 'segment退化') return 'red';
   if (reason === 'churn高风险') return 'orange';
   if (reason === '购买力坍塌') return 'purple';
@@ -510,7 +511,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
   } = useDataFetchingWithRetry<PriorityCustomersResponse>(
     fetchCustomers,
     2,
-    [currentPage, filters, activeTab] // 切换 tab / 翻页 / 筛选 都会重 fetch
+    [currentPage, filters, activeTab, churnWindowDays]
   );
 
   // ========== 计算属性 ==========
@@ -768,7 +769,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
         ? `${response?.total || 0} 位客户 | 默认: 紧急/高优先级 或 负面情感`
         : (() => {
             const floor = churnWindowDays === 60 ? '1万' : churnWindowDays === 90 ? '1.5万' : '2万';
-            return `segment/churn 退化 或 购买力下降 ≥ 50% 且 ${churnWindowDays} 天前 l6m ≥ ${floor}`;
+            return `segment/churn 退化、情感转负，或购买力下降 ≥ 50% 且 ${churnWindowDays} 天前 l6m ≥ ${floor}`;
           })()}
       action={
         <div className="flex items-center gap-3">

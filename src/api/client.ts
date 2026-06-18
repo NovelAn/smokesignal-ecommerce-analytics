@@ -555,6 +555,8 @@ export const apiClient = {
     if (params.limit) {
       queryParams.append('limit', String(params.limit));
     }
+    if (params.start_date) queryParams.append('start_date', params.start_date);
+    if (params.end_date) queryParams.append('end_date', params.end_date);
 
     const response = await fetch(`${API_BASE}/keyword-analysis?${queryParams}`);
     return handleResponse<KeywordAnalysisResponse>(response);
@@ -973,6 +975,8 @@ export interface KeywordAnalysisParams {
   buyer_types?: BuyerTypeForKeyword[];
   category?: string;
   limit?: number;
+  start_date?: string;
+  end_date?: string;
 }
 
 export interface KeywordAnalysisCategory {
@@ -994,6 +998,9 @@ export interface KeywordAnalysisResponse {
   total_messages: number;
   buyer_types: string[];
   selected_category: string | null;
+  data_source?: 'chat_history_live' | string;
+  last_message_at?: string | null;
+  date_range?: { start_date: string; end_date: string };
 }
 
 // ========== 历史快照 API 类型 (PR4) ==========
@@ -1113,6 +1120,9 @@ export interface ChurnWarningRow {
   l6m_change_pct: number | null;
   last_purchase_date: string | null;
   last_chat_date: string | null;
+  service_status?: ServiceStatus | null;
+  service_updated_at?: string | null;
+  service_notes?: string | null;
   /** 入选原因, 多个用英文逗号分隔, 例如: "segment退化,churn高风险" */
   selection_reasons: string;
   /** 严重程度档位: 1=最严重 (重要→已流失/低价值), 2=中度, 3=轻度, 4=兜底 */
@@ -1129,17 +1139,19 @@ export interface ChurnWarningResponse {
   };
   limit: number;
   offset: number;
-  /** include_total=true 时返回, 否则 absent */
-  total?: number;
+  /** 符合条件的准确总数，用于分页 */
+  total: number;
   data: ChurnWarningRow[];
 }
 
 export type ServiceStatus = 'pending' | 'contacted' | 'resolved';
+export type ServiceWorkstream = 'priority' | 'inventory';
 
 export interface ServiceMarkRequest {
   buyer_nick: string;
   status: ServiceStatus;
   notes?: string;
+  workstream?: ServiceWorkstream;
 }
 
 export interface ServiceMarkResponse {
@@ -1148,12 +1160,14 @@ export interface ServiceMarkResponse {
   buyer_nick: string;
   previous_status: ServiceStatus | null;
   new_status: ServiceStatus;
+  workstream: ServiceWorkstream;
 }
 
 export interface ServiceMarkBatchRequest {
   buyer_nicks: string[];
   status: ServiceStatus;
   notes?: string;
+  workstream?: ServiceWorkstream;
 }
 
 export interface ServiceMarkBatchResponse {
@@ -1166,6 +1180,7 @@ export interface ServiceMarkBatchResponse {
 export interface ServiceHistoryRow {
   id: number;
   buyer_nick: string;
+  workstream: ServiceWorkstream;
   status: string;
   notes: string;
   created_at: string;

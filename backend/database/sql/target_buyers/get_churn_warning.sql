@@ -1,93 +1,176 @@
--- ============================================
--- 流失预警列表 (Round 3: 对比周期可配置)
--- ============================================
--- 用途: PriorityAttentionBoard Tab 2 "流失预警"
--- 逻辑 (3 个 OR 入选条件):
---   A. segment 退化: 30D 前好 segment, 现在变差 (含严重程度: cond_a_severe)
---   B. churn_risk 升级: 低/中 → 高
---   C. l6m_netsales 坍塌: 30D 前 >= 1万, 现在下降 >= 50 percent
--- 参数: limit, offset
--- ============================================
---
--- 重要: snapshot 日期用 MAX(snapshot_date) 而不是 CURDATE()
--- 原因: MySQL event snapshot_target_buyers_history 是第二天 13:30 触发
---       (见 snapshot_target_buyers_history.sql line 460-465)
---       用 CURDATE() 会导致今天没 snapshot 时整个 JOIN 返回 0 行
--- h_prev fallback: window_days 天前没 snapshot 就用最老的 (graceful degradation)
-
-SELECT
-    h_now.buyer_nick,
-    tb.channel,
-    tb.buyer_type,
-    tb.vip_level,
-    h_now.rfm_segment_prev AS segment_prev,
-    h_now.rfm_segment AS segment_now,
-    h_now.churn_risk_prev AS churn_risk_prev,
-    h_now.churn_risk AS churn_risk_now,
-    ROUND(h_now.l6m_netsales - h_now.l6m_netsales_prev, 2) AS l6m_netsales_change,
-    ROUND(
-        (h_now.l6m_netsales - h_now.l6m_netsales_prev)
-        / NULLIF(h_now.l6m_netsales_prev, 0) * 100,
-    1) AS l6m_change_pct,
-    tb.last_purchase_date,
-    tb.last_chat_date,
-    -- 入选原因 (可多个, 逗号分隔; 前端按 , 拆分渲染多个 tag)
-    TRIM(BOTH ',' FROM CONCAT_WS(',',
-        IF(_cond_a, 'segment退化', NULL),
-        IF(_cond_b, 'churn高风险', NULL),
-        IF(_cond_c, '购买力坍塌', NULL)
-    )) AS selection_reasons,
-    -- 严重程度档位 (1=最严重, 4=最轻)
-    CASE
-        WHEN _cond_a_severe THEN 1
-        WHEN _cond_b AND NOT _cond_c THEN 2
-        WHEN _cond_a AND NOT _cond_b AND NOT _cond_c THEN 2
-        WHEN _cond_c THEN 3
-        WHEN _cond_a THEN 3
-        ELSE 4
-    END AS severity_tier
-FROM (
-    -- 内层把 3 个条件作为"派生列"算好, 避免外层到处重复
+-- 统一流失预警：历史退化、购买力坍塌、真实增量情感转负
+WITH snapshot_dates AS (
     SELECT
-        h_now_inner.buyer_nick,
-        h_now_inner.rfm_segment,
-        h_now_inner.churn_risk,
-        h_now_inner.l6m_netsales,
-        h_prev_inner.rfm_segment AS rfm_segment_prev,
-        h_prev_inner.churn_risk AS churn_risk_prev,
-        h_prev_inner.l6m_netsales AS l6m_netsales_prev,
-        -- 严重退化: 重要价值/保持 → 已流失/低价值
-        (h_prev_inner.rfm_segment IN ('重要价值客户', '重要保持客户')
-         AND h_now_inner.rfm_segment IN ('已流失', '低价值客户')) AS _cond_a_severe,
-        -- 段位退化: 任何好 segment → 任何差 segment
-        ((h_prev_inner.rfm_segment IN ('重要价值客户', '重要保持客户', '重要发展客户',
-                                       '优质价值客户', '优质保持客户', '优质发展客户'))
-         AND (h_now_inner.rfm_segment IN ('潜力客户', '待激活客户', '已流失', '低价值客户',
-                                          '重要挽留客户', '优质挽留客户'))) AS _cond_a,
-        -- churn 升级: 低/中 → 高
-        (h_prev_inner.churn_risk IN ('低', '中') AND h_now_inner.churn_risk = '高') AS _cond_b,
-        -- 购买力坍塌: l6m 30D 下降 >= 50 percent 且 30D 前 >= 1万
-        (h_prev_inner.l6m_netsales >= %(l6m_floor)s
-         AND (h_now_inner.l6m_netsales - h_prev_inner.l6m_netsales) <= -0.5 * h_prev_inner.l6m_netsales) AS _cond_c
-    FROM target_buyers_precomputed_history h_now_inner
-    JOIN target_buyers_precomputed_history h_prev_inner
-        ON h_now_inner.buyer_nick = h_prev_inner.buyer_nick
-        AND h_prev_inner.snapshot_date = (
-            SELECT COALESCE(
-                (SELECT MAX(snapshot_date) FROM target_buyers_precomputed_history
-                    WHERE snapshot_date <= DATE_SUB(
-                        (SELECT MAX(snapshot_date) FROM target_buyers_precomputed_history),
-                        INTERVAL %(window_days)s DAY
-                    )),
-                (SELECT MIN(snapshot_date) FROM target_buyers_precomputed_history)
+        MAX(snapshot_date) AS latest_date,
+        COALESCE(
+            MAX(CASE
+                WHEN snapshot_date <= DATE_SUB(
+                    (SELECT MAX(snapshot_date) FROM target_buyers_precomputed_history),
+                    INTERVAL %(window_days)s DAY
+                )
+                THEN snapshot_date
+            END),
+            MIN(snapshot_date)
+        ) AS previous_date
+    FROM target_buyers_precomputed_history
+),
+signal_rows AS (
+    SELECT
+        h_now.buyer_nick,
+        tb.channel,
+        tb.buyer_type,
+        tb.vip_level,
+        h_prev.rfm_segment AS segment_prev,
+        h_now.rfm_segment AS segment_now,
+        h_prev.churn_risk AS churn_risk_prev,
+        h_now.churn_risk AS churn_risk_now,
+        h_prev.l6m_netsales AS l6m_netsales_prev,
+        h_now.l6m_netsales AS l6m_netsales_now,
+        tb.last_purchase_date,
+        tb.last_chat_date,
+        csl.status AS service_status,
+        csl.updated_at AS service_updated_at,
+        csl.notes AS service_notes,
+        d.latest_date,
+        (
+            h_prev.rfm_segment IN (
+                '重要价值客户', '重要保持客户', '重要发展客户',
+                '优质价值客户', '优质保持客户', '优质发展客户'
             )
+            AND h_now.rfm_segment IN (
+                '潜力客户', '待激活客户', '已流失', '低价值客户',
+                '重要挽留客户', '优质挽留客户'
+            )
+        ) AS cond_segment,
+        (
+            h_prev.rfm_segment IN ('重要价值客户', '重要保持客户')
+            AND h_now.rfm_segment IN ('已流失', '低价值客户')
+        ) AS cond_segment_severe,
+        (
+            h_prev.churn_risk IN ('低', '中')
+            AND h_now.churn_risk = '高'
+        ) AS cond_churn,
+        (
+            h_prev.l6m_netsales >= %(l6m_floor)s
+            AND h_now.l6m_netsales - h_prev.l6m_netsales
+                <= -0.5 * h_prev.l6m_netsales
+        ) AS cond_sales,
+        (
+            ai.incremental_sentiment_label = 'Negative'
+            AND COALESCE(
+                ai.incremental_sentiment_analyzed_at,
+                ai.incremental_chat_to_date
+            ) >= DATE_SUB(d.latest_date, INTERVAL %(window_days)s DAY)
+            AND COALESCE(
+                ai.incremental_sentiment_analyzed_at,
+                ai.incremental_chat_to_date
+            ) < DATE_ADD(d.latest_date, INTERVAL 1 DAY)
+        ) AS cond_sentiment,
+        (
+            csl.id IS NULL
+            OR csl.status = 'pending'
+            OR (
+                csl.status IN ('contacted', 'resolved')
+                AND (
+                    (
+                        ai.incremental_sentiment_label = 'Negative'
+                        AND COALESCE(
+                            ai.incremental_sentiment_analyzed_at,
+                            ai.incremental_chat_to_date
+                        ) > csl.updated_at
+                    )
+                    OR (
+                        h_service.snapshot_date IS NOT NULL
+                        AND (
+                            (
+                                h_service.rfm_segment IN (
+                                    '重要价值客户', '重要保持客户', '重要发展客户',
+                                    '优质价值客户', '优质保持客户', '优质发展客户'
+                                )
+                                AND h_now.rfm_segment IN (
+                                    '潜力客户', '待激活客户', '已流失', '低价值客户',
+                                    '重要挽留客户', '优质挽留客户'
+                                )
+                            )
+                            OR (
+                                h_service.churn_risk IN ('低', '中')
+                                AND h_now.churn_risk = '高'
+                            )
+                            OR (
+                                h_service.l6m_netsales >= %(l6m_floor)s
+                                AND h_now.l6m_netsales - h_service.l6m_netsales
+                                    <= -0.5 * h_service.l6m_netsales
+                            )
+                        )
+                    )
+                )
+            )
+        ) AS is_trackable
+    FROM snapshot_dates d
+    JOIN target_buyers_precomputed_history h_now
+        ON h_now.snapshot_date = d.latest_date
+    JOIN target_buyers_precomputed_history h_prev
+        ON h_prev.buyer_nick = h_now.buyer_nick
+        AND h_prev.snapshot_date = d.previous_date
+    JOIN target_buyers_precomputed tb
+        ON tb.buyer_nick = h_now.buyer_nick
+    LEFT JOIN buyer_ai_analysis_cache ai
+        ON ai.buyer_nick = h_now.buyer_nick
+    LEFT JOIN customer_service_log csl
+        ON csl.buyer_nick = h_now.buyer_nick
+        AND csl.workstream = 'priority'
+    LEFT JOIN target_buyers_precomputed_history h_service
+        ON h_service.buyer_nick = h_now.buyer_nick
+        AND h_service.snapshot_date = (
+            SELECT MAX(hs.snapshot_date)
+            FROM target_buyers_precomputed_history hs
+            WHERE hs.buyer_nick = h_now.buyer_nick
+              AND hs.snapshot_date <= DATE(csl.updated_at)
         )
-    WHERE h_now_inner.snapshot_date = (SELECT MAX(snapshot_date) FROM target_buyers_precomputed_history)
-) AS h_now
-JOIN target_buyers_precomputed tb
-    ON h_now.buyer_nick = tb.buyer_nick
-WHERE h_now._cond_a OR h_now._cond_b OR h_now._cond_c
-ORDER BY severity_tier ASC,
-         (h_now.l6m_netsales - h_now.l6m_netsales_prev) ASC,
-         tb.last_purchase_date DESC
+),
+qualified AS (
+    SELECT *
+    FROM signal_rows
+    WHERE (cond_segment OR cond_churn OR cond_sales OR cond_sentiment)
+      AND is_trackable
+)
+SELECT
+    buyer_nick,
+    channel,
+    buyer_type,
+    vip_level,
+    segment_prev,
+    segment_now,
+    churn_risk_prev,
+    churn_risk_now,
+    ROUND(l6m_netsales_now - l6m_netsales_prev, 2) AS l6m_netsales_change,
+    ROUND(
+        (l6m_netsales_now - l6m_netsales_prev)
+        / NULLIF(l6m_netsales_prev, 0) * 100,
+        1
+    ) AS l6m_change_pct,
+    last_purchase_date,
+    last_chat_date,
+    service_status,
+    service_updated_at,
+    service_notes,
+    TRIM(BOTH ',' FROM CONCAT_WS(',',
+        IF(cond_segment, 'segment退化', NULL),
+        IF(cond_churn, 'churn高风险', NULL),
+        IF(cond_sales, '购买力坍塌', NULL),
+        IF(cond_sentiment, '情感转负', NULL)
+    )) AS selection_reasons,
+    CASE
+        WHEN cond_sentiment OR cond_segment_severe THEN 1
+        WHEN cond_churn AND NOT cond_sales THEN 2
+        WHEN cond_segment AND NOT cond_churn AND NOT cond_sales THEN 2
+        WHEN cond_sales OR cond_segment THEN 3
+        ELSE 4
+    END AS severity_tier,
+    COUNT(*) OVER() AS total_count
+FROM qualified
+ORDER BY
+    severity_tier ASC,
+    (l6m_netsales_now - l6m_netsales_prev) ASC,
+    last_purchase_date DESC
 LIMIT %(limit)s OFFSET %(offset)s

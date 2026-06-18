@@ -20,6 +20,13 @@ python scripts/daily_ai_analysis.py --max-buyers 500 >> "$LOG_FILE" 2>&1
 EXIT_CODE=$?
 if [ $EXIT_CODE -eq 0 ]; then
     echo "✓ Daily AI analysis completed successfully" >> "$LOG_FILE"
+
+    # 二刷本次（及历史）因 token 不足/接口异常降级到 rule-based 的客户，强制重走 LLM。
+    # 跨天补救：某天 token 不足降级，次日 token 恢复后这里自动补回。
+    # 依赖后端服务 localhost:8000 运行；未运行则跳过（|| 兜底，不影响 daily）。
+    echo "Refreshing rule-based degraded buyers..." >> "$LOG_FILE"
+    python scripts/refresh_rule_based.py >> "$LOG_FILE" 2>&1 || \
+        echo "⚠ refresh_rule_based skipped/failed (后端未运行或无降级客户)" >> "$LOG_FILE"
 else
     echo "✗ Daily AI analysis failed with exit code $EXIT_CODE" >> "$LOG_FILE"
 fi

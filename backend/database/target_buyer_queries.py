@@ -60,6 +60,18 @@ class TargetBuyerQueries:
 
         return '\n'.join(lines)
 
+    @staticmethod
+    def _remove_default_priority_filter(sql: str) -> str:
+        """移除 priority SQL 中跨多行的默认客服重评估条件。"""
+        import re
+
+        return re.sub(
+            r"\[\[AND \(\s*\(csl\.id IS NULL.*?\n\s*\)\]\]",
+            "",
+            sql,
+            flags=re.DOTALL,
+        )
+
     def get_all_target_buyers(
         self,
         search: Optional[str] = None,
@@ -201,6 +213,25 @@ class TargetBuyerQueries:
         results = self.db.execute_query(sql)
 
         return results[0] if results else {}
+
+    def get_keyword_messages(
+        self,
+        start_date: str,
+        end_date: str,
+        buyer_types: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """读取指定周期内的真实客户消息，供实时关键词分析。"""
+        sql = self._load_sql('get_keyword_messages.sql')
+        params: Dict[str, Any] = {
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+        if buyer_types:
+            params["buyer_types"] = tuple(buyer_types)
+        else:
+            sql = sql.replace('[[AND tb.buyer_type IN %(buyer_types)s]]', '')
+        sql = sql.replace('[[', '').replace(']]', '')
+        return self.db.execute_query(sql, params)
 
     def get_buyers_by_type(
         self,
@@ -508,7 +539,7 @@ class TargetBuyerQueries:
 
         # 默认筛选逻辑
         if not use_default_filter:
-            conditions_to_remove.append("AND (tb.follow_priority IN ('紧急', '高') OR COALESCE(ai.sentiment_label, tb.sentiment_label) = 'Negative')")
+            sql = self._remove_default_priority_filter(sql)
 
         # 移除不需要的WHERE条件
         for condition in conditions_to_remove:
@@ -591,7 +622,7 @@ class TargetBuyerQueries:
             conditions_to_remove.append("AND tb.chat_frequency_days = 0 AND %(has_chat)s = 'no'")
 
         if not use_default_filter:
-            conditions_to_remove.append("AND (tb.follow_priority IN ('紧急', '高') OR COALESCE(ai.sentiment_label, tb.sentiment_label) = 'Negative')")
+            sql = self._remove_default_priority_filter(sql)
 
         for condition in conditions_to_remove:
             sql = sql.replace(f'[[{condition}]]', '')
@@ -723,24 +754,56 @@ class TargetBuyerQueries:
             "l6m_floor": l6m_floor,
         })
 
+    def get_period_comparison_metrics(
+        self, start_date: Any, end_date: Any
+    ) -> Dict[str, Any]:
+        """获取一个时间段内基于首尾快照的真实变化指标。"""
+        sql = self._load_sql('get_period_comparison_metrics.sql')
+        rows = self.db.execute_query(sql, {
+            "start_date": start_date,
+            "end_date": end_date,
+        })
+        if not rows:
+            return {
+                "new_vic": 0,
+                "churn_warning": 0,
+                "vip_upgrades": 0,
+                "sentiment_negative": 0,
+            }
+        row = rows[0]
+        return {
+            "new_vic": int(row.get("new_vic") or 0),
+            "churn_warning": int(row.get("churn_warning") or 0),
+            "vip_upgrades": int(row.get("vip_upgrades") or 0),
+            "sentiment_negative": int(row.get("sentiment_negative") or 0),
+        }
+
+    def get_vic_pool_trend(self, months: int) -> List[Dict[str, Any]]:
+        sql = self._load_sql('get_vic_pool_trend.sql')
+        return self.db.execute_query(sql, {"months": months})
+
+    def get_vic_active_rate_trend(self, months: int) -> List[Dict[str, Any]]:
+        sql = self._load_sql('get_vic_active_rate_trend.sql')
+        return self.db.execute_query(sql, {"months": months})
+
+    def get_high_risk_trend(self, months: int) -> List[Dict[str, Any]]:
+        sql = self._load_sql('get_high_risk_trend.sql')
+        return self.db.execute_query(sql, {"months": months})
+
     def mark_service(
-        self, buyer_nick: str, status: str, notes: Optional[str] = None
+        self,
+        buyer_nick: str,
+        status: str,
+        notes: Optional[str] = None,
+        workstream: str = "priority",
     ) -> int:
         """UPSERT customer_service_log. 返回 affected rows."""
-        sql = """
-            INSERT INTO customer_service_log (buyer_nick, status, notes)
-            VALUES (%s, %s, %s)
-            ON DUPLICATE KEY UPDATE status = VALUES(status), notes = VALUES(notes)
-        """
-        return self.db.execute_update(sql, (buyer_nick, status, notes or ""))
+        sql = self._load_sql('mark_service.sql')
+        return self.db.execute_update(sql, (buyer_nick, workstream, status, notes or ""))
 
-    def get_service_history(self, buyer_nick: str) -> List[Dict[str, Any]]:
+    def get_service_history(
+        self, buyer_nick: str, workstream: str = "priority"
+    ) -> List[Dict[str, Any]]:
         """获取某客户的所有处理记录."""
-        sql = """
-            SELECT id, buyer_nick, status, notes, created_at, updated_at
-            FROM customer_service_log
-            WHERE buyer_nick = %s
-            ORDER BY updated_at DESC
-        """
-        return self.db.execute_query(sql, (buyer_nick,))
-
+        sql = self._load_sql('get_service_history.sql')
+        return self.db.execute_query(sql, (buyer_nick, workstream))

@@ -235,7 +235,11 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div>
+      <div className="mb-2 text-right text-[10px] text-notion-muted">
+        当前客户快照 · 更新于 {formatSnapshotTime(metrics.last_updated)}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <MetricGroupCard
         title="客户健康度"
         icon={Heart}
@@ -260,6 +264,12 @@ export const MetricCards: React.FC<MetricCardsProps> = ({
         iconColor="#3B82F6"
         metrics={serviceMetrics}
       />
+      </div>
     </div>
   );
 };
+
+function formatSnapshotTime(value: string | null | undefined): string {
+  if (!value) return '未知';
+  return value.replace('T', ' ').slice(0, 16);
+}

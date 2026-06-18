@@ -222,17 +222,18 @@ async def get_churn_warning_list(
             window_days=window,
             l6m_floor=thresholds["l6m_floor_yuan"],
         )
+        total = int(rows[0].pop("total_count", 0)) if rows else 0
+        for row in rows[1:]:
+            row.pop("total_count", None)
+
         result = {
             "window_days": window,
             "applied_thresholds": thresholds,
             "limit": limit,
             "offset": offset,
+            "total": total,
             "data": rows,
         }
-        if include_total:
-            # Round1 简化: 不做精确 total（避免多跑一次 COUNT SQL）
-            # 前端如有需要，可通过 response.data.length 估算
-            result["total"] = len(rows)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"流失预警查询失败: {str(e)}")
@@ -1371,6 +1372,7 @@ class ServiceMarkRequest(BaseModel):
     buyer_nick: str
     status: Literal['pending', 'contacted', 'resolved']
     notes: Optional[str] = None
+    workstream: Literal['priority', 'inventory'] = 'priority'
 
 
 class ServiceMarkResponse(BaseModel):
@@ -1379,12 +1381,14 @@ class ServiceMarkResponse(BaseModel):
     buyer_nick: str
     previous_status: Optional[str] = None   # 撤销用
     new_status: str
+    workstream: Literal['priority', 'inventory']
 
 
 class ServiceMarkBatchRequest(BaseModel):
     buyer_nicks: List[str] = Field(..., min_length=1, max_length=200)
     status: Literal['pending', 'contacted', 'resolved']
     notes: Optional[str] = None
+    workstream: Literal['priority', 'inventory'] = 'priority'
 
 
 class ServiceMarkBatchResponse(BaseModel):
@@ -1408,10 +1412,10 @@ async def mark_customer_service(body: ServiceMarkRequest) -> ServiceMarkResponse
     """
     try:
         # 查上次状态（撤销用）
-        prev_history = analyzer.get_service_history(body.buyer_nick)
+        prev_history = analyzer.get_service_history(body.buyer_nick, body.workstream)
         previous_status = prev_history[0].get('status') if prev_history else None
 
-        affected = analyzer.mark_service(body.buyer_nick, body.status, body.notes)
+        affected = analyzer.mark_service(body.buyer_nick, body.status, body.notes, body.workstream)
 
         return ServiceMarkResponse(
             success=True,
@@ -1419,6 +1423,7 @@ async def mark_customer_service(body: ServiceMarkRequest) -> ServiceMarkResponse
             buyer_nick=body.buyer_nick,
             previous_status=previous_status,
             new_status=body.status,
+            workstream=body.workstream,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"标记失败: {str(e)}")
@@ -1437,7 +1442,7 @@ async def batch_mark_customer_service(body: ServiceMarkBatchRequest) -> ServiceM
     failed: List[str] = []
     for nick in body.buyer_nicks:
         try:
-            analyzer.mark_service(nick, body.status, body.notes)
+            analyzer.mark_service(nick, body.status, body.notes, body.workstream)
             processed.append(nick)
         except Exception:
             failed.append(nick)
@@ -1448,6 +1453,15 @@ async def batch_mark_customer_service(body: ServiceMarkBatchRequest) -> ServiceM
         processed=processed,
         failed=failed,
     )
+
+
+@router.get("/service/history/{buyer_nick}")
+async def get_customer_service_history(
+    buyer_nick: str,
+    workstream: Literal['priority', 'inventory'] = Query('priority'),
+) -> Dict[str, Any]:
+    rows = await _run_blocking(analyzer.get_service_history, buyer_nick, workstream)
+    return {"buyer_nick": buyer_nick, "workstream": workstream, "total": len(rows), "data": rows}
 
 
 @router.post("/buyers/{user_nick}/analyze-async")
@@ -2393,7 +2407,9 @@ async def get_follow_up_list(
 async def get_keyword_analysis(
     buyer_types: str = Query("ALL", description="客户类型，逗号分隔，如 'SMOKER,BOTH'，或 'ALL'"),
     category: str = Query(None, description="分类筛选，可选"),
-    limit: int = Query(20, description="返回关键词数量限制")
+    limit: int = Query(20, ge=1, le=100, description="返回关键词数量限制"),
+    start_date: Optional[str] = Query(None, description="起始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
 ) -> Dict[str, Any]:
     """
     获取关键词分析数据
@@ -2419,114 +2435,35 @@ async def get_keyword_analysis(
         }
     """
     try:
-        from backend.database import Database
-        from backend.config import settings
-        from collections import defaultdict
+        from datetime import date, datetime
 
-        db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
-        db = Database(db_name=db_name)
+        effective_start = start_date or "1970-01-01"
+        effective_end = end_date or date.today().isoformat()
+        start = datetime.strptime(effective_start, "%Y-%m-%d").date()
+        end = datetime.strptime(effective_end, "%Y-%m-%d").date()
+        if start > end:
+            raise HTTPException(status_code=422, detail="start_date must not be after end_date")
 
-        # 解析客户类型
-        buyer_type_list = [bt.strip().upper() for bt in buyer_types.split(',')]
-        if 'ALL' in buyer_type_list:
-            buyer_type_list = ['ALL']
+        buyer_type_list = [bt.strip().upper() for bt in buyer_types.split(',') if bt.strip()]
+        selected_types = None if not buyer_type_list or 'ALL' in buyer_type_list else buyer_type_list
+        result = await _run_blocking(
+            analyzer.get_keyword_analysis,
+            effective_start,
+            effective_end,
+            selected_types,
+            category,
+            limit,
+            timeout=30,
+        )
+        result.update({
+            "buyer_types": buyer_type_list or ["ALL"],
+            "selected_category": category,
+            "date_range": {"start_date": effective_start, "end_date": effective_end},
+        })
+        return result
 
-        # 获取元数据（总消息数）
-        total_messages = 0
-        for bt in buyer_type_list:
-            meta_query = """
-                SELECT total_messages FROM keyword_analysis_meta WHERE buyer_type = %s
-            """
-            meta_result = db.execute_query(meta_query, [bt])
-            if meta_result:
-                total_messages += meta_result[0]['total_messages']
-
-        # 获取分类分布
-        category_distribution = []
-        category_counts = defaultdict(int)
-
-        for bt in buyer_type_list:
-            cat_query = """
-                SELECT category, SUM(count) as count, SUM(percentage) as percentage
-                FROM category_distribution_cache
-                WHERE buyer_type = %s
-                GROUP BY category
-                ORDER BY count DESC
-            """
-            cat_results = db.execute_query(cat_query, [bt])
-            for row in cat_results:
-                # 转换 Decimal 为 int
-                category_counts[row['category']] += int(row['count'])
-
-        # 计算百分比
-        total_category_count = sum(category_counts.values())
-        for cat_name, count in sorted(category_counts.items(), key=lambda x: -x[1]):
-            percentage = round(count / total_category_count * 100, 1) if total_category_count > 0 else 0
-            category_distribution.append({
-                "name": cat_name,
-                "value": count,
-                "percentage": percentage
-            })
-
-        # 获取关键词
-        keyword_query_parts = []
-        query_params = []
-
-        for bt in buyer_type_list:
-            if category:
-                keyword_query_parts.append("""
-                    SELECT keyword, category, SUM(count) as count, SUM(percentage) as percentage
-                    FROM keyword_analysis_cache
-                    WHERE buyer_type = %s AND category = %s
-                    GROUP BY keyword, category
-                """)
-                query_params.extend([bt, category])
-            else:
-                keyword_query_parts.append("""
-                    SELECT keyword, category, SUM(count) as count, SUM(percentage) as percentage
-                    FROM keyword_analysis_cache
-                    WHERE buyer_type = %s
-                    GROUP BY keyword, category
-                """)
-                query_params.append(bt)
-
-        # 合并查询
-        union_query = " UNION ALL ".join(keyword_query_parts)
-        final_query = f"""
-            SELECT keyword, category, SUM(count) as count, SUM(percentage) as percentage
-            FROM ({union_query}) as combined
-            GROUP BY keyword, category
-            ORDER BY count DESC
-            LIMIT %s
-        """
-        query_params.append(limit)
-
-        keyword_results = db.execute_query(final_query, query_params)
-
-        # 计算关键词总计数（用于重新计算百分比）
-        total_keyword_count = sum(int(row['count']) for row in keyword_results) if keyword_results else 0
-
-        keywords = []
-        for row in keyword_results:
-            # 转换 Decimal 为 int
-            count = int(row['count'])
-            # 重新计算百分比（基于合并后的数据）
-            percentage = round(count / total_keyword_count * 100, 1) if total_keyword_count > 0 else 0
-            keywords.append({
-                "text": row['keyword'],
-                "value": count,
-                "percentage": percentage,
-                "category": row['category']
-            })
-
-        return {
-            "category_distribution": category_distribution,
-            "keywords": keywords,
-            "total_messages": total_messages,
-            "buyer_types": buyer_type_list,
-            "selected_category": category
-        }
-
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
