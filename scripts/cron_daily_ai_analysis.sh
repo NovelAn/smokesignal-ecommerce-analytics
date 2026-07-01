@@ -27,6 +27,12 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo "Refreshing rule-based degraded buyers..." >> "$LOG_FILE"
     python scripts/refresh_rule_based.py >> "$LOG_FILE" 2>&1 || \
         echo "⚠ refresh_rule_based skipped/failed (后端未运行或无降级客户)" >> "$LOG_FILE"
+
+    # Refresh keyword analysis cache (Keywords Analysis 面板每日刷新)
+    # 之前漏调度，导致缓存停在 6/24 之后不再更新；Bug 1 修复
+    echo "Refreshing keyword analysis cache..." >> "$LOG_FILE"
+    python scripts/refresh_keyword_analysis_cache.py >> "$LOG_FILE" 2>&1 || \
+        echo "⚠ refresh_keyword_analysis_cache skipped/failed" >> "$LOG_FILE"
 else
     echo "✗ Daily AI analysis failed with exit code $EXIT_CODE" >> "$LOG_FILE"
 fi
