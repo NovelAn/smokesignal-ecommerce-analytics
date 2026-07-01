@@ -71,7 +71,7 @@ def fetch_degraded(db: Database, refresh_type: str) -> tuple[set, set]:
     sentiment = set()
     if refresh_type in ("persona", "all"):
         persona = {r["buyer_nick"] for r in db.execute_query(
-            "SELECT buyer_nick FROM buyer_ai_analysis_cache WHERE persona_method='Rule-Based'")}
+            "SELECT buyer_nick FROM buyer_ai_analysis_cache WHERE persona_method IN ('Rule-Based','pending_retry')")}
     if refresh_type in ("sentiment", "all"):
         sentiment = {r["buyer_nick"] for r in db.execute_query(
             "SELECT buyer_nick FROM buyer_ai_analysis_cache WHERE sentiment_method='rule_based'")}
@@ -144,7 +144,7 @@ def main() -> None:
     def still_degraded():
         sp = {r["buyer_nick"] for r in db.execute_query(
             f"SELECT buyer_nick FROM buyer_ai_analysis_cache "
-            f"WHERE persona_method='Rule-Based' AND buyer_nick IN ({ph})", tuple(nicks))} if persona_deg else set()
+            f"WHERE persona_method IN ('Rule-Based','pending_retry') AND buyer_nick IN ({ph})", tuple(nicks))} if persona_deg else set()
         ss = {r["buyer_nick"] for r in db.execute_query(
             f"SELECT buyer_nick FROM buyer_ai_analysis_cache "
             f"WHERE sentiment_method='rule_based' AND buyer_nick IN ({ph})", tuple(nicks))} if sentiment_deg else set()

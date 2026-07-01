@@ -384,29 +384,48 @@ class AnalyzerOrchestrator:
                 result = ground_persona_analysis_v3(result, profile, orders)
                 result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据(降级)"
 
-                # 检查结果是否有效，无效则降级
+                # L2 失败/无效: 不再降级 rule-based (按用户要求), 标 pending_retry 由二次刷新救回
                 if self._is_valid_analysis(result):
                     return self._cache_and_return(buyer_nick, profile, result)
                 else:
-                    print(f"[L2→L3] DeepSeek返回无效结果，降级到规则引擎")
-                    result = None
+                    print(f"[L2] DeepSeek返回无效结果，标为 pending_retry (不走 rule-based)")
+                    return self._cache_and_return(buyer_nick, profile, self._pending_retry_result())
 
             except TimeoutError:
-                print(f"[L2→L3] DeepSeek超时，降级到规则引擎")
+                print(f"[L2] DeepSeek超时，标为 pending_retry (不走 rule-based)")
+                return self._cache_and_return(buyer_nick, profile, self._pending_retry_result())
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "rate" in error_str or "quota" in error_str or "insufficient" in error_str or "余额" in error_str:
-                    print(f"[L2→L3] DeepSeek API余额不足(429)，降级到规则引擎")
+                    print(f"[L2] DeepSeek API余额不足(429)，标为 pending_retry (不走 rule-based)")
                 else:
-                    print(f"[L2→L3] DeepSeek失败: {e}，降级到规则引擎")
+                    print(f"[L2] DeepSeek失败: {e}，标为 pending_retry (不走 rule-based)")
+                return self._cache_and_return(buyer_nick, profile, self._pending_retry_result())
 
-        # 策略3: 规则引擎兜底
-        print(f"[L3-Rule] 使用规则引擎分析 {buyer_nick}")
-        result = self.rule_based.analyze(profile, chats, orders)
-        result["analysis_method"] = "Rule-Based"
-        result = ground_persona_analysis_v3(result, profile, orders)
-        result["data_source"] = "规则引擎"
-        return self._cache_and_return(buyer_nick, profile, result)
+        # 策略3: 规则引擎兜底 (仅当 L1 + L2 client 都未配置时 - 极端配置缺失场景)
+        if not self.minimax and not self.deepseek:
+            print(f"[L3-Rule] L1+L2 都未配置, 使用规则引擎分析 {buyer_nick}")
+            result = self.rule_based.analyze(profile, chats, orders)
+            result["analysis_method"] = "Rule-Based"
+            result = ground_persona_analysis_v3(result, profile, orders)
+            result["data_source"] = "规则引擎"
+            return self._cache_and_return(buyer_nick, profile, result)
+        # L1 存在但失败 + L2 存在但失败 → L2 段内已 return pending_retry
+
+    def _pending_retry_result(self) -> Dict[str, Any]:
+        """L2 失败时返回待重试占位 (不再降级 rule-based)。
+
+        标 analysis_method='pending_retry', 由 scripts/refresh_rule_based.py
+        识别并二次触发 LLM (MiniMax/DeepSeek) 重分析。
+        """
+        return {
+            "summary": "AI 分析暂未生成 (DeepSeek 失败, 将由二次刷新重试)",
+            "key_interests": [],
+            "pain_points": [],
+            "recommended_action": "请稍后重试或检查 DeepSeek API 状态",
+            "analysis_method": "pending_retry",
+            "data_source": "等待重试"
+        }
 
     def _format_order_summary(self, profile: Dict, orders: List[Dict]) -> str:
         """Format an authoritative order fact pack for fallback models."""
