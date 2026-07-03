@@ -208,6 +208,8 @@ class MiniMaxClient:
 
             if json_str:
                 result = json.loads(json_str)
+                # 兜底：清理解析后字符串字段里残留的 <think> 标签/思考链（B2 修复）
+                result = self._strip_think_from_values(result)
                 _safe_print("[MiniMaxClient] Parsed JSON successfully")
                 return result
             else:
@@ -698,11 +700,38 @@ class MiniMaxClient:
     def _normalize_key(self, key: Any) -> str:
         return re.sub(r"[\s_\-]+", "", str(key).strip().lower())
 
+    def _strip_think_from_values(self, obj):
+        """解析后兜底：递归清字符串字段里残留的 <think>...</think>（含未闭合）。
+
+        场景：模型把思考链写进 JSON 字符串值（如 summary="<think>Let me analyze...），
+        _clean_model_response 在 json.loads 前清不了值内部的标签，这里解析后再清。
+        """
+        def clean_str(s):
+            if not isinstance(s, str):
+                return s
+            s2 = re.sub(r"<think\b[^>]*>.*?</think\s*>", "", s, flags=re.DOTALL | re.IGNORECASE)
+            s2 = re.sub(r"<think\b[^>]*>.*", "", s2, flags=re.DOTALL | re.IGNORECASE)
+            return s2.strip()
+        if isinstance(obj, str):
+            return clean_str(obj)
+        if isinstance(obj, dict):
+            return {k: self._strip_think_from_values(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._strip_think_from_values(x) for x in obj]
+        return obj
+
     def _clean_model_response(self, response_text: str) -> str:
         if not response_text:
             return ""
 
-        cleaned = re.sub(r"<think>.*?</think>", "", response_text, flags=re.DOTALL | re.IGNORECASE)
+        # 闭合的 <think>...</think>（含属性/跨行）
+        cleaned = re.sub(r"<think\b[^>]*>.*?</think\s*>", "", response_text, flags=re.DOTALL | re.IGNORECASE)
+        # 未闭合的 <think>...（模型截断/漏输出 </think>）：丢弃 think 内容到第一个 '{' (JSON 起点)，保留 JSON
+        m_open = re.search(r"<think\b[^>]*>", cleaned, flags=re.IGNORECASE)
+        if m_open and not re.search(r"</think\s*>", cleaned[m_open.end():], flags=re.IGNORECASE):
+            after = cleaned[m_open.end():]
+            brace = after.find("{")
+            cleaned = after[brace:] if brace != -1 else ""
         cleaned = cleaned.strip()
 
         fence_match = re.search(r"```(?:json)?\s*(.*?)```", cleaned, flags=re.DOTALL | re.IGNORECASE)

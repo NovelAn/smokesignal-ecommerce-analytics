@@ -370,6 +370,12 @@ def build_persona_prompt_v3(
     - 最近有购买但少聊天，不等于低活跃或流失
     - 不要写"0天活跃""0天未聊"这类绝对化表述
 
+12. 订单/品类/折扣数据禁止误报"缺失"（order_facts 已提供）：
+    - order_facts.top_categories 非空时，category_preference 必须使用其中的品类数据，禁止写"订单品类数据缺失/订单数据缺失"。
+    - order_facts.discount_ratio 已给出（0-1），discount_mindset 直接引用，禁止写"MD占比数据缺失"。
+    - 订单少（order_facts.order_lines_in_prompt ≤ 3）时，表述为"样本较少，偏好待更多订单验证"，不要说"数据缺失"。
+    - 仅当 order_facts.top_categories 与 discount_ratio 同时为空/0 时，才允许说"订单数据不足"。
+
 先逐项完成 trait_dimensions。每一项都不能留空：
 - category_preference: 单品类专注/男士上装集中/多品类探索/跨品类扩展弱，并写证据。
 - discount_mindset: MD 占比、FP/MD 结构、大促窗口集中度，判断折扣心智。
