@@ -9,7 +9,11 @@ from typing import Dict, List, Any
 from openai import OpenAI
 from backend.config import settings
 from backend.ai.persona_context import build_persona_prompt_v3
-from backend.ai.prompts.sentiment_intent_prompt import build_sentiment_intent_prompt
+from backend.ai.prompts.sentiment_intent_prompt import (
+    SENTIMENT_INTENT_MAX_TOKENS,
+    build_sentiment_intent_prompt,
+)
+from backend.ai.analysis_errors import parse_first_json_object, validate_sentiment_payload
 
 
 def _safe_print(message: str):
@@ -28,7 +32,10 @@ class MiniMaxClient:
         from httpx._transports.default import HTTPTransport
 
         transport = HTTPTransport(proxy=None)
-        http_client = httpx.Client(transport=transport)
+        http_client = httpx.Client(
+            transport=transport,
+            timeout=httpx.Timeout(120.0, connect=10.0),
+        )
 
         self.client = OpenAI(
             api_key=settings.minimax_api_key,
@@ -298,7 +305,7 @@ class MiniMaxClient:
                     }
                 ],
                 temperature=0.3,
-                max_tokens=500
+                max_tokens=SENTIMENT_INTENT_MAX_TOKENS
             )
 
             result_text = response.choices[0].message.content
@@ -311,47 +318,13 @@ class MiniMaxClient:
     def _parse_sentiment_intent_response(self, response_text: str) -> Dict[str, Any]:
         """解析情感意图分析响应（与 DeepSeek._parse_sentiment_response 字段对齐）"""
         try:
-            start = response_text.find('{')
-            end = response_text.rfind('}') + 1
-
-            if start != -1 and end > start:
-                json_str = response_text[start:end]
-                result = json.loads(json_str)
-
-                # 确保所有必要字段存在（与 DeepSeek 完全一致）
-                return {
-                    "sentiment_score": float(result.get("sentiment_score", 0.5)),
-                    "sentiment_label": result.get("sentiment_label", "Neutral"),
-                    "intent_distribution": result.get("intent_distribution", {
-                        "Pre-sale Inquiry": 0,
-                        "Post-sale Support": 0,
-                        "Logistics": 0,
-                        "Usage Guide": 0,
-                        "Complaint": 0,
-                        "Inventory Inquiry": 0
-                    }),
-                    "dominant_intent": result.get("dominant_intent", "Unknown"),
-                    "complaint_count": int(result.get("complaint_count", 0))
-                }
-            else:
-                raise ValueError("未找到有效JSON")
+            result = parse_first_json_object(response_text)
 
         except Exception as e:
             _safe_print(f"[MiniMax] 情感意图JSON解析失败: {e}")
-            return {
-                "sentiment_score": 0.5,
-                "sentiment_label": "Neutral",
-                "intent_distribution": {
-                    "Pre-sale Inquiry": 0,
-                    "Post-sale Support": 0,
-                    "Logistics": 0,
-                    "Usage Guide": 0,
-                    "Complaint": 0,
-                    "Inventory Inquiry": 0
-                },
-                "dominant_intent": "Unknown",
-                "complaint_count": 0
-            }
+            raise ValueError("Invalid sentiment/intent JSON response") from e
+
+        return validate_sentiment_payload(result)
 
     def analyze_sentiment_batch(
         self,

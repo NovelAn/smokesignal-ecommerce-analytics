@@ -12,6 +12,10 @@ INTENT_CATEGORIES = [
     "Inventory Inquiry"
 ]
 
+# Thinking models may spend hundreds of tokens before emitting the JSON object.
+# A 500-token cap truncates valid responses before the structured answer begins.
+SENTIMENT_INTENT_MAX_TOKENS = 3000
+
 SENTIMENT_INTENT_PROMPT = """分析以下客户消息的情感和意图。
 
 {scope_hint}

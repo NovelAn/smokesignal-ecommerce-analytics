@@ -22,6 +22,7 @@ from backend.ai.rule_based_analyzer import RuleBasedAnalyzer
 from backend.ai.model_selection import should_use_deepseek_pro
 from backend.config import settings
 from backend.ai.behavior_analyzer import build_order_facts, ground_persona_analysis_v3
+from backend.ai.analysis_errors import AIAnalysisUnavailableError, is_explicit_failure_result
 
 
 class AICacheManager:
@@ -86,6 +87,10 @@ class AICacheManager:
             actual_chats: Round 4 增量优化 - 传入本次分析实际使用的 chats 列表
                          (增量模式下用 chats[0].msg_time 而非 profile.last_chat_date)
         """
+        if is_explicit_failure_result(result):
+            print(f"[AICacheManager] 拒绝保存失败画像: {buyer_nick}")
+            return False
+
         try:
             # 获取当前数据快照
             last_purchase = profile.get("last_purchase_date")
@@ -125,8 +130,10 @@ class AICacheManager:
                 last_chat
             ))
             print(f"[AICacheManager] 画像缓存已保存: {buyer_nick}")
+            return True
         except Exception as e:
             print(f"[AICacheManager] 保存画像缓存失败: {e}")
+            return False
 
     def clear_persona(self, buyer_nick: str):
         """清除画像缓存（保留情感缓存）"""
@@ -192,7 +199,9 @@ class AnalyzerOrchestrator:
         - Timeout时触发
         - 其他API异常时触发
 
-    L3: 规则引擎（兜底 - 所有AI模型失败时）
+    L3: 规则引擎（仅在没有配置任何AI模型时使用）
+
+    模型调用失败时抛出可重试错误，不写缓存、不推进数据快照。
 
     缓存策略: 纯增量更新
     - 只有新订单/新聊天才触发重新分析
@@ -384,23 +393,25 @@ class AnalyzerOrchestrator:
                 result = ground_persona_analysis_v3(result, profile, orders)
                 result["data_source"] = "消费数据" if not has_chats else "聊天记录+消费数据(降级)"
 
-                # L2 失败/无效: 不再降级 rule-based (按用户要求), 标 pending_retry 由二次刷新救回
+                # L2 失败/无效: 不缓存占位，不推进快照，保留为可重试状态
                 if self._is_valid_analysis(result):
                     return self._cache_and_return(buyer_nick, profile, result)
                 else:
-                    print(f"[L2] DeepSeek返回无效结果，标为 pending_retry (不走 rule-based)")
-                    return self._cache_and_return(buyer_nick, profile, self._pending_retry_result())
+                    print(f"[L2] DeepSeek返回无效结果，保留旧缓存并等待重试")
+                    raise AIAnalysisUnavailableError("AI persona analysis failed; retry later")
 
             except TimeoutError:
-                print(f"[L2] DeepSeek超时，标为 pending_retry (不走 rule-based)")
-                return self._cache_and_return(buyer_nick, profile, self._pending_retry_result())
+                print(f"[L2] DeepSeek超时，保留旧缓存并等待重试")
+                raise AIAnalysisUnavailableError("AI persona analysis timed out; retry later")
+            except AIAnalysisUnavailableError:
+                raise
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "rate" in error_str or "quota" in error_str or "insufficient" in error_str or "余额" in error_str:
-                    print(f"[L2] DeepSeek API余额不足(429)，标为 pending_retry (不走 rule-based)")
+                    print(f"[L2] DeepSeek API余额不足(429)，保留旧缓存并等待重试")
                 else:
-                    print(f"[L2] DeepSeek失败: {e}，标为 pending_retry (不走 rule-based)")
-                return self._cache_and_return(buyer_nick, profile, self._pending_retry_result())
+                    print(f"[L2] DeepSeek失败: {e}，保留旧缓存并等待重试")
+                raise AIAnalysisUnavailableError("AI persona analysis failed; retry later") from e
 
         # 策略3: 规则引擎兜底 (仅当 L1 + L2 client 都未配置时 - 极端配置缺失场景)
         if not self.minimax and not self.deepseek:
@@ -410,22 +421,7 @@ class AnalyzerOrchestrator:
             result = ground_persona_analysis_v3(result, profile, orders)
             result["data_source"] = "规则引擎"
             return self._cache_and_return(buyer_nick, profile, result)
-        # L1 存在但失败 + L2 存在但失败 → L2 段内已 return pending_retry
-
-    def _pending_retry_result(self) -> Dict[str, Any]:
-        """L2 失败时返回待重试占位 (不再降级 rule-based)。
-
-        标 analysis_method='pending_retry', 由 scripts/refresh_rule_based.py
-        识别并二次触发 LLM (MiniMax/DeepSeek) 重分析。
-        """
-        return {
-            "summary": "AI 分析暂未生成 (DeepSeek 失败, 将由二次刷新重试)",
-            "key_interests": [],
-            "pain_points": [],
-            "recommended_action": "请稍后重试或检查 DeepSeek API 状态",
-            "analysis_method": "pending_retry",
-            "data_source": "等待重试"
-        }
+        raise AIAnalysisUnavailableError("AI persona analysis failed; retry later")
 
     def _format_order_summary(self, profile: Dict, orders: List[Dict]) -> str:
         """Format an authoritative order fact pack for fallback models."""
@@ -466,7 +462,11 @@ class AnalyzerOrchestrator:
             is_valid_result = self._is_valid_analysis(result)
 
             if is_valid_result:
-                self.cache_manager.set_persona(buyer_nick, result, profile)
+                saved = self.cache_manager.set_persona(buyer_nick, result, profile)
+                if not saved:
+                    raise RuntimeError(
+                        "AI persona result was not cached; retry later"
+                    )
             else:
                 print(f"[Orchestrator] 跳过缓存: 分析结果无效")
 
@@ -474,7 +474,7 @@ class AnalyzerOrchestrator:
 
     def _is_valid_analysis(self, result: Dict) -> bool:
         """检查分析结果是否有效"""
-        if not result:
+        if not result or is_explicit_failure_result(result):
             return False
 
         summary = result.get("summary", "")

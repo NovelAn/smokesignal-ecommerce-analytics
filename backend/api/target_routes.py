@@ -1196,14 +1196,16 @@ async def force_refresh_analysis(
         reanalyzed = []
         ai_provider = None
 
-        # 1. 清除缓存
-        if refresh_type in ["persona", "all"]:
-            orchestrator.force_refresh(user_nick)
-            cleared.append("画像")
+        # 仅“只清除不重分析”时立即删除缓存。重新分析采用成功后覆盖，
+        # 避免模型失败时丢失上一次成功结果或写入错误占位。
+        if not reanalyze:
+            if refresh_type in ["persona", "all"]:
+                orchestrator.force_refresh(user_nick)
+                cleared.append("画像")
 
-        if refresh_type in ["sentiment", "all"]:
-            batch_analyzer.force_refresh(user_nick)
-            cleared.append("情感")
+            if refresh_type in ["sentiment", "all"]:
+                batch_analyzer.force_refresh(user_nick)
+                cleared.append("情感")
 
         # 2. 如果需要重新分析
         if reanalyze:
@@ -1230,7 +1232,8 @@ async def force_refresh_analysis(
                 profile = profile_result[0] if profile_result else None
 
                 # 保存结果
-                batch_analyzer.save_analysis_result(result, profile=profile)
+                if not batch_analyzer.save_analysis_result(result, profile=profile):
+                    raise RuntimeError("情感分析结果保存失败，请重试")
                 reanalyzed.append("情感")
                 ai_provider = result.get('sentiment_method', 'unknown')
                 logging.info(f"[ForceRefresh] 情感分析完成: {user_nick}, method={ai_provider}")
@@ -1329,12 +1332,17 @@ async def force_refresh_analysis(
                         profile=profile_data,
                         chats=chats,
                         orders=orders,
+                        force_refresh=True,
                         is_incremental=is_incremental,
                     )
 
                     # 保存结果到缓存（仅当 cache 启用时；orchestrator 内部已写过缓存，这里是冗余兜底）
                     if orchestrator.cache_manager:
-                        orchestrator.cache_manager.set_persona(user_nick, ai_result, profile_data, actual_chats=chats)
+                        saved = orchestrator.cache_manager.set_persona(
+                            user_nick, ai_result, profile_data, actual_chats=chats
+                        )
+                        if not saved:
+                            raise RuntimeError("画像分析结果保存失败，请重试")
 
                     reanalyzed.append("画像")
                     persona_method = ai_result.get('analysis_method', 'unknown')
@@ -1344,7 +1352,7 @@ async def force_refresh_analysis(
 
         # 构建返回消息
         if reanalyzed:
-            message = f"已清除 {', '.join(cleared)} 缓存并重新分析完成"
+            message = f"已重新分析并更新 {', '.join(reanalyzed)} 缓存"
         else:
             message = f"已清除 {', '.join(cleared)} 缓存，下次请求将重新分析"
 

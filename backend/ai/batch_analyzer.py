@@ -11,6 +11,7 @@ Batch Analyzer - 批量AI情绪/意图分析
 2. 智能限流: 每分钟最多20次API调用
 3. 多级降级: MiniMax M2.7 → DeepSeek → 规则引擎
 4. 批量处理: 每批20个客户
+5. 失败可重试: 已配置模型调用失败时不写缓存、不推进快照
 """
 import json
 import time
@@ -26,6 +27,7 @@ from backend.analytics.tag_calculator import TagCalculator
 from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
 from backend.ai.keyword_matcher import analyze_rule_based
 from backend.ai.model_selection import should_use_deepseek_pro
+from backend.ai.analysis_errors import AIAnalysisUnavailableError, is_explicit_failure_result
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +94,7 @@ class BatchAnalyzer:
     Features:
     - Incremental updates: Only analyze buyers with new chat records
     - Smart rate limiting: Max 20 API calls per minute
-    - Multi-level fallback: Zhipu → DeepSeek → Rule-based
+    - Multi-level fallback: MiniMax → DeepSeek; rule-based only without configured models
     - Batch processing: 20 buyers per batch
     """
 
@@ -480,7 +482,13 @@ class BatchAnalyzer:
 
                     # Round 4: 传 actual_chats 给 set_persona (增量模式下用 chats[0].msg_time)
                     if orchestrator.cache_manager and orchestrator._is_valid_analysis(result):
-                        orchestrator.cache_manager.set_persona(buyer_nick, result, profile_data, actual_chats=chats)
+                        saved = orchestrator.cache_manager.set_persona(
+                            buyer_nick, result, profile_data, actual_chats=chats
+                        )
+                        if not saved:
+                            raise RuntimeError(
+                                "AI persona result was not cached; retry later"
+                            )
 
                     return result
                 except Exception as e:
@@ -510,7 +518,11 @@ class BatchAnalyzer:
                         f"({task.processed_buyers}/{task.total_buyers})"
                     )
 
-            task.status = BatchTaskStatus.COMPLETED
+            if task.failed_buyers and not task.processed_buyers:
+                task.status = BatchTaskStatus.FAILED
+                task.error_message = "All persona analyses failed; retry later"
+            else:
+                task.status = BatchTaskStatus.COMPLETED
             task.completed_at = datetime.now()
             logger.info(f"[BatchAnalyzer] Persona task {task_id} completed: {task.processed_buyers} processed, {task.failed_buyers} failed")
 
@@ -707,10 +719,16 @@ class BatchAnalyzer:
                 )
 
             except Exception as e:
-                logger.warning(f"[BatchAnalyzer] DeepSeek failed for {buyer_nick}, fallback to rule-based: {e}")
+                logger.warning(f"[BatchAnalyzer] DeepSeek failed for {buyer_nick}; keeping analysis retryable: {e}")
 
-        # ===== L3: Rule-based（兜底）=====
-        return self._rule_based_analysis(buyer_nick, buyer_messages)
+        # 只有完全没有配置模型时才允许规则引擎提供结果。已配置模型调用失败时
+        # 必须保持可重试，不能把规则结果或错误占位写成一次成功分析。
+        if not self.minimax_client and not self.deepseek_client:
+            return self._rule_based_analysis(buyer_nick, buyer_messages)
+
+        raise AIAnalysisUnavailableError(
+            "AI sentiment/intent analysis failed; retry later"
+        )
 
     def _post_process_sentiment(
         self,
@@ -965,6 +983,13 @@ class BatchAnalyzer:
         sentiment_analyzed_last_chat_date 写入值 = incremental_chat_to_date
         （本次分析覆盖到的最早一条聊天时间；下次增量分析时作为起点）
         """
+        if is_explicit_failure_result(result):
+            logger.warning(
+                "[BatchAnalyzer] Refused to cache failed analysis for %s",
+                result.get("buyer_nick"),
+            )
+            return False
+
         from backend.database import Database
         from backend.config import settings
 
@@ -1153,7 +1178,10 @@ class BatchAnalyzer:
                         result['incremental_sentiment_score'] = None
                         result['incremental_sentiment_analyzed_at'] = None
 
-                    self.save_analysis_result(result, profile=buyer)
+                    if not self.save_analysis_result(result, profile=buyer):
+                        raise RuntimeError(
+                            "AI sentiment/intent result was not cached; retry later"
+                        )
                     return result
                 except Exception as e:
                     logger.error(f"[BatchAnalyzer] Failed to process {buyer.get('buyer_nick')}: {e}")
@@ -1179,9 +1207,16 @@ class BatchAnalyzer:
                     task.processed_buyers += 1
                     logger.debug(f"[BatchAnalyzer] Processed {result.get('buyer_nick')} ({task.processed_buyers}/{task.total_buyers})")
 
-            task.status = BatchTaskStatus.COMPLETED
+            if task.failed_buyers and not task.processed_buyers:
+                task.status = BatchTaskStatus.FAILED
+                task.error_message = "All sentiment/intent analyses failed; retry later"
+            else:
+                task.status = BatchTaskStatus.COMPLETED
             task.completed_at = datetime.now()
-            logger.info(f"[BatchAnalyzer] Batch task {task_id} completed: {task.processed_buyers} processed, {task.failed_buyers} failed")
+            logger.info(
+                f"[BatchAnalyzer] Batch task {task_id} {task.status.value}: "
+                f"{task.processed_buyers} processed, {task.failed_buyers} failed"
+            )
 
         except Exception as e:
             logger.error(f"[BatchAnalyzer] Batch task {task_id} failed: {e}")
