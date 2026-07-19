@@ -73,6 +73,9 @@ CREATE TABLE target_buyers_precomputed (
     -- === 流失风险标签 ===
     churn_risk VARCHAR(20) COMMENT '流失风险: 高/中/低',
 
+    -- === 生命周期阶段 ===
+    lifecycle_stage VARCHAR(20) COMMENT '生命周期阶段: 新客/成长/成熟/预流失/流失',
+
     -- === 地理位置 ===
     city VARCHAR(100) COMMENT '城市',
 
@@ -108,6 +111,7 @@ CREATE TABLE target_buyers_precomputed (
     INDEX idx_vip_level (vip_level),
     INDEX idx_last_purchase (last_purchase_date),
     INDEX idx_churn_risk (churn_risk),
+    INDEX idx_lifecycle_stage (lifecycle_stage),
     INDEX idx_updated (updated_at),
     INDEX idx_l6m_netsales (l6m_netsales),
     INDEX idx_l1y_netsales (l1y_netsales),
@@ -392,7 +396,19 @@ SET churn_risk = CASE
     ELSE '低'
 END;
 
--- 3.7 更新品类偏好(TOP3) - 按NetSales排序
+-- 3.7 计算生命周期阶段 (依赖 churn_risk)
+UPDATE target_buyers_precomputed
+SET lifecycle_stage = CASE
+    WHEN DATEDIFF(NOW(), last_purchase_date) > 365 OR churn_risk = '高' THEN '流失'
+    WHEN DATEDIFF(NOW(), first_purchase_date) <= 90 THEN '新客'
+    WHEN rolling_24m_netsales >= 50000 AND DATEDIFF(NOW(), last_purchase_date) <= 180 THEN '成熟'
+    WHEN DATEDIFF(NOW(), first_purchase_date) BETWEEN 91 AND 365
+         AND DATEDIFF(NOW(), last_purchase_date) <= 90
+         AND rolling_24m_netsales < 50000 THEN '成长'
+    ELSE '预流失'
+END;
+
+-- 3.8 更新品类偏好(TOP3) - 按NetSales排序
 WITH buyer_category_stats AS (
     SELECT
         买家昵称,
@@ -440,6 +456,24 @@ BEGIN
     DECLARE start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
     DECLARE affected_rows INT DEFAULT 0;
     DECLARE target_count INT DEFAULT 0;
+
+    -- P2: 从 tag_config 表读取阈值配置 (硬编码 → 数据库驱动)
+    DECLARE v_v0_min, v_v1_min, v_v2_min, v_v3_min DECIMAL(18,4);
+    DECLARE v_churn_high_days, v_churn_med_days INT;
+    DECLARE v_discount_high, v_discount_med DECIMAL(18,4);
+    DECLARE v_lc_new_days, v_lc_mature_min, v_lc_churn_days INT;
+
+    SELECT config_value INTO v_v0_min FROM tag_config WHERE config_key = 'vip_v0_min';
+    SELECT config_value INTO v_v1_min FROM tag_config WHERE config_key = 'vip_v1_min';
+    SELECT config_value INTO v_v2_min FROM tag_config WHERE config_key = 'vip_v2_min';
+    SELECT config_value INTO v_v3_min FROM tag_config WHERE config_key = 'vip_v3_min';
+    SELECT config_value INTO v_churn_high_days FROM tag_config WHERE config_key = 'churn_high_days_since_chat';
+    SELECT config_value INTO v_churn_med_days  FROM tag_config WHERE config_key = 'churn_medium_days_since_chat';
+    SELECT config_value INTO v_discount_high FROM tag_config WHERE config_key = 'discount_high_ratio';
+    SELECT config_value INTO v_discount_med  FROM tag_config WHERE config_key = 'discount_medium_ratio';
+    SELECT config_value INTO v_lc_new_days    FROM tag_config WHERE config_key = 'lifecycle_new_customer_days';
+    SELECT config_value INTO v_lc_mature_min  FROM tag_config WHERE config_key = 'lifecycle_mature_min_netsales';
+    SELECT config_value INTO v_lc_churn_days  FROM tag_config WHERE config_key = 'lifecycle_churn_days_since_purchase';
 
     -- 记录开始
     SELECT CONCAT('🚀 开始刷新目标买家预计算表: ', start_time) AS message;
@@ -646,13 +680,13 @@ BEGIN
             ELSE 0
         END;
 
-    -- VIP等级
+    -- VIP等级 (使用 tag_config 配置的阈值)
     UPDATE target_buyers_precomputed
     SET vip_level = CASE
-        WHEN rolling_24m_netsales >= 450000 THEN 'V3'
-        WHEN rolling_24m_netsales >= 150000 THEN 'V2'
-        WHEN rolling_24m_netsales >= 50000 THEN 'V1'
-        WHEN rolling_24m_netsales >= 30000 THEN 'V0'
+        WHEN rolling_24m_netsales >= v_v3_min THEN 'V3'
+        WHEN rolling_24m_netsales >= v_v2_min THEN 'V2'
+        WHEN rolling_24m_netsales >= v_v1_min THEN 'V1'
+        WHEN rolling_24m_netsales >= v_v0_min THEN 'V0'
         ELSE 'Non-VIP'
     END;
 
@@ -668,8 +702,8 @@ BEGIN
             WHERE 买家昵称 = target_buyers_precomputed.buyer_nick
         ),
         discount_sensitivity = CASE
-            WHEN discount_ratio >= 0.7 THEN '高度敏感'
-            WHEN discount_ratio >= 0.4 THEN '中度敏感'
+            WHEN discount_ratio >= v_discount_high THEN '高度敏感'
+            WHEN discount_ratio >= v_discount_med  THEN '中度敏感'
             ELSE '低度敏感'
         END;
 
@@ -721,21 +755,43 @@ BEGIN
             WHERE user_nick = tb.buyer_nick
         );
 
-    -- 流失风险（两个维度都要不活跃才升高风险）
+    -- 流失风险（两个维度都要不活跃才升高风险）使用 tag_config 配置的阈值
     UPDATE target_buyers_precomputed
     SET churn_risk = CASE
-        -- 高风险：购买 > 2年 且 聊天 > 6个月（两个维度都长期不活跃）
+        -- 高风险：购买 > 2年 且 聊天 > 配置天数（两个维度都长期不活跃）
         WHEN
             DATEDIFF(NOW(), last_purchase_date) > 730
-            AND DATEDIFF(NOW(), last_chat_date) > 180
+            AND DATEDIFF(NOW(), last_chat_date) > v_churn_high_days
         THEN '高'
-        -- 中风险：购买 > 6个月 且 聊天 > 3个月（两个维度都不太活跃）
+        -- 中风险：购买 > 6个月 且 聊天 > 配置天数（两个维度都不太活跃）
         WHEN
             DATEDIFF(NOW(), last_purchase_date) > 180
-            AND DATEDIFF(NOW(), last_chat_date) > 90
+            AND DATEDIFF(NOW(), last_chat_date) > v_churn_med_days
         THEN '中'
         -- 低风险：至少有一个维度活跃
         ELSE '低'
+    END;
+
+    -- 生命周期阶段 (依赖 churn_risk，必须在之后计算) 使用 tag_config 配置的阈值
+    UPDATE target_buyers_precomputed
+    SET lifecycle_stage = CASE
+        -- 流失: 最后购买超过配置天数 OR 高流失风险
+        WHEN DATEDIFF(NOW(), last_purchase_date) > v_lc_churn_days OR churn_risk = '高'
+          THEN '流失'
+        -- 新客: 首次购买在配置天数内
+        WHEN DATEDIFF(NOW(), first_purchase_date) <= v_lc_new_days
+          THEN '新客'
+        -- 成熟: 高净值(rolling_24m >= 配置值) 且 近期活跃(180天内有购买)
+        WHEN rolling_24m_netsales >= v_lc_mature_min
+             AND DATEDIFF(NOW(), last_purchase_date) <= 180
+          THEN '成熟'
+        -- 成长: 首次购买91-365天 且 近期有购买(90天内) 且 净值 < 配置值
+        WHEN DATEDIFF(NOW(), first_purchase_date) BETWEEN 91 AND 365
+             AND DATEDIFF(NOW(), last_purchase_date) <= 90
+             AND rolling_24m_netsales < v_lc_mature_min
+          THEN '成长'
+        -- 预流失: 兜底
+        ELSE '预流失'
     END;
 
     -- 品类偏好(TOP3) - 按NetSales排序

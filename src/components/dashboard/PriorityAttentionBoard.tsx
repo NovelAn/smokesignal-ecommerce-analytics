@@ -51,6 +51,17 @@ function getChurnRiskColor(risk: string): 'red' | 'orange' | 'green' {
   return 'green';
 }
 
+function getLifecycleColor(stage: string): 'blue' | 'green' | 'purple' | 'orange' | 'red' {
+  const map: Record<string, 'blue' | 'green' | 'purple' | 'orange' | 'red'> = {
+    '新客': 'blue',
+    '成长': 'green',
+    '成熟': 'purple',
+    '预流失': 'orange',
+    '流失': 'red',
+  };
+  return map[stage] || 'blue';
+}
+
 // RFM segment 等级排名 (M*R*F 越高的 segment 越重要)
 const SEGMENT_RANK: Record<string, number> = {
   '重要价值客户': 100, '重要保持客户': 90, '重要发展客户': 85, '重要挽留客户': 70,
@@ -136,6 +147,15 @@ function ChurnRowCells({ row, canUndo, customer, onStatusChange, onUndo }: Churn
         <NotionTag
           text={row.vip_level || 'N/A'}
           color={row.vip_level === 'V3' || row.vip_level === 'V2' ? 'red' : row.vip_level === 'V1' ? 'orange' : 'gray'}
+          size="xs"
+        />
+      </td>
+
+      {/* 生命周期阶段 */}
+      <td className="px-2 py-1">
+        <NotionTag
+          text={row.lifecycle_stage || '-'}
+          color={getLifecycleColor(row.lifecycle_stage || '')}
           size="xs"
         />
       </td>
@@ -955,6 +975,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                 </th>
                 <th className="px-3 py-1 font-medium text-notion-muted whitespace-nowrap">客户</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">VIP</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">生命周期</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">Segment 变化</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">入选原因</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">Churn 升级</th>

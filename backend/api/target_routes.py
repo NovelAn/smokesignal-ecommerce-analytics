@@ -2680,3 +2680,408 @@ async def get_history_buyer_timeline(
     except Exception as e:
         logging.exception("[History] get_history_buyer_timeline failed for %s", buyer_nick)
         raise HTTPException(status_code=500, detail=str(e) or e.__class__.__name__)
+
+
+# ============================================
+# 分群查询 (P0: User Segmentation)
+# ============================================
+
+# 标签筛选参数 (query/count/export 共用)
+_SEGMENT_TAG_PARAMS = dict(
+    buyer_type=Optional[List[str]],
+    vip_level=Optional[List[str]],
+    lifecycle_stage=Optional[List[str]],
+    churn_risk=Optional[List[str]],
+    channel=Optional[List[str]],
+    sentiment_label=Optional[List[str]],
+    dominant_intent=Optional[List[str]],
+    follow_priority=Optional[List[str]],
+    client_monthly_tag=Optional[List[str]],
+    top_category=Optional[List[str]],
+    discount_sensitivity=Optional[List[str]],
+)
+
+# 指标范围参数
+_SEGMENT_RANGE_PARAMS = dict(
+    min_gmv=Optional[float],
+    max_gmv=Optional[float],
+    min_orders=Optional[int],
+    max_orders=Optional[int],
+    min_refund_rate=Optional[float],
+    max_refund_rate=Optional[float],
+    min_l6m_netsales=Optional[float],
+    max_l6m_netsales=Optional[float],
+    min_purchase_interval=Optional[float],
+    max_purchase_interval=Optional[float],
+    min_days_since_purchase=Optional[int],
+    max_days_since_purchase=Optional[int],
+)
+
+
+def _build_segment_filters(**kwargs) -> Dict[str, Any]:
+    """从路由参数构建分群筛选字典, 剔除 None 值."""
+    filters: Dict[str, Any] = {}
+    for key, val in kwargs.items():
+        if val is not None:
+            filters[key] = val
+    return filters
+
+
+@router.get("/segments/query")
+async def get_segment_buyers(
+    # 标签筛选
+    buyer_type: Optional[List[str]] = Query(None, description="买家类型"),
+    vip_level: Optional[List[str]] = Query(None, description="VIP等级"),
+    lifecycle_stage: Optional[List[str]] = Query(None, description="生命周期阶段"),
+    churn_risk: Optional[List[str]] = Query(None, description="流失风险"),
+    channel: Optional[List[str]] = Query(None, description="渠道"),
+    sentiment_label: Optional[List[str]] = Query(None, description="情感标签"),
+    dominant_intent: Optional[List[str]] = Query(None, description="主要意图"),
+    follow_priority: Optional[List[str]] = Query(None, description="跟进优先级"),
+    client_monthly_tag: Optional[List[str]] = Query(None, description="新老客"),
+    top_category: Optional[List[str]] = Query(None, description="品类偏好"),
+    discount_sensitivity: Optional[List[str]] = Query(None, description="折扣敏感度"),
+    # 指标范围
+    min_gmv: Optional[float] = Query(None, description="最小GMV"),
+    max_gmv: Optional[float] = Query(None, description="最大GMV"),
+    min_orders: Optional[int] = Query(None, description="最小订单数"),
+    max_orders: Optional[int] = Query(None, description="最大订单数"),
+    min_refund_rate: Optional[float] = Query(None, description="最小退款率"),
+    max_refund_rate: Optional[float] = Query(None, description="最大退款率"),
+    min_l6m_netsales: Optional[float] = Query(None, description="最小L6M净销售"),
+    max_l6m_netsales: Optional[float] = Query(None, description="最大L6M净销售"),
+    min_purchase_interval: Optional[float] = Query(None, description="最小购买间隔天数"),
+    max_purchase_interval: Optional[float] = Query(None, description="最大购买间隔天数"),
+    min_days_since_purchase: Optional[int] = Query(None, description="最小距上次购买天数"),
+    max_days_since_purchase: Optional[int] = Query(None, description="最大距上次购买天数"),
+    # 分页
+    limit: int = Query(50, ge=1, le=500, description="返回数量"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    include_total: bool = Query(True, description="是否计算总数"),
+) -> Dict[str, Any]:
+    """按标签组合筛选买家列表."""
+    filters = _build_segment_filters(
+        buyer_type=buyer_type, vip_level=vip_level,
+        lifecycle_stage=lifecycle_stage, churn_risk=churn_risk,
+        channel=channel, sentiment_label=sentiment_label,
+        dominant_intent=dominant_intent, follow_priority=follow_priority,
+        client_monthly_tag=client_monthly_tag, top_category=top_category,
+        discount_sensitivity=discount_sensitivity,
+        min_gmv=min_gmv, max_gmv=max_gmv,
+        min_orders=min_orders, max_orders=max_orders,
+        min_refund_rate=min_refund_rate, max_refund_rate=max_refund_rate,
+        min_l6m_netsales=min_l6m_netsales, max_l6m_netsales=max_l6m_netsales,
+        min_purchase_interval=min_purchase_interval, max_purchase_interval=max_purchase_interval,
+        min_days_since_purchase=min_days_since_purchase, max_days_since_purchase=max_days_since_purchase,
+    )
+    try:
+        return await _run_blocking(
+            analyzer.get_segment, filters,
+            limit=limit, offset=offset, include_total=include_total,
+            timeout=15,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/segments/count")
+async def get_segment_count(
+    # 标签筛选 (同 /segments/query)
+    buyer_type: Optional[List[str]] = Query(None),
+    vip_level: Optional[List[str]] = Query(None),
+    lifecycle_stage: Optional[List[str]] = Query(None),
+    churn_risk: Optional[List[str]] = Query(None),
+    channel: Optional[List[str]] = Query(None),
+    sentiment_label: Optional[List[str]] = Query(None),
+    dominant_intent: Optional[List[str]] = Query(None),
+    follow_priority: Optional[List[str]] = Query(None),
+    client_monthly_tag: Optional[List[str]] = Query(None),
+    top_category: Optional[List[str]] = Query(None),
+    discount_sensitivity: Optional[List[str]] = Query(None),
+    # 指标范围 (同 /segments/query)
+    min_gmv: Optional[float] = Query(None),
+    max_gmv: Optional[float] = Query(None),
+    min_orders: Optional[int] = Query(None),
+    max_orders: Optional[int] = Query(None),
+    min_refund_rate: Optional[float] = Query(None),
+    max_refund_rate: Optional[float] = Query(None),
+    min_l6m_netsales: Optional[float] = Query(None),
+    max_l6m_netsales: Optional[float] = Query(None),
+    min_purchase_interval: Optional[float] = Query(None),
+    max_purchase_interval: Optional[float] = Query(None),
+    min_days_since_purchase: Optional[int] = Query(None),
+    max_days_since_purchase: Optional[int] = Query(None),
+) -> Dict[str, Any]:
+    """按标签组合统计匹配买家数量 (实时预览用)."""
+    filters = _build_segment_filters(
+        buyer_type=buyer_type, vip_level=vip_level,
+        lifecycle_stage=lifecycle_stage, churn_risk=churn_risk,
+        channel=channel, sentiment_label=sentiment_label,
+        dominant_intent=dominant_intent, follow_priority=follow_priority,
+        client_monthly_tag=client_monthly_tag, top_category=top_category,
+        discount_sensitivity=discount_sensitivity,
+        min_gmv=min_gmv, max_gmv=max_gmv,
+        min_orders=min_orders, max_orders=max_orders,
+        min_refund_rate=min_refund_rate, max_refund_rate=max_refund_rate,
+        min_l6m_netsales=min_l6m_netsales, max_l6m_netsales=max_l6m_netsales,
+        min_purchase_interval=min_purchase_interval, max_purchase_interval=max_purchase_interval,
+        min_days_since_purchase=min_days_since_purchase, max_days_since_purchase=max_days_since_purchase,
+    )
+    try:
+        total = await _run_blocking(
+            analyzer.get_segment_count, filters, timeout=10,
+        )
+        return {"total": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/segments/export")
+async def export_segment_csv(
+    # 标签筛选 (同 /segments/query)
+    buyer_type: Optional[List[str]] = Query(None),
+    vip_level: Optional[List[str]] = Query(None),
+    lifecycle_stage: Optional[List[str]] = Query(None),
+    churn_risk: Optional[List[str]] = Query(None),
+    channel: Optional[List[str]] = Query(None),
+    sentiment_label: Optional[List[str]] = Query(None),
+    dominant_intent: Optional[List[str]] = Query(None),
+    follow_priority: Optional[List[str]] = Query(None),
+    client_monthly_tag: Optional[List[str]] = Query(None),
+    top_category: Optional[List[str]] = Query(None),
+    discount_sensitivity: Optional[List[str]] = Query(None),
+    # 指标范围 (同 /segments/query)
+    min_gmv: Optional[float] = Query(None),
+    max_gmv: Optional[float] = Query(None),
+    min_orders: Optional[int] = Query(None),
+    max_orders: Optional[int] = Query(None),
+    min_refund_rate: Optional[float] = Query(None),
+    max_refund_rate: Optional[float] = Query(None),
+    min_l6m_netsales: Optional[float] = Query(None),
+    max_l6m_netsales: Optional[float] = Query(None),
+    min_purchase_interval: Optional[float] = Query(None),
+    max_purchase_interval: Optional[float] = Query(None),
+    min_days_since_purchase: Optional[int] = Query(None),
+    max_days_since_purchase: Optional[int] = Query(None),
+):
+    """导出分群结果为CSV文件 (utf-8-sig BOM for Excel)."""
+    try:
+        from fastapi.responses import StreamingResponse
+        from io import StringIO
+        import csv
+        from datetime import datetime
+
+        filters = _build_segment_filters(
+            buyer_type=buyer_type, vip_level=vip_level,
+            lifecycle_stage=lifecycle_stage, churn_risk=churn_risk,
+            channel=channel, sentiment_label=sentiment_label,
+            dominant_intent=dominant_intent, follow_priority=follow_priority,
+            client_monthly_tag=client_monthly_tag, top_category=top_category,
+            discount_sensitivity=discount_sensitivity,
+            min_gmv=min_gmv, max_gmv=max_gmv,
+            min_orders=min_orders, max_orders=max_orders,
+            min_refund_rate=min_refund_rate, max_refund_rate=max_refund_rate,
+            min_l6m_netsales=min_l6m_netsales, max_l6m_netsales=max_l6m_netsales,
+            min_purchase_interval=min_purchase_interval, max_purchase_interval=max_purchase_interval,
+            min_days_since_purchase=min_days_since_purchase, max_days_since_purchase=max_days_since_purchase,
+        )
+
+        buyers = await _run_blocking(
+            analyzer.queries.get_segment_buyers, filters,
+            limit=2000, offset=0, timeout=30,
+        )
+
+        output = StringIO()
+        writer = csv.writer(output)
+
+        headers = [
+            'buyer_nick', 'channel', 'buyer_type', 'vip_level', 'lifecycle_stage',
+            'churn_risk', 'discount_sensitivity', 'sentiment_label', 'dominant_intent',
+            'follow_priority', 'rfm_segment', 'city', 'top_category',
+            'historical_gmv', 'historical_net_sales', 'rolling_24m_netsales',
+            'l6m_netsales', 'total_orders', 'refund_rate',
+            'avg_purchase_interval_days', 'last_purchase_date', 'last_chat_date',
+        ]
+        writer.writerow(headers)
+
+        for b in buyers:
+            writer.writerow([
+                b.get('buyer_nick', ''),
+                b.get('channel', ''),
+                b.get('buyer_type', ''),
+                b.get('vip_level', ''),
+                b.get('lifecycle_stage', ''),
+                b.get('churn_risk', ''),
+                b.get('discount_sensitivity', ''),
+                b.get('sentiment_label', ''),
+                b.get('dominant_intent', ''),
+                b.get('follow_priority', ''),
+                b.get('rfm_segment', ''),
+                b.get('city', ''),
+                b.get('top_category', ''),
+                b.get('historical_gmv', 0),
+                b.get('historical_net_sales', 0),
+                b.get('rolling_24m_netsales', 0),
+                b.get('l6m_netsales', 0),
+                b.get('total_orders', 0),
+                f"{b.get('refund_rate', 0) * 100:.1f}%",
+                b.get('avg_purchase_interval_days', 0),
+                b.get('last_purchase_date', ''),
+                b.get('last_chat_date', ''),
+            ])
+
+        csv_content = output.getvalue()
+        filename = f"segment_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        return StreamingResponse(
+            iter([csv_content.encode('utf-8-sig')]),
+            media_type='text/csv; charset=utf-8',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/segments/filter-options")
+async def get_filter_options() -> Dict[str, Any]:
+    """获取各标签字段的可选值 (前端筛选器用)."""
+    try:
+        return await _run_blocking(
+            analyzer.get_filter_options, timeout=10,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# 标签阈值配置 (P2: Tag Configurability)
+# ============================================
+
+@router.get("/tag-config")
+async def get_tag_config() -> Dict[str, Any]:
+    """
+    获取全部 tag_config (前端 SettingsView 渲染用).
+
+    返回: [{config_key, config_value, config_label, category, sort_order, updated_at}, ...]
+    """
+    try:
+        from backend.database import Database
+        from backend.config import settings
+
+        db_name = settings.db_name_to_use if settings.db_name_to_use else "aliyunDB"
+        db = Database(db_name=db_name)
+        rows = db.execute_query(
+            "SELECT config_key, config_value, config_label, category, "
+            "sort_order, updated_at, updated_by FROM tag_config ORDER BY category, sort_order"
+        )
+        return {"configs": rows, "count": len(rows)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class TagConfigUpdate(BaseModel):
+    config_value: float
+    updated_by: Optional[str] = "ui"
+
+
+@router.put("/tag-config/{config_key}")
+async def update_tag_config(config_key: str, body: TagConfigUpdate) -> Dict[str, Any]:
+    """
+    更新单条 tag_config 阈值. 写入后失效内存缓存.
+
+    注意: 已存在的 target_buyers_precomputed 字段不会自动重算;
+    需要手动 CALL refresh_target_buyers_precomputed() 让阈值生效.
+    """
+    try:
+        from backend.database import Database
+        from backend.config import settings
+        from backend.analytics.tag_calculator import invalidate_tag_config_cache
+
+        db_name = settings.db_name_to_use if settings.db_name_to_use else "aliyunDB"
+        db = Database(db_name=db_name)
+
+        # 检查 key 存在
+        existing = db.execute_query(
+            "SELECT config_key, config_label FROM tag_config WHERE config_key = %s",
+            [config_key],
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"config_key {config_key} 不存在")
+
+        db.execute_update(
+            "UPDATE tag_config SET config_value = %s, updated_by = %s WHERE config_key = %s",
+            [body.config_value, body.updated_by, config_key],
+        )
+        invalidate_tag_config_cache()
+
+        return {
+            "config_key": config_key,
+            "config_value": body.config_value,
+            "config_label": existing[0].get("config_label"),
+            "message": "已更新. 提醒: 重跑 CALL refresh_target_buyers_precomputed() 让目标买家表字段生效",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class TagConfigPreview(BaseModel):
+    """预览: 临时改一组 config (不写库), 返回受影响买家数估算."""
+    changes: Dict[str, float] = Field(..., description="key -> 新值")
+
+
+@router.post("/tag-config/preview")
+async def preview_tag_config(body: TagConfigPreview) -> Dict[str, Any]:
+    """
+    预览一组阈值变更对当前目标买家池的影响 (不写库).
+
+    受限规则: 仅校验 VIP 等级 + lifecycle_stage 的边界变更.
+    返回每条 key 的 before/after 估算买家数.
+    """
+    try:
+        from backend.database import Database
+        from backend.config import settings
+
+        db_name = settings.db_name_to_use if settings.db_name_to_use else "aliyunDB"
+        db = Database(db_name=db_name)
+
+        affected: List[Dict[str, Any]] = []
+
+        # 仅支持 VIP 和 lifecycle 这两类基础预览
+        if "vip_v2_min" in body.changes or "vip_v3_min" in body.changes:
+            # 估算 v2 ↔ v3 之间的人数
+            row = db.execute_query(
+                "SELECT "
+                "  SUM(CASE WHEN vip_level = 'V3' THEN 1 ELSE 0 END) as v3_count, "
+                "  SUM(CASE WHEN vip_level = 'V2' THEN 1 ELSE 0 END) as v2_count "
+                "FROM target_buyers_precomputed"
+            )
+            affected.append({
+                "key_set": [k for k in ["vip_v2_min", "vip_v3_min"] if k in body.changes],
+                "current_v3_count": int(row[0].get("v3_count") or 0) if row else 0,
+                "current_v2_count": int(row[0].get("v2_count") or 0) if row else 0,
+                "note": "重跑 procedure 后 vip_level 会按新阈值重算",
+            })
+
+        if "lifecycle_churn_days_since_purchase" in body.changes:
+            new_days = int(body.changes["lifecycle_churn_days_since_purchase"])
+            # 估算新的流失数: 距上次购买 > new_days 的客户
+            row = db.execute_query(
+                "SELECT COUNT(*) as cnt FROM target_buyers_precomputed "
+                "WHERE DATEDIFF(NOW(), last_purchase_date) > %s",
+                [new_days],
+            )
+            affected.append({
+                "key": "lifecycle_churn_days_since_purchase",
+                "new_threshold_days": new_days,
+                "estimated_churn_count": int(row[0].get("cnt") or 0) if row else 0,
+                "note": f"按新阈值 {new_days} 天计算, 实际 lifecycle_stage=流失 人数",
+            })
+
+        return {
+            "preview": affected,
+            "summary": "上述数字为基于当前数据的估算, 重跑 procedure 后才真正生效",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

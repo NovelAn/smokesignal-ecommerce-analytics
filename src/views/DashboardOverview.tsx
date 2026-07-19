@@ -17,6 +17,7 @@ import { useDataFetchingWithRetry } from '../hooks/useDataFetching';
 import { MetricCards } from '../components/dashboard/MetricCards';
 import { KeywordAnalysisPanel } from '../components/dashboard/KeywordAnalysisPanel';
 import { PriorityAttentionBoard } from '../components/dashboard/PriorityAttentionBoard';
+import { SegmentationBuilder } from '../components/dashboard/SegmentationBuilder';
 import { SentimentCharts } from '../components/dashboard/SentimentCharts';
 import { YoYCompareChart } from '../components/dashboard/YoYCompareChart';
 
@@ -101,6 +102,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         highlightTrigger={highlightTrigger}
         appActiveTab={appActiveTab}
       />
+
+      {/* Row 3.5: 用户分群构建器 (P0) */}
+      <SegmentationBuilder />
 
       {/* Row 4: 情感和意图图表 */}
       <SentimentCharts timeRange={timeRange} />

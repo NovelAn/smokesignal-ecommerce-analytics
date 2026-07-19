@@ -642,7 +642,128 @@ export const apiClient = {
     const response = await fetch(`${API_BASE}/service/history/${encodeURIComponent(buyerNick)}`);
     return handleResponse<ServiceHistoryResponse>(response);
   },
+
+  // ========== 分群查询 (P0: User Segmentation) ==========
+
+  /**
+   * 按标签组合筛选买家列表
+   * GET /api/v2/segments/query
+   */
+  querySegment: async (filters: SegmentFilters, limit = 50, offset = 0, includeTotal = true) => {
+    const queryParams = _buildSegmentParams(filters, limit, offset, includeTotal);
+    const response = await fetch(`${API_BASE}/segments/query?${queryParams}`);
+    return handleResponse<SegmentQueryResponse>(response);
+  },
+
+  /**
+   * 按标签组合统计匹配买家数量 (实时预览)
+   * GET /api/v2/segments/count
+   */
+  getSegmentCount: async (filters: SegmentFilters) => {
+    const queryParams = _buildSegmentParams(filters);
+    const response = await fetch(`${API_BASE}/segments/count?${queryParams}`);
+    return handleResponse<{ total: number }>(response);
+  },
+
+  /**
+   * 获取分群 CSV 导出 URL
+   */
+  getSegmentExportUrl: (filters: SegmentFilters) => {
+    const queryParams = _buildSegmentParams(filters);
+    return `${API_BASE}/segments/export?${queryParams}`;
+  },
+
+  /**
+   * 获取各标签字段的可选值
+   * GET /api/v2/segments/filter-options
+   */
+  getFilterOptions: async () => {
+    const response = await fetch(`${API_BASE}/segments/filter-options`);
+    return handleResponse<FilterOptions>(response);
+  },
+
+  // ========== 标签阈值配置 (P2) ==========
+
+  /**
+   * 获取全部 tag_config 阈值 (SettingsView 渲染用)
+   * GET /api/v2/tag-config
+   */
+  getTagConfig: async () => {
+    const response = await fetch(`${API_BASE}/tag-config`);
+    return handleResponse<{ configs: TagConfig[]; count: number }>(response);
+  },
+
+  /**
+   * 更新单条 tag_config 阈值
+   * PUT /api/v2/tag-config/{key}
+   */
+  updateTagConfig: async (configKey: string, configValue: number, updatedBy = 'ui') => {
+    const response = await fetch(`${API_BASE}/tag-config/${encodeURIComponent(configKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config_value: configValue, updated_by: updatedBy }),
+    });
+    return handleResponse<TagConfigUpdateResponse>(response);
+  },
+
+  /**
+   * 预览一组阈值变更对买家池的影响 (不写库)
+   * POST /api/v2/tag-config/preview
+   */
+  previewTagConfig: async (changes: Record<string, number>) => {
+    const response = await fetch(`${API_BASE}/tag-config/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ changes }),
+    });
+    return handleResponse<TagConfigPreviewResponse>(response);
+  },
 };
+
+// ========== 分群参数构建 helper ==========
+
+function _buildSegmentParams(
+  filters: SegmentFilters,
+  limit?: number,
+  offset?: number,
+  includeTotal?: boolean,
+): URLSearchParams {
+  const qp = new URLSearchParams();
+
+  // 标签多选
+  const tagKeys: (keyof SegmentFilters)[] = [
+    'buyer_type', 'vip_level', 'lifecycle_stage', 'churn_risk', 'channel',
+    'sentiment_label', 'dominant_intent', 'follow_priority', 'client_monthly_tag',
+    'top_category', 'discount_sensitivity',
+  ];
+  for (const key of tagKeys) {
+    const val = filters[key];
+    if (val && Array.isArray(val)) {
+      val.forEach((v) => qp.append(key, v));
+    }
+  }
+
+  // 指标范围
+  const rangeKeys: (keyof SegmentFilters)[] = [
+    'min_gmv', 'max_gmv', 'min_orders', 'max_orders',
+    'min_refund_rate', 'max_refund_rate', 'min_l6m_netsales', 'max_l6m_netsales',
+    'min_purchase_interval', 'max_purchase_interval',
+    'min_days_since_purchase', 'max_days_since_purchase',
+  ];
+  for (const key of rangeKeys) {
+    const val = filters[key];
+    if (val !== undefined && val !== null) {
+      qp.append(key, String(val));
+    }
+  }
+
+  // 分页
+  if (limit !== undefined) qp.append('limit', String(limit));
+  if (offset !== undefined) qp.append('offset', String(offset));
+  if (includeTotal !== undefined) qp.append('include_total', String(includeTotal));
+
+  return qp;
+}
 
 // ========== TypeScript 类型定义 ==========
 
@@ -703,6 +824,7 @@ export interface BuyerInfo {
   total_orders: number;
   last_purchase_date: string;
   churn_risk: '高' | '中' | '低';
+  lifecycle_stage: '新客' | '成长' | '成熟' | '预流失' | '流失';
   discount_sensitivity: '高度敏感' | '中度敏感' | '低度敏感';
   top_category: string;
 }
@@ -752,6 +874,7 @@ export interface BuyerProfile {
 
   // 标签
   churn_risk: '高' | '中' | '低';
+  lifecycle_stage: '新客' | '成长' | '成熟' | '预流失' | '流失';
   top_category: string;
   second_category: string;
   third_category: string;
@@ -935,6 +1058,7 @@ export interface PriorityCustomer {
   l1y_netsales: number;
   l1y_refund_rate: number;
   has_chat: boolean;
+  lifecycle_stage?: string | null;
   // AI Persona fields
   persona_key_interests: string[] | null;
   persona_pain_points: string[] | null;
@@ -1117,6 +1241,8 @@ export interface ChurnWarningRow {
   selection_reasons: string;
   /** 严重程度档位: 1=最严重 (重要→已流失/低价值), 2=中度, 3=轻度, 4=兜底 */
   severity_tier: number;
+  /** 生命周期阶段 */
+  lifecycle_stage?: string | null;
 }
 
 export interface ChurnWarningResponse {
@@ -1176,4 +1302,104 @@ export interface ServiceHistoryResponse {
   buyer_nick: string;
   total: number;
   data: ServiceHistoryRow[];
+}
+
+// ========== 分群查询类型 (P0) ==========
+
+export interface SegmentFilters {
+  // 标签多选
+  buyer_type?: string[];
+  vip_level?: string[];
+  lifecycle_stage?: string[];
+  churn_risk?: string[];
+  channel?: string[];
+  sentiment_label?: string[];
+  dominant_intent?: string[];
+  follow_priority?: string[];
+  client_monthly_tag?: string[];
+  top_category?: string[];
+  discount_sensitivity?: string[];
+  // 指标范围
+  min_gmv?: number;
+  max_gmv?: number;
+  min_orders?: number;
+  max_orders?: number;
+  min_refund_rate?: number;
+  max_refund_rate?: number;
+  min_l6m_netsales?: number;
+  max_l6m_netsales?: number;
+  min_purchase_interval?: number;
+  max_purchase_interval?: number;
+  min_days_since_purchase?: number;
+  max_days_since_purchase?: number;
+}
+
+export interface SegmentBuyer {
+  buyer_nick: string;
+  channel: string;
+  buyer_type: string;
+  vip_level: string;
+  lifecycle_stage: string;
+  churn_risk: string;
+  discount_sensitivity: string;
+  sentiment_label: string;
+  dominant_intent: string;
+  follow_priority: string;
+  rfm_segment: string;
+  city: string;
+  top_category: string;
+  historical_gmv: number;
+  historical_net_sales: number;
+  rolling_24m_netsales: number;
+  l6m_netsales: number;
+  total_orders: number;
+  refund_rate: number;
+  avg_purchase_interval_days: number;
+  last_purchase_date: string;
+  last_chat_date: string | null;
+}
+
+export interface SegmentQueryResponse {
+  buyers: SegmentBuyer[];
+  total: number | null;
+  limit: number;
+  offset: number;
+}
+
+export interface FilterOptions {
+  buyer_types: string[];
+  vip_levels: string[];
+  lifecycle_stages: string[];
+  churn_risks: string[];
+  channels: string[];
+  sentiment_labels: string[];
+  dominant_intents: string[];
+  follow_priorities: string[];
+  client_monthly_tags: string[];
+  top_categories: string[];
+  discount_sensitivities: string[];
+}
+
+// ========== 标签阈值配置类型 (P2) ==========
+
+export interface TagConfig {
+  config_key: string;
+  config_value: number;
+  config_label: string;
+  category: 'vip' | 'churn' | 'discount' | 'lifecycle' | 'purchase_freq' | 'chat_recent' | 'smoker';
+  sort_order: number;
+  updated_at?: string;
+  updated_by?: string;
+}
+
+export interface TagConfigUpdateResponse {
+  config_key: string;
+  config_value: number;
+  config_label?: string;
+  message: string;
+}
+
+export interface TagConfigPreviewResponse {
+  preview: Array<Record<string, unknown>>;
+  summary: string;
 }

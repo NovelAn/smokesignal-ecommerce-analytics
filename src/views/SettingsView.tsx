@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Terminal, Play, RefreshCw, CheckCircle, AlertCircle, Loader2, Search, User, Sparkles, Square } from 'lucide-react';
 import { apiClient, BatchAnalysisStatus, SentimentSummary } from '../api/client';
+import { ThresholdConfigPanel } from '../components/settings/ThresholdConfigPanel';
 
 const SettingsView: React.FC = () => {
   const [batchStatus, setBatchStatus] = useState<BatchAnalysisStatus | null>(null);
@@ -301,6 +302,12 @@ const SettingsView: React.FC = () => {
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
+      {/* 阈值与标签配置 (P2) */}
+      <div>
+        <h2 className="text-2xl font-serif text-notion-text mb-4">阈值与标签配置</h2>
+        <ThresholdConfigPanel />
+      </div>
+
       {/* Pipeline Configuration */}
       <div>
         <h2 className="text-2xl font-serif text-notion-text mb-4">Pipeline Configuration</h2>
