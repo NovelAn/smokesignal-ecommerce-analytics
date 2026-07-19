@@ -744,3 +744,156 @@ class TargetBuyerQueries:
         """
         return self.db.execute_query(sql, (buyer_nick,))
 
+    # ============================================
+    # 分群查询 (P0: User Segmentation)
+    # ============================================
+
+    def _build_segment_conditions(
+        self,
+        filters: Dict[str, Any],
+    ) -> tuple:
+        """
+        构建分群查询的动态条件和参数.
+
+        Args:
+            filters: 筛选条件字典, key 与 SQL 占位符对应
+
+        Returns:
+            (conditions_to_remove: list, params: dict)
+        """
+        conditions_to_remove: List[str] = []
+        params: Dict[str, Any] = {}
+
+        # 标签多选筛选 (IN 条件)
+        tag_filters = [
+            'buyer_type', 'vip_level', 'lifecycle_stage', 'churn_risk',
+            'channel', 'sentiment_label', 'dominant_intent', 'follow_priority',
+            'client_monthly_tag', 'top_category', 'discount_sensitivity',
+        ]
+        for tag_key in tag_filters:
+            value = filters.get(tag_key)
+            if value:
+                if isinstance(value, (list, tuple)):
+                    params[tag_key] = tuple(value)
+                else:
+                    params[tag_key] = (value,)
+            else:
+                conditions_to_remove.append(f'AND {tag_key} IN %({tag_key})s')
+
+        # 指标范围筛选 (min/max 对)
+        range_filters = [
+            ('min_gmv', 'max_gmv', 'historical_gmv'),
+            ('min_orders', 'max_orders', 'total_orders'),
+            ('min_refund_rate', 'max_refund_rate', 'refund_rate'),
+            ('min_l6m_netsales', 'max_l6m_netsales', 'l6m_netsales'),
+            ('min_purchase_interval', 'max_purchase_interval', 'avg_purchase_interval_days'),
+        ]
+        for min_key, max_key, col in range_filters:
+            min_val = filters.get(min_key)
+            max_val = filters.get(max_key)
+            if min_val is not None:
+                params[min_key] = min_val
+            else:
+                conditions_to_remove.append(f'AND {col} >= %({min_key})s')
+            if max_val is not None:
+                params[max_key] = max_val
+            else:
+                conditions_to_remove.append(f'AND {col} <= %({max_key})s')
+
+        # 天数范围 (DATEDIFF 条件)
+        min_days = filters.get('min_days_since_purchase')
+        max_days = filters.get('max_days_since_purchase')
+        if min_days is not None:
+            params['min_days_since_purchase'] = min_days
+        else:
+            conditions_to_remove.append('AND DATEDIFF(NOW(), last_purchase_date) >= %(min_days_since_purchase)s')
+        if max_days is not None:
+            params['max_days_since_purchase'] = max_days
+        else:
+            conditions_to_remove.append('AND DATEDIFF(NOW(), last_purchase_date) <= %(max_days_since_purchase)s')
+
+        return conditions_to_remove, params
+
+    def _apply_conditions(self, sql: str, conditions_to_remove: List[str], params: Dict[str, Any]) -> str:
+        """移除未使用的 [[CONDITION]] 并清理残留标记."""
+        import re
+        for condition in conditions_to_remove:
+            sql = sql.replace(f'[[{condition}]]', '')
+        sql = re.sub(r'\[\[|\]\]', '', sql)
+        return sql
+
+    def get_segment_buyers(
+        self,
+        filters: Dict[str, Any],
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        按标签组合筛选买家列表.
+
+        Args:
+            filters: 筛选条件字典
+            limit: 返回数量
+            offset: 偏移量
+
+        Returns:
+            匹配的买家列表
+        """
+        sql = self._load_sql('get_segment_buyers.sql')
+        conditions_to_remove, params = self._build_segment_conditions(filters)
+        sql = self._apply_conditions(sql, conditions_to_remove, params)
+
+        params['limit'] = limit
+        params['offset'] = offset
+
+        return self.db.execute_query(sql, params)
+
+    def get_segment_buyers_count(
+        self,
+        filters: Dict[str, Any],
+    ) -> int:
+        """
+        按标签组合统计匹配买家数量.
+
+        Args:
+            filters: 筛选条件字典
+
+        Returns:
+            匹配买家总数
+        """
+        sql = self._load_sql('get_segment_buyers_count.sql')
+        conditions_to_remove, params = self._build_segment_conditions(filters)
+        sql = self._apply_conditions(sql, conditions_to_remove, params)
+
+        results = self.db.execute_query(sql, params)
+        return results[0]['total'] if results else 0
+
+    def get_filter_options(self) -> Dict[str, List[str]]:
+        """
+        获取各标签字段的可选值 (用于前端筛选器).
+
+        Returns:
+            各标签字段的 DISTINCT 值列表
+        """
+        tag_columns = {
+            'buyer_types': 'buyer_type',
+            'vip_levels': 'vip_level',
+            'lifecycle_stages': 'lifecycle_stage',
+            'churn_risks': 'churn_risk',
+            'channels': 'channel',
+            'sentiment_labels': 'sentiment_label',
+            'dominant_intents': 'dominant_intent',
+            'follow_priorities': 'follow_priority',
+            'client_monthly_tags': 'client_monthly_tag',
+            'top_categories': 'top_category',
+            'discount_sensitivities': 'discount_sensitivity',
+        }
+
+        result: Dict[str, List[str]] = {}
+        for result_key, column in tag_columns.items():
+            sql = f"SELECT DISTINCT {column} FROM target_buyers_precomputed WHERE {column} IS NOT NULL AND {column} != '' ORDER BY {column}"
+            rows = self.db.execute_query(sql)
+            result[result_key] = [row[column] for row in rows]
+
+        return result
+

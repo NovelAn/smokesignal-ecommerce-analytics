@@ -483,3 +483,47 @@ class TargetBuyerAnalyzer:
         """获取某客户的所有处理记录 (Round 1)."""
         return self.queries.get_service_history(buyer_nick)
 
+    # ============================================
+    # 分群查询 (P0: User Segmentation)
+    # ============================================
+
+    def get_segment(
+        self,
+        filters: Dict[str, Any],
+        limit: int = 50,
+        offset: int = 0,
+        include_total: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        按标签组合筛选买家, 返回列表 + 总数.
+
+        Args:
+            filters: 筛选条件字典
+            limit: 返回数量
+            offset: 偏移量
+            include_total: 是否计算总数 (首页时建议 True)
+
+        Returns:
+            {"buyers": [...], "total": int|None, "limit": int, "offset": int}
+        """
+        buyers = self.queries.get_segment_buyers(filters, limit, offset)
+
+        total = None
+        if include_total:
+            total = self.queries.get_segment_buyers_count(filters)
+
+        return {
+            "buyers": buyers,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def get_segment_count(self, filters: Dict[str, Any]) -> int:
+        """按标签组合统计匹配买家数量 (实时预览用)."""
+        return self.queries.get_segment_buyers_count(filters)
+
+    def get_filter_options(self) -> Dict[str, List[str]]:
+        """获取各标签字段的可选值 (前端筛选器用)."""
+        return self.queries.get_filter_options()
+

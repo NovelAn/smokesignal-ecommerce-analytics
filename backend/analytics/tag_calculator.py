@@ -3,30 +3,98 @@ Tag calculation logic for buyer segmentation
 """
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
+import logging
+import threading
+import time
+
+
+_TAG_CONFIG_CACHE: Dict[str, Any] = {}
+_TAG_CONFIG_CACHE_TS: float = 0.0
+_TAG_CONFIG_CACHE_TTL: int = 300  # 5 分钟
+_TAG_CONFIG_LOCK = threading.Lock()
+
+# 默认值, 与 create_tag_config.sql 的 seed 完全一致
+# 用于 DB 不可达 / tag_config 表尚未初始化时的兜底
+TAG_CONFIG_DEFAULTS: Dict[str, float] = {
+    "vip_v0_min": 30000,
+    "vip_v1_min": 50000,
+    "vip_v2_min": 150000,
+    "vip_v3_min": 450000,
+    "churn_high_days_since_chat": 180,
+    "churn_medium_days_since_chat": 90,
+    "discount_high_ratio": 0.7,
+    "discount_medium_ratio": 0.4,
+    "lifecycle_new_customer_days": 90,
+    "lifecycle_mature_min_netsales": 50000,
+    "lifecycle_churn_days_since_purchase": 365,
+}
+
+
+def get_tag_config() -> Dict[str, float]:
+    """读取 tag_config 表 (5 分钟内存缓存, 失败时返回默认)."""
+    global _TAG_CONFIG_CACHE, _TAG_CONFIG_CACHE_TS
+    now = time.time()
+    if _TAG_CONFIG_CACHE and (now - _TAG_CONFIG_CACHE_TS) < _TAG_CONFIG_CACHE_TTL:
+        return _TAG_CONFIG_CACHE
+    with _TAG_CONFIG_LOCK:
+        # 双重检查, 避免并发重复查 DB
+        if _TAG_CONFIG_CACHE and (time.time() - _TAG_CONFIG_CACHE_TS) < _TAG_CONFIG_CACHE_TTL:
+            return _TAG_CONFIG_CACHE
+        try:
+            from backend.database import Database
+            from backend.config import settings
+
+            db_name = settings.db_name_to_use if settings.db_name_to_use else "aliyunDB"
+            db = Database(db_name=db_name)
+            rows = db.execute_query("SELECT config_key, config_value FROM tag_config")
+            config = {row["config_key"]: float(row["config_value"]) for row in rows}
+            if config:
+                _TAG_CONFIG_CACHE = config
+                _TAG_CONFIG_CACHE_TS = time.time()
+                return config
+        except Exception as e:
+            logging.warning(f"[TagConfig] Failed to load tag_config: {e}; using defaults")
+        # 兜底: 返回默认
+        _TAG_CONFIG_CACHE = dict(TAG_CONFIG_DEFAULTS)
+        _TAG_CONFIG_CACHE_TS = time.time()
+        return _TAG_CONFIG_CACHE
+
+
+def invalidate_tag_config_cache() -> None:
+    """手动失效缓存 (PUT 端点调用)."""
+    global _TAG_CONFIG_CACHE, _TAG_CONFIG_CACHE_TS
+    with _TAG_CONFIG_LOCK:
+        _TAG_CONFIG_CACHE = {}
+        _TAG_CONFIG_CACHE_TS = 0.0
 
 
 class TagCalculator:
     """Calculate buyer tags based on order and chat data"""
 
     @staticmethod
-    def calculate_vip_level(rolling_netsales: float) -> str:
+    def calculate_vip_level(rolling_netsales: float, config: Optional[Dict[str, float]] = None) -> str:
         """
-        Calculate VIP level based on rolling 24 months netsales
+        Calculate VIP level based on rolling 24 months netsales (P2: thresholds from tag_config)
 
-        VIP Levels:
+        Default thresholds (from TAG_CONFIG_DEFAULTS):
         - Non-VIP: < 30,000
         - V0: 30,000 - 49,999
         - V1: 50,000 - 149,999
         - V2: 150,000 - 449,999
         - V3: >= 450,000
         """
-        if rolling_netsales < 30000:
+        cfg = config or get_tag_config()
+        v0 = cfg["vip_v0_min"]
+        v1 = cfg["vip_v1_min"]
+        v2 = cfg["vip_v2_min"]
+        v3 = cfg["vip_v3_min"]
+        if rolling_netsales < v0:
             return "Non-VIP"
-        elif rolling_netsales < 50000:
+        elif rolling_netsales < v1:
             return "V0"
-        elif rolling_netsales < 150000:
+        elif rolling_netsales < v2:
             return "V1"
-        elif rolling_netsales < 450000:
+        elif rolling_netsales < v3:
             return "V2"
         else:
             return "V3"
@@ -34,7 +102,8 @@ class TagCalculator:
     @staticmethod
     def calculate_discount_sensitivity(
         discount_order_count: int,
-        total_orders: int
+        total_orders: int,
+        config: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         """
         Calculate discount sensitivity
@@ -51,10 +120,11 @@ class TagCalculator:
 
         discount_ratio = discount_order_count / total_orders
 
-        if discount_ratio >= 0.7:
+        cfg = config or get_tag_config()
+        if discount_ratio >= cfg["discount_high_ratio"]:
             level = "高度敏感"
             tag = "折扣猎手" if total_orders >= 3 else None
-        elif discount_ratio >= 0.4:
+        elif discount_ratio >= cfg["discount_medium_ratio"]:
             level = "中度敏感"
             tag = None
         else:
@@ -70,16 +140,18 @@ class TagCalculator:
     @staticmethod
     def calculate_churn_risk(
         last_purchase: Optional[datetime],
-        last_chat: Optional[datetime]
+        last_chat: Optional[datetime],
+        config: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         """
-        Calculate churn risk
+        Calculate churn risk (P2: thresholds from tag_config)
 
-        Definition:
-        - Churned: No purchase in 24 months AND no chat in 6 months
-        - At Risk: Warning signs
+        Definition (thresholds configurable via tag_config):
+        - Churned: No purchase in 24 months AND no chat > churn_high_days_since_chat (default 180)
+        - At Risk: No purchase in 6 months AND no chat > churn_medium_days_since_chat (default 90)
         - Active: Recent activity
         """
+        cfg = config or get_tag_config()
         now = datetime.now()
         has_purchase = last_purchase is not None
         has_chat = last_chat is not None
@@ -90,8 +162,11 @@ class TagCalculator:
         days_since_purchase = (now - last_purchase).days if has_purchase else 9999
         days_since_chat = (now - last_chat).days if has_chat else 9999
 
-        # Churned: 2 years no purchase AND 6 months no chat
-        if days_since_purchase > 730 and days_since_chat > 180:
+        churn_high_days = cfg["churn_high_days_since_chat"]
+        churn_med_days = cfg["churn_medium_days_since_chat"]
+
+        # Churned: 2 years no purchase AND chat > high threshold days
+        if days_since_purchase > 730 and days_since_chat > churn_high_days:
             return {
                 "status": "Churned",
                 "tag": "流失客户",
@@ -99,8 +174,8 @@ class TagCalculator:
                 "days_since_chat": days_since_chat
             }
 
-        # At Risk: 6 months no purchase AND 30 days no chat
-        if days_since_purchase > 180 and days_since_chat > 30:
+        # At Risk: 6 months no purchase AND chat > medium threshold days
+        if days_since_purchase > 180 and days_since_chat > churn_med_days:
             return {
                 "status": "At Risk",
                 "tag": "流失预警",
@@ -246,6 +321,57 @@ class TagCalculator:
             "stage": stage,
             "tags": tags
         }
+
+    @staticmethod
+    def calculate_lifecycle_stage(
+        first_purchase_date: Optional[datetime],
+        last_purchase_date: Optional[datetime],
+        rolling_24m_netsales: float,
+        churn_risk: str,
+        config: Optional[Dict[str, float]] = None,
+    ) -> str:
+        """
+        Calculate lifecycle stage based on precomputed table fields.
+        Mirrors the SQL CASE logic in the stored procedure.
+
+        Stages (priority order, thresholds from tag_config):
+        1. 流失: last_purchase > lifecycle_churn_days_since_purchase OR churn_risk = '高'
+        2. 新客: first_purchase <= lifecycle_new_customer_days
+        3. 成熟: rolling_24m >= lifecycle_mature_min_netsales AND last_purchase <= 180 days
+        4. 成长: first_purchase 91-365 days AND last_purchase <= 90 days AND rolling_24m < lifecycle_mature_min_netsales
+        5. 预流失: fallback
+        """
+        cfg = config or get_tag_config()
+        new_days = int(cfg["lifecycle_new_customer_days"])
+        mature_min = cfg["lifecycle_mature_min_netsales"]
+        churn_days = int(cfg["lifecycle_churn_days_since_purchase"])
+
+        now = datetime.now()
+
+        if last_purchase_date is None and first_purchase_date is None:
+            return "预流失"
+
+        days_since_last = (now - last_purchase_date).days if last_purchase_date else 9999
+        days_since_first = (now - first_purchase_date).days if first_purchase_date else 9999
+
+        # 1. 流失
+        if days_since_last > churn_days or churn_risk == "高":
+            return "流失"
+
+        # 2. 新客
+        if days_since_first <= new_days:
+            return "新客"
+
+        # 3. 成熟
+        if rolling_24m_netsales >= mature_min and days_since_last <= 180:
+            return "成熟"
+
+        # 4. 成长
+        if 91 <= days_since_first <= 365 and days_since_last <= 90 and rolling_24m_netsales < mature_min:
+            return "成长"
+
+        # 5. 预流失 (fallback)
+        return "预流失"
 
     @staticmethod
     def determine_category_preference(
