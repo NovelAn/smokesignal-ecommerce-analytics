@@ -67,6 +67,12 @@ FUNCTIONAL_NEUTRAL = [
     '收到货', '催促',
 ]
 
+NEGATIVE_SENTIMENT_BASES = {
+    "explicit_complaint",
+    "abuse_or_threat",
+    "strong_negative_evaluation",
+}
+
 
 # ---------------------------------------------------------------------------
 # INTENT word lists (migrated from batch_analyzer._classify_intents_by_keywords:825-853)
@@ -274,6 +280,34 @@ def analyze_sentiment(messages: List[str]) -> Dict[str, Any]:
         label = 'Neutral'
 
     return {"sentiment_score": round(score, 2), "sentiment_label": label}
+
+
+def enforce_ai_sentiment_standard(
+    messages: List[str],
+    score: float,
+    sentiment_basis: str = "",
+) -> Dict[str, Any]:
+    """Enforce score boundaries using the model's contextual judgment category.
+
+    This intentionally does not inspect keywords in ``messages``. Negative is kept
+    only when the full-dialogue model classified its basis as an explicit complaint,
+    abuse/threat, or a strong negative evaluation. Authenticity concerns and normal
+    business contexts stay Neutral even if the provider emitted a low score.
+    """
+    normalized_score = float(score)
+    if normalized_score < 0.4:
+        if sentiment_basis not in NEGATIVE_SENTIMENT_BASES:
+            return {"sentiment_score": 0.5, "sentiment_label": "Neutral"}
+        label = "Negative"
+    elif normalized_score > 0.6:
+        label = "Positive"
+    else:
+        label = "Neutral"
+
+    return {
+        "sentiment_score": normalized_score,
+        "sentiment_label": label,
+    }
 
 
 def analyze_rule_based(buyer_nick: str, messages: List[str]) -> Dict[str, Any]:

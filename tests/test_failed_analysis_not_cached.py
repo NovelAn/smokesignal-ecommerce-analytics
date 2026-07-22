@@ -12,6 +12,7 @@ from backend.ai.analyzer_orchestrator import AICacheManager, AnalyzerOrchestrato
 from backend.ai.batch_analyzer import BatchAnalyzer, BatchTask, BatchTaskStatus
 from backend.ai.deepseek_client import DeepSeekClient
 from backend.ai.minimax_client import MiniMaxClient
+from backend.ai.prompts.sentiment_intent_prompt import build_sentiment_intent_prompt
 
 
 class _FailingPersonaClient:
@@ -57,6 +58,7 @@ class _FakeChatCompletions:
         self.last_kwargs = kwargs
         content = (
             '{"sentiment_score":0.5,"sentiment_label":"Neutral",'
+            '"sentiment_basis":"neutral_business","sentiment_evidence":"",'
             '"intent_distribution":{"Pre-sale Inquiry":1},'
             '"dominant_intent":"Pre-sale Inquiry","complaint_count":0}'
         )
@@ -118,6 +120,7 @@ def test_sentiment_parser_accepts_first_complete_json_before_extra_text(
     client = client_class.__new__(client_class)
     valid = (
         '{"sentiment_score":0.5,"sentiment_label":"Neutral",'
+        '"sentiment_basis":"neutral_business","sentiment_evidence":"",'
         '"intent_distribution":{"Pre-sale Inquiry":1},'
         '"dominant_intent":"Pre-sale Inquiry","complaint_count":0}'
     )
@@ -128,7 +131,35 @@ def test_sentiment_parser_accepts_first_complete_json_before_extra_text(
     assert result["dominant_intent"] == "Pre-sale Inquiry"
 
 
-def test_minimax_sentiment_call_has_enough_output_budget():
+def test_sentiment_parser_preserves_contextual_basis_and_evidence():
+    client = MiniMaxClient.__new__(MiniMaxClient)
+    valid = (
+        '{"sentiment_score":0.5,"sentiment_label":"Neutral",'
+        '"sentiment_basis":"authenticity_concern",'
+        '"sentiment_evidence":"我怀疑是假货",'
+        '"intent_distribution":{"Post-sale Support":1},'
+        '"dominant_intent":"Post-sale Support","complaint_count":0}'
+    )
+
+    result = client._parse_sentiment_intent_response(valid)
+
+    assert result["sentiment_basis"] == "authenticity_concern"
+    assert result["sentiment_evidence"] == "我怀疑是假货"
+
+
+def test_sentiment_parser_rejects_result_without_contextual_basis():
+    client = MiniMaxClient.__new__(MiniMaxClient)
+    missing_basis = (
+        '{"sentiment_score":0.2,"sentiment_label":"Negative",'
+        '"intent_distribution":{"Complaint":1},'
+        '"dominant_intent":"Complaint","complaint_count":1}'
+    )
+
+    with pytest.raises(ValueError, match="schema"):
+        client._parse_sentiment_intent_response(missing_basis)
+
+
+def test_minimax_sentiment_call_does_not_truncate_reasoning_before_json():
     completions = _FakeChatCompletions()
     client = MiniMaxClient.__new__(MiniMaxClient)
     client.client = SimpleNamespace(
@@ -138,7 +169,7 @@ def test_minimax_sentiment_call_has_enough_output_budget():
 
     client.analyze_sentiment_intent("buyer", ["hello"])
 
-    assert completions.last_kwargs["max_tokens"] >= 2000
+    assert "max_tokens" not in completions.last_kwargs
 
 
 def test_deepseek_sentiment_call_has_enough_output_budget(monkeypatch):
@@ -227,6 +258,41 @@ def test_sentiment_provider_failures_do_not_fall_back_to_cacheable_rules():
             "buyer",
             [{"sender_nick": "buyer", "content": "hello"}],
         )
+
+
+def test_sentiment_schema_failure_retries_minimax_before_deepseek():
+    class RetryableMiniMax:
+        def __init__(self):
+            self.calls = 0
+
+        def analyze_sentiment_intent(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ValueError("Invalid sentiment/intent response schema")
+            return {
+                "sentiment_score": 0.5,
+                "sentiment_label": "Neutral",
+                "sentiment_basis": "neutral_business",
+                "sentiment_evidence": "",
+                "intent_distribution": {"Post-sale Support": 1},
+                "dominant_intent": "Post-sale Support",
+                "complaint_count": 0,
+            }
+
+    minimax = RetryableMiniMax()
+    analyzer = BatchAnalyzer.__new__(BatchAnalyzer)
+    analyzer.minimax_client = minimax
+    analyzer.deepseek_client = _FailingSentimentClient()
+    analyzer.rate_limiter = SimpleNamespace(wait=lambda: None)
+
+    result = analyzer.analyze_single_buyer(
+        "buyer",
+        [{"sender_nick": "buyer", "content": "正常退货"}],
+    )
+
+    assert minimax.calls == 2
+    assert result["sentiment_label"] == "Neutral"
+    assert result["sentiment_method"] == "minimax_m3"
 
 
 def test_persona_cache_rejects_pending_retry_placeholder():
@@ -355,3 +421,186 @@ def test_batch_save_failure_is_counted_as_failure(monkeypatch):
     assert task.processed_buyers == 0
     assert task.failed_buyers == 1
     assert task.status is BatchTaskStatus.FAILED
+
+
+def _post_process_sentiment(
+    messages,
+    score,
+    label="Negative",
+    basis="neutral_business",
+    evidence="",
+    intent_distribution=None,
+):
+    analyzer = BatchAnalyzer.__new__(BatchAnalyzer)
+    return analyzer._post_process_sentiment(
+        "buyer",
+        messages,
+        {
+            "sentiment_score": score,
+            "sentiment_label": label,
+            "sentiment_basis": basis,
+            "sentiment_evidence": evidence,
+            "intent_distribution": intent_distribution or {
+                "Pre-sale Inquiry": 0,
+                "Post-sale Support": 0,
+                "Logistics": 0,
+                "Usage Guide": 0,
+                "Complaint": 0,
+            },
+            "dominant_intent": "Unknown",
+            "complaint_count": 0,
+        },
+        method="minimax_m3",
+    )
+
+
+def test_post_process_derives_label_from_score_boundaries():
+    result = _post_process_sentiment(["包装破损，想换货"], 0.42)
+
+    assert result["sentiment_score"] == 0.42
+    assert result["sentiment_label"] == "Neutral"
+
+
+def test_post_process_rejects_negative_for_neutral_business_context():
+    result = _post_process_sentiment(
+        ["太薄了，请帮我预约退货"],
+        0.35,
+        basis="neutral_business",
+    )
+
+    assert result["sentiment_score"] == 0.5
+    assert result["sentiment_label"] == "Neutral"
+
+
+def test_post_process_keeps_model_negative_for_explicit_complaint_basis():
+    result = _post_process_sentiment(
+        ["我要投诉"],
+        0.2,
+        basis="explicit_complaint",
+        evidence="我要投诉",
+    )
+
+    assert result["sentiment_score"] == 0.2
+    assert result["sentiment_label"] == "Negative"
+
+
+def test_post_process_treats_authenticity_concern_as_neutral():
+    result = _post_process_sentiment(
+        ["我怀疑是假货"],
+        0.2,
+        basis="authenticity_concern",
+        evidence="我怀疑是假货",
+    )
+
+    assert result["sentiment_score"] == 0.5
+    assert result["sentiment_label"] == "Neutral"
+
+
+def test_post_process_does_not_treat_authenticity_concern_as_complaint():
+    result = _post_process_sentiment(
+        ["我怀疑是假货，可以帮我核实吗"],
+        0.45,
+        label="Neutral",
+        basis="authenticity_concern",
+        evidence="我怀疑是假货",
+        intent_distribution={
+            "Pre-sale Inquiry": 0,
+            "Post-sale Support": 1,
+            "Logistics": 0,
+            "Usage Guide": 0,
+            "Complaint": 1,
+        },
+    )
+
+    assert result["intent_distribution"]["Complaint"] == 0
+    assert result["complaint_count"] == 0
+    assert result["dominant_intent"] == "Post-sale Support"
+
+
+def test_post_process_recognizes_strong_accusation_as_negative_evidence():
+    result = _post_process_sentiment(
+        ["你们就是虚假宣传"],
+        0.3,
+        basis="strong_negative_evaluation",
+        evidence="你们就是虚假宣传",
+    )
+
+    assert result["sentiment_score"] == 0.3
+    assert result["sentiment_label"] == "Negative"
+
+
+def test_post_process_recognizes_abuse_as_negative_evidence():
+    result = _post_process_sentiment(
+        ["你这个狗懒子"],
+        0.2,
+        basis="abuse_or_threat",
+        evidence="你这个狗懒子",
+    )
+
+    assert result["sentiment_score"] == 0.2
+    assert result["sentiment_label"] == "Negative"
+
+
+def test_analyze_single_buyer_sends_chronological_full_dialogue_to_model():
+    class CapturingClient:
+        def __init__(self):
+            self.messages = None
+
+        def analyze_sentiment_intent(self, buyer_nick, messages, is_incremental=False):
+            self.messages = messages
+            return {
+                "sentiment_score": 0.5,
+                "sentiment_label": "Neutral",
+                "sentiment_basis": "neutral_business",
+                "sentiment_evidence": "",
+                "intent_distribution": {},
+                "dominant_intent": "Unknown",
+                "complaint_count": 0,
+            }
+
+    client = CapturingClient()
+    analyzer = BatchAnalyzer.__new__(BatchAnalyzer)
+    analyzer.minimax_client = client
+    analyzer.deepseek_client = None
+    analyzer.rate_limiter = SimpleNamespace(wait=lambda: None)
+
+    analyzer.analyze_single_buyer(
+        "buyer",
+        [
+            {"sender_nick": "service", "content": "已经为您解释"},
+            {"sender_nick": "buyer", "content": "是正品吗"},
+            {"sender_nick": "service", "content": "您好"},
+            {"sender_nick": "buyer", "content": "收到商品了"},
+        ],
+    )
+
+    assert client.messages == [
+        "[买家] 收到商品了",
+        "[客服] 您好",
+        "[买家] 是正品吗",
+        "[客服] 已经为您解释",
+    ]
+
+
+def test_sentiment_prompt_requires_contextual_basis_not_keyword_matching():
+    prompt = build_sentiment_intent_prompt(
+        ["[买家] 我怀疑是假货", "[客服] 本店为官方旗舰店，所售均为正品"]
+    )
+
+    assert "sentiment_basis" in prompt
+    assert "authenticity_concern" in prompt
+    assert "我怀疑是假货" in prompt
+    assert "不得仅因出现" in prompt
+    assert "[客服] 本店为官方旗舰店" in prompt
+
+
+def test_sentiment_prompt_does_not_accumulate_friction_into_negative():
+    prompt = build_sentiment_intent_prompt(
+        ["[买家] 你怎么听不懂", "[买家] 我等的很焦虑", "[买家] 虚假宣传吗"]
+    )
+
+    assert "多个未达到 Negative 门槛的表达不能累加升级" in prompt
+    assert '"虚假宣传吗"' in prompt
+    assert '"我等的很焦虑"' in prompt
+    assert '"你怎么听不懂"' in prompt
+    assert '"我真的会投诉你们"' in prompt

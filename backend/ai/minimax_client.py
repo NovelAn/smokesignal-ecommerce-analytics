@@ -10,7 +10,6 @@ from openai import OpenAI
 from backend.config import settings
 from backend.ai.persona_context import build_persona_prompt_v3
 from backend.ai.prompts.sentiment_intent_prompt import (
-    SENTIMENT_INTENT_MAX_TOKENS,
     build_sentiment_intent_prompt,
 )
 from backend.ai.analysis_errors import parse_first_json_object, validate_sentiment_payload
@@ -304,8 +303,7 @@ class MiniMaxClient:
                         "content": prompt
                     }
                 ],
-                temperature=0.3,
-                max_tokens=SENTIMENT_INTENT_MAX_TOKENS
+                temperature=0.3
             )
 
             result_text = response.choices[0].message.content

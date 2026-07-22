@@ -25,7 +25,11 @@ import threading
 
 from backend.analytics.tag_calculator import TagCalculator
 from backend.ai.analyzer_orchestrator import get_analyzer_orchestrator
-from backend.ai.keyword_matcher import analyze_rule_based
+from backend.ai.keyword_matcher import (
+    NEGATIVE_SENTIMENT_BASES,
+    analyze_rule_based,
+    enforce_ai_sentiment_standard,
+)
 from backend.ai.model_selection import should_use_deepseek_pro
 from backend.ai.analysis_errors import AIAnalysisUnavailableError, is_explicit_failure_result
 
@@ -637,6 +641,36 @@ class BatchAnalyzer:
         chats = list(new_chats) + list(context_chats)
         return chats, True, since
 
+    @staticmethod
+    def _build_model_dialogue(
+        buyer_nick: str,
+        chats: List[Dict[str, Any]],
+        buyer_message_limit: int = 20,
+    ) -> List[str]:
+        """Build chronological role-labelled context for the latest buyer turns.
+
+        Database chats arrive newest-first. Keep every customer-service turn around
+        the latest ``buyer_message_limit`` buyer messages, then reverse the selection
+        so the model reads the conversation in its natural chronological order.
+        """
+        selected_desc: List[Dict[str, Any]] = []
+        buyer_count = 0
+        for chat in chats or []:
+            content = str(chat.get('content') or '').strip()
+            if not content:
+                continue
+            selected_desc.append(chat)
+            if chat.get('sender_nick') == buyer_nick:
+                buyer_count += 1
+                if buyer_count >= buyer_message_limit:
+                    break
+
+        dialogue = []
+        for chat in reversed(selected_desc):
+            role = "买家" if chat.get('sender_nick') == buyer_nick else "客服"
+            dialogue.append(f"[{role}] {str(chat.get('content') or '').strip()}")
+        return dialogue
+
     def analyze_single_buyer(
         self,
         buyer_nick: str,
@@ -683,17 +717,28 @@ class BatchAnalyzer:
         if not buyer_messages:
             return self._default_analysis(buyer_nick, "no_buyer_messages")
 
+        model_dialogue = self._build_model_dialogue(buyer_nick, chats)
+
         # ===== L1: MiniMax-M3（首选，月订阅制省 token）=====
         if self.minimax_client:
             try:
                 self.rate_limiter.wait()
                 logger.debug(f"[BatchAnalyzer] Analyzing {buyer_nick} with MiniMax-M3 (L1)")
 
-                ai_result = self.minimax_client.analyze_sentiment_intent(
-                    buyer_nick,
-                    buyer_messages[:20],
-                    is_incremental=is_incremental
-                )
+                try:
+                    ai_result = self.minimax_client.analyze_sentiment_intent(
+                        buyer_nick, model_dialogue, is_incremental=is_incremental
+                    )
+                except ValueError as error:
+                    logger.warning(
+                        "[BatchAnalyzer] MiniMax-M3 returned invalid sentiment schema for %s; retrying once: %s",
+                        buyer_nick,
+                        error,
+                    )
+                    self.rate_limiter.wait()
+                    ai_result = self.minimax_client.analyze_sentiment_intent(
+                        buyer_nick, model_dialogue, is_incremental=is_incremental
+                    )
                 logger.info(f"[BatchAnalyzer] MiniMax-M3 analysis completed for {buyer_nick}")
                 return self._post_process_sentiment(
                     buyer_nick, buyer_messages, ai_result, method='minimax_m3'
@@ -710,7 +755,7 @@ class BatchAnalyzer:
 
                 ai_result = self.deepseek_client.analyze_sentiment_intent(
                     buyer_nick,
-                    buyer_messages[:20],
+                    model_dialogue,
                     is_incremental=is_incremental
                 )
                 logger.info(f"[BatchAnalyzer] DeepSeek analysis completed for {buyer_nick}")
@@ -761,27 +806,53 @@ class BatchAnalyzer:
         # 2. 本地关键词增强（merge AI 结果与本地强关键词信号，避免 AI 漏判售后/投诉）
         merged_intent = self._merge_intent_distribution(intent_dist, buyer_messages)
 
+        # Complaint 与 Negative 使用相同的上下文语义门槛，不能由本地关键词
+        # 把真伪疑虑、正常退换货或商品问题反馈硬升级为投诉。
+        sentiment_basis = ai_result.get('sentiment_basis', '')
+        if sentiment_basis not in NEGATIVE_SENTIMENT_BASES:
+            merged_intent['Complaint'] = 0
+
         # 3. 重新计算 dominant_intent（merged 之后为准）
         dominant_intent = self._dominant_intent(merged_intent)
 
-        # 4. 准备 result
+        # 4. 强制执行 Prompt 的情感边界。模型标签不能覆盖分数区间，且没有
+        # 明确投诉/强负面证据时，即使模型给出低分也必须回到 Neutral。
+        enforced_sentiment = enforce_ai_sentiment_standard(
+            buyer_messages[:20],
+            ai_result.get('sentiment_score', 0.5),
+            sentiment_basis,
+        )
+        if (
+            enforced_sentiment['sentiment_score'] != ai_result.get('sentiment_score')
+            or enforced_sentiment['sentiment_label'] != ai_result.get('sentiment_label')
+        ):
+            logger.info(
+                "[BatchAnalyzer] Corrected sentiment result for %s: score=%s label=%s -> score=%s label=%s",
+                buyer_nick,
+                ai_result.get('sentiment_score'),
+                ai_result.get('sentiment_label'),
+                enforced_sentiment['sentiment_score'],
+                enforced_sentiment['sentiment_label'],
+            )
+
+        # 5. 准备 result
         result = {
             "buyer_nick": buyer_nick,
             "analyzed_at": datetime.now(),
-            "sentiment_score": ai_result.get('sentiment_score', 0.5),
-            "sentiment_label": ai_result.get('sentiment_label', 'Neutral'),
+            "sentiment_score": enforced_sentiment['sentiment_score'],
+            "sentiment_label": enforced_sentiment['sentiment_label'],
             "intent_distribution": merged_intent,
             "dominant_intent": dominant_intent,
             "complaint_count": merged_intent.get('Complaint', ai_result.get('complaint_count', 0)),
             "sentiment_method": method,
         }
 
-        # 5. 计算 pre_sale / post_sale score
+        # 6. 计算 pre_sale / post_sale score
         intent_scores = TagCalculator.calculate_intent_scores(merged_intent)
         result['pre_sale_score'] = intent_scores['pre_sale_score']
         result['post_sale_score'] = intent_scores['post_sale_score']
 
-        # 6. 提取关键词（与 buyer_messages 一致，不依赖 AI 返回）
+        # 7. 提取关键词（与 buyer_messages 一致，不依赖 AI 返回）
         result['pre_sale_keywords'] = self._extract_keywords(buyer_messages, 'pre_sale')
         result['post_sale_keywords'] = self._extract_keywords(buyer_messages, 'post_sale')
 

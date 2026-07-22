@@ -46,6 +46,8 @@ def validate_sentiment_payload(result: Dict[str, Any]) -> Dict[str, Any]:
     required = {
         "sentiment_score",
         "sentiment_label",
+        "sentiment_basis",
+        "sentiment_evidence",
         "intent_distribution",
         "dominant_intent",
         "complaint_count",
@@ -62,12 +64,24 @@ def validate_sentiment_payload(result: Dict[str, Any]) -> Dict[str, Any]:
     label = result["sentiment_label"]
     intents = result["intent_distribution"]
     dominant_intent = result["dominant_intent"]
+    sentiment_basis = str(result.get("sentiment_basis") or "").strip()
+    sentiment_evidence = str(result.get("sentiment_evidence") or "").strip()
+    valid_bases = {
+        "positive_expression",
+        "neutral_business",
+        "authenticity_concern",
+        "explicit_complaint",
+        "abuse_or_threat",
+        "strong_negative_evaluation",
+    }
     if (
         label not in {"Positive", "Neutral", "Negative"}
         or not 0 <= score <= 1
         or not isinstance(intents, dict)
         or not isinstance(dominant_intent, str)
         or complaint_count < 0
+        or sentiment_basis not in valid_bases
+        or not isinstance(result.get("sentiment_evidence"), str)
     ):
         raise ValueError("Invalid sentiment/intent response schema")
 
@@ -77,4 +91,6 @@ def validate_sentiment_payload(result: Dict[str, Any]) -> Dict[str, Any]:
         "intent_distribution": intents,
         "dominant_intent": dominant_intent,
         "complaint_count": complaint_count,
+        "sentiment_basis": sentiment_basis,
+        "sentiment_evidence": sentiment_evidence,
     }
