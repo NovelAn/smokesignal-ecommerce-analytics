@@ -88,11 +88,15 @@ class RecordingCursor:
 
     def execute(self, sql, params=None):
         name = sql.splitlines()[0].removeprefix("-- name: ").strip()
+        self.last_name = name
         self.db.statement_names.append(name)
         self.db.statement_params.append((name, params))
         if self.db.fail_on == name:
             raise RuntimeError("write failed")
         return 1
+
+    def fetchone(self):
+        return self.db.fetchone_by_name.get(self.last_name)
 
 
 class RecordingConnection:
@@ -113,7 +117,7 @@ class RecordingConnection:
 
 
 class RecordingDatabase:
-    def __init__(self, rows=None, fail_on=None):
+    def __init__(self, rows=None, fail_on=None, fetchone_by_name=None):
         self.rows = rows or []
         self.fail_on = fail_on
         self.statement_names = []
@@ -123,6 +127,7 @@ class RecordingDatabase:
         self.rollback_count = 0
         self.last_params = None
         self.last_sql = None
+        self.fetchone_by_name = fetchone_by_name or {}
 
     @contextmanager
     def get_connection(self):
@@ -238,6 +243,31 @@ def test_issue_trends_uses_bound_filters():
     )
 
 
+def test_issue_trends_supports_all_api_filters():
+    db = RecordingDatabase()
+    repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
+
+    repo.get_issue_trends(
+        "2026-06-01",
+        "2026-07-01",
+        issue_code="material_expectation",
+        status="open",
+        severity="medium",
+        buyer_type="VIC",
+    )
+
+    assert "i.issue_code = %s" in db.last_sql
+    assert "i.status = %s" in db.last_sql
+    assert "i.severity = %s" in db.last_sql
+    assert "tb.buyer_type = %s" in db.last_sql
+    assert db.last_params[-4:] == (
+        "material_expectation",
+        "open",
+        "medium",
+        "VIC",
+    )
+
+
 class SourceDatabase(RecordingDatabase):
     def __init__(self, rows_by_name):
         super().__init__()
@@ -303,3 +333,66 @@ def test_continued_event_replaces_existing_event_for_rollup():
     assert len(events) == 1
     assert events[0].event_id == 17
     assert events[0].suggested_action == "协助退货"
+
+
+def test_batch_candidates_return_only_buyer_names():
+    db = RecordingDatabase(rows=[{"buyer_nick": "a"}, {"buyer_nick": "b"}])
+    repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
+
+    assert repo.get_batch_candidates(50) == ["a", "b"]
+    assert db.last_params == (50,)
+
+
+def test_review_decision_is_written_without_touching_v1_cache():
+    db = RecordingDatabase()
+    repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
+
+    result = repo.review_event(9, "approve", None, "")
+
+    assert result == {"event_id": 9, "review_status": "approved"}
+    assert db.statement_names == ["review_event.sql"]
+
+
+def test_review_correction_updates_gold_event_and_state_in_one_transaction():
+    corrected = payload().model_dump(mode="json")
+    db = RecordingDatabase(
+        fetchone_by_name={
+            "get_review_event.sql": {"id": 9, "buyer_nick": "buyer", "last_run_id": 7},
+            "get_buyer_analysis.sql": {
+                "customer_state": None,
+                "events": json.dumps(
+                    [
+                        {
+                            "id": 9,
+                            "event_ended_at": "2026-07-20T10:05:00",
+                            "sentiment_label": "Neutral",
+                            "service_friction": "none",
+                            "suggested_action": "协助退货",
+                        }
+                    ]
+                ),
+                "issues": json.dumps(
+                    [
+                        {
+                            "event_id": 9,
+                            "issue_category": "after_sales",
+                            "issue_code": "return_request",
+                            "issue_detail": "客户提出退货",
+                            "severity": "low",
+                            "status": "open",
+                            "evidence_msg_time": "2026-07-20T10:00:00",
+                        }
+                    ]
+                ),
+            },
+        }
+    )
+    repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
+
+    result = repo.review_event(9, "correct", corrected, "人工修正")
+
+    assert result == {"event_id": 9, "review_status": "corrected"}
+    assert db.begin_count == 1
+    assert db.commit_count == 1
+    assert db.rollback_count == 0
+    assert db.statement_names[-2:] == ["upsert_customer_state.sql", "review_event.sql"]

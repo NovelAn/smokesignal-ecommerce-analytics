@@ -582,7 +582,7 @@ git commit -m "feat(ai-v2): roll up customer state and issue trends"
 - Consumes: analyzer and repository from Tasks 2-5.
 - Produces: all `/api/v2/ai-analysis-v2/*` endpoints from design section 11.
 
-- [ ] **Step 1: Write failing API contract tests**
+- [x] **Step 1: Write failing API contract tests**
 
 ```python
 def test_single_buyer_analysis_returns_events_issues_and_state(client, fake_analyzer):
@@ -603,12 +603,12 @@ def test_review_correction_requires_note(client):
     assert response.status_code == 422
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `./.venv/bin/python -m pytest -q tests/api/test_ai_analysis_v2_routes.py`
 Expected: 404 or import failure because the router is not registered.
 
-- [ ] **Step 3: Implement request/response models and endpoints**
+- [x] **Step 3: Implement request/response models and endpoints**
 
 ```python
 router = APIRouter(prefix="/api/v2/ai-analysis-v2", tags=["ai_analysis_v2"])
@@ -636,13 +636,13 @@ async def analyze_buyer_v2(buyer_nick: str, mode: Literal["full", "incremental"]
 
 Use existing `BatchTaskStatus` response fields and thread-safe cancellation semantics for the batch endpoints.
 
-- [ ] **Step 4: Verify GREEN and route registration**
+- [x] **Step 4: Verify GREEN and route registration**
 
 Run: `./.venv/bin/python -m pytest -q tests/api/test_ai_analysis_v2_routes.py`
 Run: `./.venv/bin/python -c "from backend.main import app; assert any(r.path.startswith('/api/v2/ai-analysis-v2') for r in app.routes)"`
 Expected: tests pass and the route assertion exits 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/api/ai_analysis_v2_routes.py backend/api/__init__.py backend/main.py tests/api/test_ai_analysis_v2_routes.py

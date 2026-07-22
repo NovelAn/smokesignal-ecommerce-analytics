@@ -6,5 +6,6 @@ All endpoints now use the v2.0 target buyer precomputation API.
 """
 from .target_routes import router as target_router
 from .external_routes import router as external_router
+from .ai_analysis_v2_routes import router as ai_analysis_v2_router
 
-__all__ = ["target_router", "external_router"]
+__all__ = ["target_router", "external_router", "ai_analysis_v2_router"]

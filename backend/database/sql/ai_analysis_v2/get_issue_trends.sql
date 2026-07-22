@@ -21,6 +21,7 @@ FROM (
         COUNT(DISTINCT CASE WHEN i.created_at >= %s AND i.created_at < %s THEN i.event_id END) AS current_period_count,
         COUNT(DISTINCT CASE WHEN i.created_at >= %s AND i.created_at < %s THEN i.event_id END) AS previous_period_count
     FROM ai_analysis_v2_issues i
+    JOIN target_buyers_precomputed tb ON tb.buyer_nick = i.buyer_nick
     WHERE i.created_at >= %s AND i.created_at < %s
     [[OPTIONAL_CONDITION]]
     GROUP BY i.issue_category, i.issue_code
