@@ -385,6 +385,13 @@ V2 使用 5 张影子表，不修改 `buyer_ai_analysis_cache` 的历史结构�
 
 ## 14. 测试与发布门禁
 
+### 14.0 当前环境事实
+
+- 项目当前只配置了 `aliyunDB`，数据库为生产 `dunhill`，服务端版本 MySQL 8.0.36。
+- 当前生产库只有 `buyer_ai_analysis_cache`、`chat_history` 和 `target_buyers_precomputed` 等 V1 表，5 张 V2 表均不存在。
+- 本机存在 MySQL 8.0.24 服务，但项目配置中没有可用的本地数据库账号。
+- 在获得可用的本地测试数据库连接前，不允许把 V2 DDL 直接应用到 Aliyun 生产库进行试错。
+
 ### 14.1 自动化测试
 
 - schema 校验：缺字段、非法枚举、截断 JSON 必须失败。
