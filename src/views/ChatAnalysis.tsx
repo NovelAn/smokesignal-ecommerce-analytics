@@ -80,6 +80,7 @@ import { apiClient, DashboardMetrics, BuyerProfile as APIBuyerProfile } from '..
 import { useDataFetchingWithRetry } from '../hooks/useDataFetching';
 import { LoadingSpinner, CardSkeleton, TableSkeleton, MetricCardSkeleton } from '../components/common/LoadingState';
 import { ErrorAlert, EmptyState } from '../components/common/ErrorAlert';
+import { CustomerV2StateCard } from '../components/ai-analysis-v2/CustomerV2StateCard';
 
 // --- Notion Style Components ---
 
@@ -211,6 +212,8 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
   const [enableAI, setEnableAI] = useState(false); // AI分析开关（控制是否强制刷新分析）
   const [hasActivatedAI, setHasActivatedAI] = useState(false);
   const [isRefreshingAI, setIsRefreshingAI] = useState(false); // 是否正在刷新AI分析
+  const [isAnalyzingV2, setIsAnalyzingV2] = useState(false);
+  const [v2ActionError, setV2ActionError] = useState<string | null>(null);
 
   // Filter states - pending (user selected but not applied)
   const [pendingChannelFilter, setPendingChannelFilter] = useState<('DTC' | 'PFS')[]>([]);
@@ -539,12 +542,29 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
     [currentSession?.user_nick, enableAI]
   );
 
+  const {
+    data: v2Analysis,
+    isLoading: v2Loading,
+    error: v2LoadError,
+    refetch: refetchV2,
+  } = useDataFetchingWithRetry(
+    async () => {
+      if (!currentSession?.user_nick) {
+        return { customer_state: null, events: [], issues: [] };
+      }
+      return apiClient.getAIAnalysisV2(currentSession.user_nick);
+    },
+    1,
+    [currentSession?.user_nick],
+  );
+
   const handleSelectUser = (session: BuyerSession) => {
     setSelectedSession(session);
     setActiveSubTab('profile'); // Reset to profile on user change
     // Reset AI switch to off when switching users (but keep any cached results)
     setEnableAI(false);
     setHasActivatedAI(false);
+    setV2ActionError(null);
     // Reset order pagination when switching users
     setOrderCurrentPage(1);
     // Open all dates by default when selecting a new user for better visibility
@@ -586,6 +606,20 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
     } finally {
       // 延迟关闭loading状态，等待AI分析完成
       setTimeout(() => setIsRefreshingAI(false), 1000);
+    }
+  };
+
+  const handleAnalyzeV2 = async (mode: 'full' | 'incremental') => {
+    if (!currentSession?.user_nick) return;
+    setIsAnalyzingV2(true);
+    setV2ActionError(null);
+    try {
+      await apiClient.analyzeBuyerV2(currentSession.user_nick, mode);
+      await refetchV2();
+    } catch (error) {
+      setV2ActionError(error instanceof Error ? error.message : '分析失败，请重试');
+    } finally {
+      setIsAnalyzingV2(false);
     }
   };
 
@@ -1329,6 +1363,13 @@ const ChatAnalysis: React.FC<ChatAnalysisProps> = ({
                             </div>
                             )}
                          </NotionCard>
+
+                         <CustomerV2StateCard
+                           analysis={v2Analysis}
+                           loading={v2Loading || isAnalyzingV2}
+                           error={v2ActionError || v2LoadError}
+                           onAnalyze={handleAnalyzeV2}
+                         />
 
                         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                             {/* Individual Intent Radar */}

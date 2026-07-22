@@ -3,14 +3,16 @@
  * 连接到 FastAPI 后端 (使用预计算表 - v2 API)
  */
 
+import type { V2AnalysisRunResult, V2BuyerAnalysis } from '../types/aiAnalysisV2';
+
 const API_BASE = '/api/v2';
 const BUYERS_TIMEOUT_MS = 15000;
 const DEFAULT_TIMEOUT_MS = 30000;
 
-function fetchWithTimeout(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+function fetchWithTimeout(url: string, timeoutMs = DEFAULT_TIMEOUT_MS, options: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { signal: controller.signal })
+  return fetch(url, { ...options, signal: controller.signal })
     .catch((error) => {
       if (error?.name === 'AbortError') {
         throw new APIError(408, `请求超时(${timeoutMs / 1000}s)，请稍后重试`);
@@ -46,7 +48,9 @@ export class APIError extends Error {
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new APIError(response.status, error.detail || error.message || '请求失败');
+    const detail = error.detail;
+    const message = typeof detail === 'string' ? detail : detail?.message;
+    throw new APIError(response.status, message || error.message || '请求失败');
   }
   return response.json();
 }
@@ -259,6 +263,22 @@ export const apiClient = {
       { method: 'POST' }
     );
     return handleResponse<{ buyer_nick: string; refresh_type: string; analysis_mode: string; message: string }>(response);
+  },
+
+  getAIAnalysisV2: async (buyerNick: string) => {
+    const response = await fetchWithTimeout(
+      `${API_BASE}/ai-analysis-v2/buyers/${encodeURIComponent(buyerNick)}`
+    );
+    return handleResponse<V2BuyerAnalysis>(response);
+  },
+
+  analyzeBuyerV2: async (buyerNick: string, mode: 'full' | 'incremental') => {
+    const response = await fetchWithTimeout(
+      `${API_BASE}/ai-analysis-v2/buyers/${encodeURIComponent(buyerNick)}/analyze?mode=${mode}`,
+      120000,
+      { method: 'POST' },
+    );
+    return handleResponse<V2AnalysisRunResult>(response);
   },
 
   // ========== 场外信息相关 ==========

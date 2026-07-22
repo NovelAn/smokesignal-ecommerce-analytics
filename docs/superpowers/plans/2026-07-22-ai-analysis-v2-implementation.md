@@ -656,13 +656,12 @@ git commit -m "feat(ai-v2): expose analysis and review APIs"
 - Create: `src/components/ai-analysis-v2/CustomerV2StateCard.tsx`
 - Modify: `src/api/client.ts`
 - Modify: `src/views/ChatAnalysis.tsx`
-- Modify: `src/App.tsx`
 
 **Interfaces:**
 - Consumes: Task 6 API payloads.
 - Produces: typed client methods and customer state/history UI.
 
-- [ ] **Step 1: Add exact TypeScript contracts**
+- [x] **Step 1: Add exact TypeScript contracts**
 
 ```typescript
 export type V2Sentiment = 'Positive' | 'Neutral' | 'Negative' | 'Unknown';
@@ -685,7 +684,7 @@ export interface V2BuyerAnalysis {
 }
 ```
 
-- [ ] **Step 2: Add API methods and build to expose type errors**
+- [x] **Step 2: Add API methods and build to expose type errors**
 
 ```typescript
 async getAIAnalysisV2(buyerNick: string): Promise<V2BuyerAnalysis> {
@@ -700,7 +699,7 @@ async analyzeBuyerV2(buyerNick: string, mode: 'full' | 'incremental'): Promise<V
 Run: `PATH=/Users/novel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH npm run build`
 Expected: build fails until `V2CustomerState`, `V2Event`, and the card props are fully defined.
 
-- [ ] **Step 3: Implement the customer state card**
+- [x] **Step 3: Implement the customer state card**
 
 The card must render current sentiment, attention priority, primary issue, all unresolved issues, resolution status, recommended action, and an expandable event timeline. It must show an empty state when V2 has never run and a retryable error without replacing the previous successful result.
 
@@ -745,17 +744,19 @@ export function CustomerV2StateCard({ analysis, onAnalyze, loading }: Props) {
 }
 ```
 
-- [ ] **Step 4: Verify build**
+- [x] **Step 4: Verify build**
 
 Run: `PATH=/Users/novel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH npm run build`
 Expected: Vite build passes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add src/types/aiAnalysisV2.ts src/api/client.ts src/components/ai-analysis-v2/CustomerV2StateCard.tsx src/views/ChatAnalysis.tsx src/App.tsx
+git add src/types/aiAnalysisV2.ts src/api/client.ts src/components/ai-analysis-v2/CustomerV2StateCard.tsx src/views/ChatAnalysis.tsx
 git commit -m "feat(ai-v2): show customer state and issue history"
 ```
+
+`ChatAnalysis` is already mounted by `App.tsx`; no navigation change is needed for this customer-detail card.
 
 ### Task 8: Build issue trends and the 50-case review workbench
 
