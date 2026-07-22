@@ -205,7 +205,7 @@ git commit -m "feat(ai-v2): add strict analysis contracts"
 - Consumes: Task 1 Pydantic models and `backend.database.Database`.
 - Produces: `AIAnalysisV2Repository.load_source()`, `start_run()`, `find_completed_run() -> CompletedRun | None`, `merge_existing()`, `persist_success()`, `persist_failure()`, `get_buyer_analysis()`.
 
-- [ ] **Step 1: Write failing transaction and idempotency tests**
+- [x] **Step 1: Write failing transaction and idempotency tests**
 
 ```python
 def test_failed_run_does_not_write_results_or_checkpoint():
@@ -232,12 +232,12 @@ def test_completed_fingerprint_short_circuits_duplicate_analysis():
     assert completed.payload == payload()
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `./.venv/bin/python -m pytest -q tests/database/test_ai_analysis_v2_repository.py`
 Expected: import failure for `AIAnalysisV2Repository`.
 
-- [ ] **Step 3: Create the five-table DDL**
+- [x] **Step 3: Create the five-table DDL**
 
 ```sql
 CREATE TABLE IF NOT EXISTS ai_analysis_v2_runs (
@@ -262,7 +262,7 @@ CREATE TABLE IF NOT EXISTS ai_analysis_v2_runs (
 
 In the same file create `ai_analysis_v2_events`, `ai_analysis_v2_issues`, `ai_analysis_v2_customer_state`, and `ai_analysis_v2_reviews` with every field and index enumerated in design sections 9.2-9.5. Add foreign keys only between V2 tables and use `ON DELETE RESTRICT`. Before running the DDL test, mechanically compare all five `CREATE TABLE` column lists against those design sections; a missing column fails this step.
 
-- [ ] **Step 4: Implement the SQL loader and transaction boundary**
+- [x] **Step 4: Implement the SQL loader and transaction boundary**
 
 ```python
 class AIAnalysisV2Repository:
@@ -287,13 +287,13 @@ class AIAnalysisV2Repository:
                 raise
 ```
 
-- [ ] **Step 5: Verify GREEN and DDL contract**
+- [x] **Step 5: Verify GREEN and DDL contract**
 
 Run: `./.venv/bin/python -m pytest -q tests/database/test_ai_analysis_v2_repository.py`
 Run: `rg -n "CREATE TABLE IF NOT EXISTS ai_analysis_v2_" backend/database/sql/ai_analysis_v2/create_tables.sql`
 Expected: repository tests pass and exactly five CREATE TABLE matches appear.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/ai/v2/repository.py backend/database/sql/ai_analysis_v2 tests/database/test_ai_analysis_v2_repository.py

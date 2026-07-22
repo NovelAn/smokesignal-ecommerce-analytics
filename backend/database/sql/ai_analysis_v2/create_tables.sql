@@ -1,0 +1,103 @@
+CREATE TABLE IF NOT EXISTS ai_analysis_v2_runs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    buyer_nick VARCHAR(255) NOT NULL,
+    analysis_mode ENUM('full','incremental') NOT NULL,
+    status ENUM('running','completed','failed') NOT NULL DEFAULT 'running',
+    provider VARCHAR(32) NULL,
+    model VARCHAR(64) NULL,
+    prompt_version VARCHAR(32) NOT NULL,
+    source_fingerprint CHAR(64) NOT NULL,
+    completed_fingerprint CHAR(64) NULL,
+    source_from_msg_time DATETIME NULL,
+    source_to_msg_time DATETIME NULL,
+    source_message_count INT NOT NULL,
+    result_payload JSON NULL,
+    failure_code VARCHAR(64) NULL,
+    failure_message VARCHAR(500) NULL,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME NULL,
+    UNIQUE KEY uq_v2_completed (buyer_nick, completed_fingerprint, prompt_version),
+    KEY idx_v2_runs_buyer_time (buyer_nick, started_at),
+    KEY idx_v2_runs_status_time (status, started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ai_analysis_v2_events (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    buyer_nick VARCHAR(255) NOT NULL,
+    created_run_id BIGINT NOT NULL,
+    last_run_id BIGINT NOT NULL,
+    event_index INT NOT NULL,
+    topic_summary VARCHAR(500) NOT NULL,
+    event_started_at DATETIME NOT NULL,
+    event_ended_at DATETIME NOT NULL,
+    sentiment_label ENUM('Positive','Neutral','Negative') NOT NULL,
+    sentiment_score DECIMAL(5,4) NOT NULL,
+    sentiment_basis ENUM('positive_expression','neutral_business','authenticity_concern','explicit_complaint','abuse_or_threat','strong_negative_evaluation') NOT NULL,
+    peak_emotion ENUM('calm','concern','anxiety','dissatisfaction','anger','gratitude') NOT NULL,
+    service_friction ENUM('none','low','medium','high') NOT NULL,
+    resolution_status ENUM('unresolved','explained_pending_acceptance','resolved','unknown') NOT NULL,
+    customer_accepted BOOLEAN NULL,
+    suggested_action VARCHAR(500) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_v2_event_run_index (created_run_id, event_index),
+    KEY idx_v2_events_buyer_time (buyer_nick, event_ended_at),
+    KEY idx_v2_events_sentiment_time (sentiment_label, event_ended_at),
+    CONSTRAINT fk_v2_events_created_run FOREIGN KEY (created_run_id) REFERENCES ai_analysis_v2_runs(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_v2_events_last_run FOREIGN KEY (last_run_id) REFERENCES ai_analysis_v2_runs(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ai_analysis_v2_issues (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    event_id BIGINT NOT NULL,
+    buyer_nick VARCHAR(255) NOT NULL,
+    issue_category VARCHAR(32) NOT NULL,
+    issue_code VARCHAR(64) NOT NULL,
+    issue_detail VARCHAR(500) NOT NULL,
+    severity ENUM('low','medium','high','critical') NOT NULL,
+    owner ENUM('product','logistics','service','customer','mixed','unknown') NOT NULL,
+    status ENUM('open','explained_pending_acceptance','resolved','unknown') NOT NULL,
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+    evidence_text VARCHAR(500) NOT NULL,
+    evidence_msg_time DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_v2_issues_code_time (issue_code, created_at),
+    KEY idx_v2_issues_status_severity (status, severity),
+    KEY idx_v2_issues_buyer_time (buyer_nick, created_at),
+    CONSTRAINT fk_v2_issues_event FOREIGN KEY (event_id) REFERENCES ai_analysis_v2_events(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ai_analysis_v2_customer_state (
+    buyer_nick VARCHAR(255) PRIMARY KEY,
+    current_sentiment_label ENUM('Positive','Neutral','Negative','Unknown') NOT NULL,
+    primary_issue_id BIGINT NULL,
+    primary_issue_code VARCHAR(64) NULL,
+    primary_issue_detail VARCHAR(500) NULL,
+    active_issue_count INT NOT NULL DEFAULT 0,
+    highest_severity ENUM('low','medium','high','critical') NULL,
+    attention_priority ENUM('urgent','high','medium','low') NOT NULL,
+    recommended_action VARCHAR(500) NOT NULL,
+    analyzed_through_msg_time DATETIME NULL,
+    last_event_at DATETIME NULL,
+    last_run_id BIGINT NOT NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY idx_v2_state_attention (attention_priority, updated_at),
+    KEY idx_v2_state_sentiment (current_sentiment_label, updated_at),
+    CONSTRAINT fk_v2_state_primary_issue FOREIGN KEY (primary_issue_id) REFERENCES ai_analysis_v2_issues(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_v2_state_last_run FOREIGN KEY (last_run_id) REFERENCES ai_analysis_v2_runs(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ai_analysis_v2_reviews (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    event_id BIGINT UNIQUE NOT NULL,
+    review_status ENUM('pending','approved','corrected','rejected') NOT NULL DEFAULT 'pending',
+    model_payload JSON NOT NULL,
+    gold_payload JSON NULL,
+    review_note TEXT NULL,
+    reviewed_by VARCHAR(64) NULL,
+    reviewed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_v2_reviews_status (review_status, created_at),
+    CONSTRAINT fk_v2_reviews_event FOREIGN KEY (event_id) REFERENCES ai_analysis_v2_events(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
