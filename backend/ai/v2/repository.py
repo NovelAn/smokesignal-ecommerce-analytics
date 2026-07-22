@@ -9,6 +9,7 @@ from typing import Any
 from backend.config import settings
 from backend.database import Database
 
+from .rollup import PersistedEvent, PersistedIssue
 from .schemas import AnalysisPayload, CustomerState
 
 
@@ -27,6 +28,15 @@ class BuyerAnalysis:
     issues: list[dict[str, Any]]
 
 
+@dataclass(frozen=True)
+class AnalysisSource:
+    chats: list[dict[str, Any]]
+    checkpoint: datetime | None
+    open_events: list[dict[str, Any]]
+    profile: dict[str, Any]
+    customer_state: dict[str, Any] | None
+
+
 class AIAnalysisV2Repository:
     def __init__(self, db: Database | None = None, sql_dir: Path | None = None):
         self.db = db or Database(db_name=settings.db_name_to_use or "aliyunDB")
@@ -36,6 +46,42 @@ class AIAnalysisV2Repository:
 
     def _sql(self, name: str) -> str:
         return (self.sql_dir / name).read_text(encoding="utf-8")
+
+    def load_source(self, buyer_nick: str, mode: str) -> AnalysisSource:
+        if mode not in {"full", "incremental"}:
+            raise ValueError("mode must be full or incremental")
+        state_rows = self.db.execute_query(
+            self._sql("get_source_state.sql"), (buyer_nick,)
+        )
+        customer_state = state_rows[0] if state_rows else None
+        checkpoint = self._as_datetime(
+            customer_state.get("analyzed_through_msg_time")
+            if customer_state
+            else None
+        )
+        if mode == "incremental" and checkpoint is not None:
+            chats = self.db.execute_query(
+                self._sql("get_incremental_chats.sql"),
+                (buyer_nick, checkpoint, buyer_nick, checkpoint),
+            )
+        else:
+            chats = self.db.execute_query(
+                self._sql("get_full_chats.sql"), (buyer_nick,)
+            )
+            checkpoint = None
+        open_events = self.db.execute_query(
+            self._sql("get_open_events.sql"), (buyer_nick,)
+        )
+        profile_rows = self.db.execute_query(
+            self._sql("get_buyer_profile.sql"), (buyer_nick,)
+        )
+        return AnalysisSource(
+            chats=chats,
+            checkpoint=checkpoint,
+            open_events=open_events,
+            profile=profile_rows[0] if profile_rows else {},
+            customer_state=customer_state,
+        )
 
     def start_run(
         self,
@@ -94,6 +140,8 @@ class AIAnalysisV2Repository:
         window: Any,
         payload: AnalysisPayload,
         state: CustomerState,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> None:
         del window  # fingerprint and source range are already fixed by start_run
         with self.db.get_connection() as connection:
@@ -122,7 +170,7 @@ class AIAnalysisV2Repository:
                     )
                     cursor.execute(
                         self._sql("complete_run.sql"),
-                        (payload.model_dump_json(), run_id),
+                        (provider, model, payload.model_dump_json(), run_id),
                     )
                 connection.commit()
             except Exception:
@@ -236,6 +284,75 @@ class AIAnalysisV2Repository:
             params += (issue_category,)
         return self.db.execute_query(sql, params)
 
+    def events_for_rollup(
+        self, buyer_nick: str, payload: AnalysisPayload
+    ) -> list[PersistedEvent]:
+        analysis = self.get_buyer_analysis(buyer_nick)
+        issues_by_event: dict[int, list[PersistedIssue]] = {}
+        for issue in analysis.issues:
+            event_id = int(issue["event_id"])
+            issues_by_event.setdefault(event_id, []).append(
+                PersistedIssue(
+                    issue_category=issue["issue_category"],
+                    issue_code=issue["issue_code"],
+                    issue_detail=issue["issue_detail"],
+                    severity=issue["severity"],
+                    status=issue["status"],
+                    last_seen_at=self._as_datetime(
+                        issue.get("evidence_msg_time") or issue.get("created_at")
+                    )
+                    or self._as_datetime(
+                        next(
+                            event["event_ended_at"]
+                            for event in analysis.events
+                            if int(event["id"]) == event_id
+                        )
+                    ),
+                )
+            )
+        events = [
+            PersistedEvent(
+                event_id=int(event["id"]),
+                buyer_nick=buyer_nick,
+                event_ended_at=self._as_datetime(event["event_ended_at"]),
+                sentiment_label=event["sentiment_label"],
+                service_friction=event["service_friction"],
+                suggested_action=event["suggested_action"],
+                issues=tuple(issues_by_event.get(int(event["id"]), [])),
+            )
+            for event in analysis.events
+        ]
+        for event in payload.events:
+            if event.related_event_id is not None:
+                events = [
+                    existing
+                    for existing in events
+                    if existing.event_id != event.related_event_id
+                ]
+            events.append(
+                PersistedEvent(
+                    event_id=event.related_event_id,
+                    buyer_nick=buyer_nick,
+                    event_ended_at=event.event_ended_at,
+                    sentiment_label=event.sentiment_label,
+                    service_friction=event.service_friction,
+                    suggested_action=event.suggested_action,
+                    issues=tuple(
+                        PersistedIssue(
+                            issue_category=issue.issue_category,
+                            issue_code=issue.issue_code,
+                            issue_detail=issue.issue_detail,
+                            severity=issue.severity,
+                            status=issue.status,
+                            last_seen_at=issue.evidence_msg_time
+                            or event.event_ended_at,
+                        )
+                        for issue in event.issues
+                    ),
+                )
+            )
+        return events
+
     @staticmethod
     def _decode_json(value: Any) -> Any:
         return json.loads(value) if isinstance(value, str) else value
@@ -247,3 +364,9 @@ class AIAnalysisV2Repository:
         if isinstance(value, date):
             return value
         return date.fromisoformat(value)
+
+    @staticmethod
+    def _as_datetime(value: datetime | str | None) -> datetime | None:
+        if value is None or isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(value)

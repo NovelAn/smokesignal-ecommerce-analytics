@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.ai.v2.repository import AIAnalysisV2Repository
+from backend.ai.v2.repository import AIAnalysisV2Repository, BuyerAnalysis
 from backend.ai.v2.schemas import AnalysisPayload, CustomerState
 
 
@@ -89,6 +89,7 @@ class RecordingCursor:
     def execute(self, sql, params=None):
         name = sql.splitlines()[0].removeprefix("-- name: ").strip()
         self.db.statement_names.append(name)
+        self.db.statement_params.append((name, params))
         if self.db.fail_on == name:
             raise RuntimeError("write failed")
         return 1
@@ -116,6 +117,7 @@ class RecordingDatabase:
         self.rows = rows or []
         self.fail_on = fail_on
         self.statement_names = []
+        self.statement_params = []
         self.begin_count = 0
         self.commit_count = 0
         self.rollback_count = 0
@@ -175,6 +177,24 @@ def test_success_rolls_back_every_write_on_error():
     assert db.rollback_count == 1
 
 
+def test_success_records_the_provider_that_produced_the_valid_payload():
+    db = RecordingDatabase()
+    repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
+
+    repo.persist_success(
+        7,
+        "buyer",
+        window(),
+        payload(),
+        state(),
+        provider="deepseek",
+        model="deepseek-v4-flash",
+    )
+
+    complete_params = dict(db.statement_params)["complete_run.sql"]
+    assert complete_params[:2] == ("deepseek", "deepseek-v4-flash")
+
+
 def test_completed_fingerprint_short_circuits_duplicate_analysis():
     db = RecordingDatabase(
         rows=[
@@ -216,3 +236,70 @@ def test_issue_trends_uses_bound_filters():
         "2026-07-01",
         "product",
     )
+
+
+class SourceDatabase(RecordingDatabase):
+    def __init__(self, rows_by_name):
+        super().__init__()
+        self.rows_by_name = rows_by_name
+
+    def execute_query(self, sql, params=None):
+        name = sql.splitlines()[0].removeprefix("-- name: ").strip()
+        self.statement_names.append(name)
+        return self.rows_by_name.get(name, [])
+
+
+def test_load_incremental_source_returns_checkpoint_context_and_profile():
+    checkpoint = "2026-07-20 10:00:00"
+    db = SourceDatabase(
+        {
+            "get_source_state.sql": [
+                {
+                    "analyzed_through_msg_time": checkpoint,
+                    "attention_priority": "low",
+                    "current_sentiment_label": "Neutral",
+                }
+            ],
+            "get_incremental_chats.sql": [{"content": "新增消息"}],
+            "get_open_events.sql": [{"id": 17, "topic_summary": "退货"}],
+            "get_buyer_profile.sql": [{"client_monthly_tag": "V2"}],
+        }
+    )
+    repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
+
+    source = repo.load_source("buyer", "incremental")
+
+    assert source.checkpoint.isoformat(sep=" ") == checkpoint
+    assert source.chats == [{"content": "新增消息"}]
+    assert source.open_events[0]["id"] == 17
+    assert source.profile["client_monthly_tag"] == "V2"
+    assert "get_incremental_chats.sql" in db.statement_names
+
+
+def test_continued_event_replaces_existing_event_for_rollup():
+    class ExistingRepository(AIAnalysisV2Repository):
+        def get_buyer_analysis(self, buyer_nick):
+            return BuyerAnalysis(
+                customer_state=None,
+                events=[
+                    {
+                        "id": 17,
+                        "event_ended_at": "2026-07-19T10:00:00",
+                        "sentiment_label": "Neutral",
+                        "service_friction": "none",
+                        "suggested_action": "旧动作",
+                    }
+                ],
+                issues=[],
+            )
+
+    updated = payload().model_copy(deep=True)
+    updated.events[0].event_action = "continue_event"
+    updated.events[0].related_event_id = 17
+    repo = ExistingRepository(db=RecordingDatabase(), sql_dir=SQL_DIR)
+
+    events = repo.events_for_rollup("buyer", updated)
+
+    assert len(events) == 1
+    assert events[0].event_id == 17
+    assert events[0].suggested_action == "协助退货"

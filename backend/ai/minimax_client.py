@@ -44,6 +44,20 @@ class MiniMaxClient:
         )
         self.model = settings.minimax_model
 
+    def analyze_v2(self, prompt: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你是电商客服事件与问题分析专家。只返回符合给定schema的JSON。",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        return response.choices[0].message.content or ""
+
     def analyze_buyer_persona(
         self,
         user_nick: str,

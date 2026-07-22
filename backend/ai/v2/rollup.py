@@ -34,6 +34,7 @@ class PersistedEvent:
     service_friction: str
     suggested_action: str
     issues: tuple[PersistedIssue, ...]
+    event_id: int | None = None
 
 
 def recency_factor(age_days: int) -> float:

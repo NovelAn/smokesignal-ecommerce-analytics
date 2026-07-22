@@ -389,7 +389,7 @@ git commit -m "feat(ai-v2): prepare incremental windows and prompt"
 - Consumes: Tasks 1-3 and existing OpenAI-compatible clients.
 - Produces: `AIAnalysisV2Analyzer.analyze_buyer(buyer_nick: str, mode: Literal['full','incremental']) -> AnalysisRunResult`.
 
-- [ ] **Step 1: Write failing provider-routing tests**
+- [x] **Step 1: Write failing provider-routing tests**
 
 ```python
 def test_invalid_minimax_schema_retries_once_before_deepseek():
@@ -415,12 +415,12 @@ def test_low_value_customer_does_not_use_deepseek_after_minimax_failure():
     assert deepseek.calls == 0
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_analyzer.py`
 Expected: import failure for `AIAnalysisV2Analyzer`.
 
-- [ ] **Step 3: Add raw V2 calls to existing clients**
+- [x] **Step 3: Add raw V2 calls to existing clients**
 
 ```python
 def analyze_v2(self, prompt: str) -> str:
@@ -437,7 +437,7 @@ def analyze_v2(self, prompt: str) -> str:
 
 MiniMax must not receive `max_tokens`. DeepSeek may use the existing shared maximum.
 
-- [ ] **Step 4: Implement orchestration**
+- [x] **Step 4: Implement orchestration**
 
 ```python
 class AIAnalysisV2Analyzer:
@@ -482,12 +482,18 @@ class AIAnalysisV2Analyzer:
 
 `merge_existing()` deduplicates completed payloads by `source_fingerprint` and event/issue identity. `persist_success()` owns one database transaction for one window: insert/update events and issues, upsert the rolled-up state and checkpoint, then mark that run completed. A failed later window therefore leaves the last successful checkpoint retryable and does not erase earlier successful work. Cached windows carry their original provider; an all-cache run returns `cache` only if legacy data lacks provider metadata.
 
-- [ ] **Step 5: Verify GREEN and existing failure contract**
+- [x] **Step 5: Verify GREEN and existing failure contract**
 
-Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_analyzer.py tests/test_failed_analysis_not_cached.py`
+Run in separate pytest processes because `tests/ai/conftest.py` intentionally stubs the `backend` package:
+
+```bash
+./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_analyzer.py
+./.venv/bin/python -m pytest -q tests/test_failed_analysis_not_cached.py
+```
+
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/ai/v2/analyzer.py backend/ai/minimax_client.py backend/ai/deepseek_client.py tests/ai/test_ai_analysis_v2_analyzer.py
