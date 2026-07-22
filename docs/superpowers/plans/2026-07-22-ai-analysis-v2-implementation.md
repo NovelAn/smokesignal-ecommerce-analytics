@@ -312,7 +312,7 @@ git commit -m "feat(ai-v2): add shadow schema and repository"
 - Consumes: raw `chat_history` rows and Task 1 taxonomy.
 - Produces: `PreparedMessage`, `MessageWindow`, `prepare_windows()`, `build_analysis_prompt()`.
 
-- [ ] **Step 1: Write failing preparation tests**
+- [x] **Step 1: Write failing preparation tests**
 
 ```python
 def test_prepare_windows_masks_identifiers_and_splits_after_24_hours():
@@ -329,12 +329,12 @@ def test_incremental_window_includes_only_new_messages_plus_20_context_turns():
     assert len(windows[0].context_messages) <= 20
 ```
 
-- [ ] **Step 2: Verify preprocessing RED**
+- [x] **Step 2: Verify preprocessing RED**
 
 Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_preprocessing.py`
 Expected: import failure for `prepare_windows`.
 
-- [ ] **Step 3: Implement deterministic preprocessing**
+- [x] **Step 3: Implement deterministic preprocessing**
 
 ```python
 PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
@@ -351,7 +351,7 @@ def fingerprint(messages: Sequence[PreparedMessage], prompt_version: str) -> str
     return hashlib.sha256(f"{prompt_version}\n{source}".encode()).hexdigest()
 ```
 
-- [ ] **Step 4: Write failing prompt tests**
+- [x] **Step 4: Write failing prompt tests**
 
 ```python
 def test_prompt_requires_multiple_issues_and_controlled_codes():
@@ -363,14 +363,14 @@ def test_prompt_requires_multiple_issues_and_controlled_codes():
     assert "客服消息只提供语境" in prompt
 ```
 
-- [ ] **Step 5: Implement the prompt and verify GREEN**
+- [x] **Step 5: Implement the prompt and verify GREEN**
 
 The prompt must serialize the complete Task 1 JSON shape, list every taxonomy code, include the strict sentiment rules from `sentiment_intent_prompt.py`, explain `new_event` versus `continue_event`, and include only supplied open event IDs as legal `related_event_id` values.
 
 Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_preprocessing.py tests/ai/test_ai_analysis_v2_prompt.py`
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/ai/v2/preprocessing.py backend/ai/v2/prompt.py tests/ai/test_ai_analysis_v2_preprocessing.py tests/ai/test_ai_analysis_v2_prompt.py
