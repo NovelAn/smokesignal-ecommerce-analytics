@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -208,6 +209,41 @@ class AIAnalysisV2Repository:
             issues=self._decode_json(row.get("issues")) or [],
         )
 
+    def get_issue_trends(
+        self,
+        date_from: date | datetime | str,
+        date_to: date | datetime | str,
+        issue_category: str | None = None,
+    ) -> list[dict[str, Any]]:
+        start = self._as_date(date_from)
+        end = self._as_date(date_to)
+        if end <= start:
+            raise ValueError("date_to must be after date_from")
+        previous_start = start - (end - start)
+        sql = self._sql("get_issue_trends.sql").replace(
+            "[[OPTIONAL_CONDITION]]",
+            "AND i.issue_category = %s" if issue_category else "",
+        )
+        params: tuple[Any, ...] = (
+            start.isoformat(),
+            end.isoformat(),
+            previous_start.isoformat(),
+            start.isoformat(),
+            previous_start.isoformat(),
+            end.isoformat(),
+        )
+        if issue_category:
+            params += (issue_category,)
+        return self.db.execute_query(sql, params)
+
     @staticmethod
     def _decode_json(value: Any) -> Any:
         return json.loads(value) if isinstance(value, str) else value
+
+    @staticmethod
+    def _as_date(value: date | datetime | str) -> date:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        return date.fromisoformat(value)

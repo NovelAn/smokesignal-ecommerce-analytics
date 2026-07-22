@@ -119,12 +119,16 @@ class RecordingDatabase:
         self.begin_count = 0
         self.commit_count = 0
         self.rollback_count = 0
+        self.last_params = None
+        self.last_sql = None
 
     @contextmanager
     def get_connection(self):
         yield RecordingConnection(self)
 
     def execute_query(self, sql, params=None):
+        self.last_sql = sql
+        self.last_params = params
         self.statement_names.append(sql.splitlines()[0].removeprefix("-- name: ").strip())
         return self.rows
 
@@ -189,3 +193,26 @@ def test_completed_fingerprint_short_circuits_duplicate_analysis():
     assert completed is not None
     assert completed.run_id == 7
     assert completed.payload == payload()
+
+
+def test_issue_trends_uses_bound_filters():
+    db = RecordingDatabase(rows=[{"issue_code": "material_expectation"}])
+    repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
+
+    rows = repo.get_issue_trends(
+        date_from="2026-06-01",
+        date_to="2026-07-01",
+        issue_category="product",
+    )
+
+    assert rows[0]["issue_code"] == "material_expectation"
+    assert "i.issue_category = %s" in db.last_sql
+    assert db.last_params == (
+        "2026-06-01",
+        "2026-07-01",
+        "2026-05-02",
+        "2026-06-01",
+        "2026-05-02",
+        "2026-07-01",
+        "product",
+    )

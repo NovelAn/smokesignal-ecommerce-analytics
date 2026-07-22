@@ -508,7 +508,7 @@ git commit -m "feat(ai-v2): analyze events with retryable provider routing"
 - Consumes: persisted events/issues.
 - Produces: `issue_weight()`, `build_customer_state()`, `repository.get_issue_trends(filters)`.
 
-- [ ] **Step 1: Write failing decay tests**
+- [x] **Step 1: Write failing decay tests**
 
 ```python
 def test_new_open_medium_issue_outweighs_old_resolved_critical_issue():
@@ -526,12 +526,12 @@ def test_stale_sentiment_becomes_unknown_after_90_days():
     assert state.current_sentiment_label == "Unknown"
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_rollup.py`
 Expected: import failure for `build_customer_state`.
 
-- [ ] **Step 3: Implement exact decay and priority rules**
+- [x] **Step 3: Implement exact decay and priority rules**
 
 ```python
 SEVERITY_FACTOR = {"low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -550,14 +550,14 @@ def issue_weight(issue: PersistedIssue, now: datetime) -> float:
 
 Implement `urgent/high/medium/low` exactly as design section 8.
 
-- [ ] **Step 4: Add and verify trend SQL**
+- [x] **Step 4: Add and verify trend SQL**
 
 The query must return `issue_category`, `issue_code`, `event_count`, `affected_buyers`, `unresolved_count`, `high_severity_count`, `last_seen_at`, `current_period_count`, `previous_period_count`, and `change_percent`. It must use bound date parameters and optional `[[OPTIONAL_CONDITION]]` markers supported by the query loader.
 
 Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_rollup.py tests/database/test_ai_analysis_v2_repository.py`
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/ai/v2/rollup.py backend/ai/v2/repository.py backend/database/sql/ai_analysis_v2 tests/ai/test_ai_analysis_v2_rollup.py tests/database/test_ai_analysis_v2_repository.py
