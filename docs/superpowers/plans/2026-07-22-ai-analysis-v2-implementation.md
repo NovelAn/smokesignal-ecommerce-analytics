@@ -766,13 +766,13 @@ git commit -m "feat(ai-v2): show customer state and issue history"
 - Create: `src/components/ai-analysis-v2/ReviewWorkbench.tsx`
 - Modify: `src/api/client.ts`
 - Modify: `src/App.tsx`
-- Create: `tests/playwright/test_ai_analysis_v2.py`
+- Create: `tests/frontend/ai-analysis-v2.spec.ts`
 
 **Interfaces:**
 - Consumes: trends and reviews endpoints.
 - Produces: top-level “AI 问题洞察” navigation, trend drill-down, approve/correct/reject workflow.
 
-- [ ] **Step 1: Write the failing Playwright happy path**
+- [x] **Step 1: Write the failing Playwright happy path**
 
 ```python
 def test_review_workbench_corrects_case_and_updates_progress(page, app_url):
@@ -787,27 +787,27 @@ def test_review_workbench_corrects_case_and_updates_progress(page, app_url):
     expect(page.get_by_text(re.compile(r"已审核\s+1\s*/\s*50"))).to_be_visible()
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
-Run: `./.venv/bin/python -m pytest -q tests/playwright/test_ai_analysis_v2.py -k review_workbench`
+Run: `npx playwright test tests/frontend/ai-analysis-v2.spec.ts --project=chromium`
 Expected: navigation element “AI 问题洞察” is not found.
 
-- [ ] **Step 3: Implement trends and review UI**
+- [x] **Step 3: Implement trends and review UI**
 
 `IssueTrendsPanel` must expose 30/90/180-day controls and category, code, status, severity, and buyer-type filters. It must show issue count, affected buyers, unresolved count, high-severity count, period change, and affected-customer drill-down.
 
 `ReviewWorkbench` must preserve the approved three-column layout: queue, complete dialogue, editable analysis. Use explicit high-contrast classes (`bg-slate-100`, `bg-white`, `text-slate-900`, `text-slate-600`) rather than inherited theme variables.
 
-- [ ] **Step 4: Verify build and Playwright**
+- [x] **Step 4: Verify build and Playwright**
 
 Run: `PATH=/Users/novel/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH npm run build`
-Run: `./.venv/bin/python -m pytest -q tests/playwright/test_ai_analysis_v2.py -k 'review_workbench or issue_trends'`
+Run: `npx playwright test tests/frontend/ai-analysis-v2.spec.ts --project=chromium`
 Expected: build and tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add src/views/AIAnalysisV2View.tsx src/components/ai-analysis-v2 src/api/client.ts src/App.tsx tests/playwright/test_ai_analysis_v2.py
+git add src/views/AIAnalysisV2View.tsx src/components/ai-analysis-v2 src/api/client.ts src/App.tsx tests/frontend/ai-analysis-v2.spec.ts
 git commit -m "feat(ai-v2): add issue trends and review workbench"
 ```
 

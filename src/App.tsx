@@ -63,7 +63,8 @@ import {
   AlertTriangle,
   PieChart as PieIcon,
   BarChart as BarChartIcon,
-  Info
+  Info,
+  BrainCircuit
 } from 'lucide-react';
 import {
   KEYWORD_DATA,
@@ -81,6 +82,7 @@ import { DashboardOverview } from './views/DashboardOverview';
 import ChatAnalysis from './views/ChatAnalysis';
 import ExternalInfoConfig from './views/ExternalInfoConfig';
 import SettingsView from './views/SettingsView';
+import AIAnalysisV2View from './views/AIAnalysisV2View';
 import { NotionCard } from './components/common/NotionCard';
 import { NotionTag } from './components/common/NotionTag';
 
@@ -106,7 +108,7 @@ const formatShortDate = (dateStr: string | undefined | null): string => {
 // --- App Layout ---
 
 export default function App() {
-  type AppTab = 'overview' | 'analysis' | 'external' | 'settings';
+  type AppTab = 'overview' | 'analysis' | 'ai-insights' | 'external' | 'settings';
 
   const [activeTab, setActiveTab] = useState<AppTab>('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -120,6 +122,7 @@ export default function App() {
   const [mountedTabs, setMountedTabs] = useState<Record<AppTab, boolean>>({
     overview: true,
     analysis: false,
+    'ai-insights': false,
     external: false,
     settings: false,
   });
@@ -182,6 +185,7 @@ export default function App() {
            <nav className="hidden md:flex items-center gap-1 bg-notion-gray_bg/50 p-1 rounded-lg border border-notion-border/50">
              <NavTab id="overview" icon={LayoutDashboard} label="Overview" />
              <NavTab id="analysis" icon={Database} label="Chat & CRM" />
+             <NavTab id="ai-insights" icon={BrainCircuit} label="AI 问题洞察" />
              <NavTab id="external" icon={Database} label="External Info" />
              <NavTab id="settings" icon={Settings} label="Configuration" />
            </nav>
@@ -210,6 +214,7 @@ export default function App() {
         <div className="md:hidden border-b border-notion-border bg-white p-4 space-y-2 absolute top-14 left-0 right-0 z-40 shadow-lg animate-in slide-in-from-top-2">
             <button onClick={() => {setActiveTab('overview'); setIsMobileMenuOpen(false)}} className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium ${activeTab === 'overview' ? 'bg-notion-hover' : ''}`}>Overview</button>
             <button onClick={() => {setActiveTab('analysis'); setIsMobileMenuOpen(false)}} className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium ${activeTab === 'analysis' ? 'bg-notion-hover' : ''}`}>Chat & CRM</button>
+            <button onClick={() => {setActiveTab('ai-insights'); setIsMobileMenuOpen(false)}} className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium ${activeTab === 'ai-insights' ? 'bg-notion-hover' : ''}`}>AI 问题洞察</button>
             <button onClick={() => {setActiveTab('external'); setIsMobileMenuOpen(false)}} className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium ${activeTab === 'external' ? 'bg-notion-hover' : ''}`}>External Info</button>
             <button onClick={() => {setActiveTab('settings'); setIsMobileMenuOpen(false)}} className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium ${activeTab === 'settings' ? 'bg-notion-hover' : ''}`}>Configuration</button>
         </div>
@@ -239,6 +244,11 @@ export default function App() {
                   navigationToken={crmNavigationToken}
                   onBackToOverview={handleBackToOverview}
                 />
+              </div>
+            )}
+            {mountedTabs['ai-insights'] && (
+              <div className={activeTab === 'ai-insights' ? 'contents' : 'hidden'}>
+                <AIAnalysisV2View />
               </div>
             )}
             {mountedTabs.external && (

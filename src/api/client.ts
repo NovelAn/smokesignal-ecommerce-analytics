@@ -3,7 +3,13 @@
  * 连接到 FastAPI 后端 (使用预计算表 - v2 API)
  */
 
-import type { V2AnalysisRunResult, V2BuyerAnalysis } from '../types/aiAnalysisV2';
+import type {
+  V2AnalysisRunResult,
+  V2AffectedBuyer,
+  V2BuyerAnalysis,
+  V2IssueTrend,
+  V2ReviewsResponse,
+} from '../types/aiAnalysisV2';
 
 const API_BASE = '/api/v2';
 const BUYERS_TIMEOUT_MS = 15000;
@@ -279,6 +285,46 @@ export const apiClient = {
       { method: 'POST' },
     );
     return handleResponse<V2AnalysisRunResult>(response);
+  },
+
+  getAIAnalysisV2Trends: async (params: {
+    days: 30 | 90 | 180;
+    issue_category?: string;
+    issue_code?: string;
+    status?: string;
+    severity?: string;
+    buyer_type?: string;
+  }) => {
+    const query = new URLSearchParams({ days: String(params.days) });
+    Object.entries(params).forEach(([key, value]) => {
+      if (key !== 'days' && value) query.set(key, String(value));
+    });
+    const response = await fetch(`${API_BASE}/ai-analysis-v2/trends?${query}`);
+    return handleResponse<{ items: V2IssueTrend[]; date_from: string; date_to: string }>(response);
+  },
+
+  getAIAnalysisV2AffectedBuyers: async (issueCode: string, days: 30 | 90 | 180) => {
+    const response = await fetch(
+      `${API_BASE}/ai-analysis-v2/trends/${encodeURIComponent(issueCode)}/buyers?days=${days}`
+    );
+    return handleResponse<{ items: V2AffectedBuyer[] }>(response);
+  },
+
+  getAIAnalysisV2Reviews: async () => {
+    const response = await fetch(`${API_BASE}/ai-analysis-v2/reviews?limit=50`);
+    return handleResponse<V2ReviewsResponse>(response);
+  },
+
+  reviewAIAnalysisV2Event: async (
+    eventId: number,
+    body: { action: 'approve' | 'correct' | 'reject'; gold_payload?: Record<string, any>; note?: string },
+  ) => {
+    const response = await fetch(`${API_BASE}/ai-analysis-v2/reviews/${eventId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return handleResponse<{ event_id: number; review_status: string }>(response);
   },
 
   // ========== 场外信息相关 ==========

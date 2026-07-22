@@ -58,3 +58,50 @@ export interface V2AnalysisRunResult extends V2BuyerAnalysis {
   provider: 'minimax' | 'deepseek' | 'cache';
   reason: string | null;
 }
+
+export interface V2IssueTrend {
+  issue_category: string;
+  issue_code: string;
+  event_count: number;
+  affected_buyers: number;
+  unresolved_count: number;
+  high_severity_count: number;
+  last_seen_at: string;
+  current_period_count: number;
+  previous_period_count: number;
+  change_percent: number;
+}
+
+export interface V2AffectedBuyer {
+  buyer_nick: string;
+  issue_detail: string;
+  severity: IssueSeverity;
+  status: IssueStatus;
+  sentiment_label: Exclude<V2Sentiment, 'Unknown'>;
+  event_ended_at: string;
+}
+
+export interface V2DialogueMessage {
+  role: 'buyer' | 'service';
+  content: string;
+  msg_time: string;
+}
+
+export interface V2ReviewItem {
+  id: number;
+  event_id: number;
+  buyer_nick: string;
+  topic_summary: string;
+  review_status: 'pending' | 'approved' | 'corrected' | 'rejected';
+  model_payload: { events: Array<Record<string, any>> };
+  gold_payload: { events: Array<Record<string, any>> } | null;
+  review_note: string | null;
+  dialogue: V2DialogueMessage[];
+}
+
+export interface V2ReviewsResponse {
+  items: V2ReviewItem[];
+  count: number;
+  limit: number;
+  offset: number;
+}

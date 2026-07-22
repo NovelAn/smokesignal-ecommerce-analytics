@@ -284,6 +284,17 @@ class AIAnalysisV2Repository:
         )
         return [row["buyer_nick"] for row in rows]
 
+    def get_affected_buyers(
+        self,
+        issue_code: str,
+        date_from: date | datetime | str,
+        date_to: date | datetime | str,
+    ) -> list[dict[str, Any]]:
+        return self.db.execute_query(
+            self._sql("get_affected_buyers.sql"),
+            (issue_code, date_from, date_to),
+        )
+
     def list_reviews(self, limit: int = 50, offset: int = 0) -> dict[str, Any]:
         rows = self.db.execute_query(
             self._sql("list_reviews.sql"), (limit, offset)
@@ -291,6 +302,7 @@ class AIAnalysisV2Repository:
         for row in rows:
             row["model_payload"] = self._decode_json(row.get("model_payload"))
             row["gold_payload"] = self._decode_json(row.get("gold_payload"))
+            row["dialogue"] = self._decode_json(row.get("dialogue")) or []
         return {"items": rows, "count": len(rows), "limit": limit, "offset": offset}
 
     def review_event(

@@ -1,0 +1,159 @@
+import { useEffect, useMemo, useState } from 'react';
+
+import { apiClient } from '../../api/client';
+import type { V2ReviewItem, V2Sentiment } from '../../types/aiAnalysisV2';
+
+
+export function ReviewWorkbench() {
+  const [items, setItems] = useState<V2ReviewItem[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [mode, setMode] = useState<'correct' | 'reject' | null>(null);
+  const [sentiment, setSentiment] = useState<V2Sentiment>('Neutral');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiClient.getAIAnalysisV2Reviews()
+      .then(result => {
+        setItems(result.items);
+        setSelectedId(result.items[0]?.event_id ?? null);
+      })
+      .catch(err => setError(err instanceof Error ? err.message : '审核队列加载失败'));
+  }, []);
+
+  const selected = useMemo(
+    () => items.find(item => item.event_id === selectedId) ?? null,
+    [items, selectedId],
+  );
+  const reviewed = items.filter(item => item.review_status !== 'pending').length;
+  const event = selected?.gold_payload?.events[0] ?? selected?.model_payload.events[0];
+
+  const updateStatus = (eventId: number, status: V2ReviewItem['review_status'], reviewNote: string, goldPayload?: V2ReviewItem['gold_payload']) => {
+    setItems(current => current.map(item => item.event_id === eventId
+      ? { ...item, review_status: status, review_note: reviewNote, gold_payload: goldPayload ?? item.gold_payload }
+      : item));
+  };
+
+  const approve = async () => {
+    if (!selected) return;
+    await apiClient.reviewAIAnalysisV2Event(selected.event_id, { action: 'approve' });
+    updateStatus(selected.event_id, 'approved', '');
+  };
+
+  const submitReview = async () => {
+    if (!selected || !note.trim() || !mode) return;
+    if (mode === 'reject') {
+      await apiClient.reviewAIAnalysisV2Event(selected.event_id, { action: 'reject', note });
+      updateStatus(selected.event_id, 'rejected', note);
+    } else {
+      const gold = structuredClone(selected.gold_payload ?? selected.model_payload);
+      const correctedEvent = gold.events[0];
+      correctedEvent.sentiment_label = sentiment;
+      correctedEvent.sentiment_score = sentiment === 'Positive' ? 0.8 : sentiment === 'Negative' ? 0.2 : 0.5;
+      correctedEvent.sentiment_basis = sentiment === 'Positive'
+        ? 'positive_expression'
+        : sentiment === 'Negative'
+          ? 'explicit_complaint'
+          : 'authenticity_concern';
+      await apiClient.reviewAIAnalysisV2Event(selected.event_id, {
+        action: 'correct',
+        gold_payload: gold,
+        note,
+      });
+      updateStatus(selected.event_id, 'corrected', note, gold);
+    }
+    setMode(null);
+    setNote('');
+  };
+
+  return (
+    <section className="space-y-3 text-slate-900" aria-label="人工审核工作台">
+      <div className="flex items-center justify-between rounded border border-slate-200 bg-white px-4 py-3">
+        <div>
+          <h2 className="text-sm font-semibold">50 例人工审核</h2>
+          <p className="text-xs text-slate-600">逐例确认情感边界、具体问题和处理结果。</p>
+        </div>
+        <strong className="text-sm">已审核 {reviewed} / 50</strong>
+      </div>
+      {error && <p role="alert" className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">{error}</p>}
+
+      <div className="grid min-h-[560px] grid-cols-1 overflow-hidden rounded border border-slate-300 bg-slate-100 lg:grid-cols-[280px_minmax(0,1fr)_minmax(360px,1fr)]">
+        <aside className="border-b border-slate-300 bg-slate-100 p-3 lg:border-b-0 lg:border-r" aria-label="审核队列">
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-600">审核队列</p>
+          <div className="space-y-2">
+            {items.map(item => (
+              <button
+                key={item.event_id}
+                type="button"
+                onClick={() => { setSelectedId(item.event_id); setMode(null); setNote(''); }}
+                className={`w-full rounded border p-3 text-left focus:outline-none focus:ring-2 focus:ring-orange-500 ${selectedId === item.event_id ? 'border-orange-400 bg-white' : 'border-slate-200 bg-slate-50 hover:bg-white'}`}
+              >
+                <strong className="block text-sm text-slate-900">{item.buyer_nick}</strong>
+                <span className="mt-1 block text-xs text-slate-600">{item.topic_summary}</span>
+                <span className="mt-2 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">{item.review_status}</span>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <article className="border-b border-slate-300 bg-white p-4 lg:border-b-0 lg:border-r" aria-label="完整对话">
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-slate-600">完整对话</p>
+          {selected ? (
+            <div className="space-y-3">
+              {selected.dialogue.map((message, index) => (
+                <div key={`${message.msg_time}-${index}`} className={`max-w-[88%] rounded border p-3 ${message.role === 'buyer' ? 'border-orange-200 bg-orange-50 text-slate-900' : 'ml-auto border-slate-200 bg-slate-100 text-slate-900'}`}>
+                  <div className="flex justify-between gap-3 text-[10px] font-semibold text-slate-600">
+                    <span>{message.role === 'buyer' ? '买家' : '客服'}</span>
+                    <time>{message.msg_time}</time>
+                  </div>
+                  <p className="mt-1 text-sm leading-relaxed">{message.content}</p>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-sm text-slate-600">审核队列为空。</p>}
+        </article>
+
+        <article className="bg-white p-4" aria-label="分析结果">
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-slate-600">分析结果</p>
+          {selected && event ? (
+            <div className="space-y-4">
+              <div className="rounded border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs text-slate-600">模型情感</p>
+                <strong className="mt-1 block text-lg text-slate-900">{event.sentiment_label}</strong>
+                <p className="mt-2 text-sm text-slate-700">{event.topic_summary}</p>
+                <p className="mt-1 text-xs text-slate-600">处理结果：{event.resolution_status}</p>
+              </div>
+
+              {!mode ? (
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={approve} className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500">结果正确</button>
+                  <button type="button" onClick={() => { setMode('correct'); setSentiment(event.sentiment_label); }} className="rounded border border-orange-300 bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-900 hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500">修改结果</button>
+                  <button type="button" onClick={() => setMode('reject')} className="rounded border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-900 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500">驳回结果</button>
+                </div>
+              ) : (
+                <div className="space-y-3 rounded border border-slate-300 bg-slate-50 p-3">
+                  {mode === 'correct' && (
+                    <label className="block text-xs font-semibold text-slate-800">最终情感
+                      <select value={sentiment} onChange={e => setSentiment(e.target.value as V2Sentiment)} className="mt-1 block w-full rounded border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900">
+                        <option value="Positive">Positive</option>
+                        <option value="Neutral">Neutral</option>
+                        <option value="Negative">Negative</option>
+                      </select>
+                    </label>
+                  )}
+                  <label className="block text-xs font-semibold text-slate-800">审核备注
+                    <textarea value={note} onChange={e => setNote(e.target.value)} rows={4} className="mt-1 block w-full rounded border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900" />
+                  </label>
+                  <div className="flex gap-2">
+                    <button type="button" disabled={!note.trim()} onClick={submitReview} className="rounded bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-40">{mode === 'correct' ? '确认并加入金标准' : '确认驳回'}</button>
+                    <button type="button" onClick={() => setMode(null)} className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800">取消</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : <p className="text-sm text-slate-600">选择一个案例开始审核。</p>}
+        </article>
+      </div>
+    </section>
+  );
+}

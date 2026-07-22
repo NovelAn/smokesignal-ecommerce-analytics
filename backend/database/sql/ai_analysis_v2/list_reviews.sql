@@ -1,7 +1,16 @@
 -- name: list_reviews.sql
 SELECT r.id, r.event_id, r.review_status, r.model_payload, r.gold_payload,
        r.review_note, r.reviewed_by, r.reviewed_at,
-       e.buyer_nick, e.topic_summary, e.event_started_at, e.event_ended_at
+       e.buyer_nick, e.topic_summary, e.event_started_at, e.event_ended_at,
+       (SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(
+           'role', IF(chat.sender_nick = chat.user_nick, 'buyer', 'service'),
+           'content', chat.content,
+           'msg_time', chat.msg_time
+       )), JSON_ARRAY())
+        FROM chat_history chat
+        WHERE chat.user_nick = e.buyer_nick
+          AND chat.msg_time BETWEEN e.event_started_at AND e.event_ended_at
+       ) AS dialogue
 FROM ai_analysis_v2_reviews r
 JOIN ai_analysis_v2_events e ON e.id = r.event_id
 ORDER BY r.id

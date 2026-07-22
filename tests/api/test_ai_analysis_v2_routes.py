@@ -21,6 +21,9 @@ class FakeRepository:
             ],
         )
 
+    def get_affected_buyers(self, issue_code, date_from, date_to):
+        return [{"buyer_nick": "buyer", "issue_code": issue_code}]
+
 
 class FakeAnalyzer:
     def analyze_buyer(self, buyer_nick, mode):
@@ -92,3 +95,14 @@ def test_batch_status_and_cancel_reuse_one_manager(monkeypatch):
     assert started.json()["task_id"] == "task-1"
     assert status.json()["status"] == "running"
     assert cancelled.json()["status"] == "cancelled"
+
+
+def test_issue_trend_drills_down_to_affected_buyers(monkeypatch):
+    monkeypatch.setattr(routes, "get_v2_repository", lambda: FakeRepository())
+
+    response = client.get(
+        "/api/v2/ai-analysis-v2/trends/material_expectation/buyers?days=30"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["buyer_nick"] == "buyer"

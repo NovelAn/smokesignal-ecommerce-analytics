@@ -6,6 +6,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from functools import lru_cache
+from enum import IntEnum
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -17,6 +18,12 @@ from backend.ai.v2.repository import AIAnalysisV2Repository, BuyerAnalysis
 
 
 router = APIRouter(prefix="/api/v2/ai-analysis-v2", tags=["ai_analysis_v2"])
+
+
+class TrendDays(IntEnum):
+    DAYS_30 = 30
+    DAYS_90 = 90
+    DAYS_180 = 180
 
 
 class ReviewRequest(BaseModel):
@@ -101,7 +108,7 @@ async def get_buyer_v2(buyer_nick: str):
 
 @router.get("/trends")
 async def get_issue_trends(
-    days: Literal[30, 90, 180] = 30,
+    days: TrendDays = TrendDays.DAYS_30,
     issue_category: str | None = None,
     issue_code: str | None = None,
     status: str | None = None,
@@ -131,6 +138,22 @@ async def get_reviews(
     return await asyncio.to_thread(
         get_v2_repository().list_reviews, limit, offset
     )
+
+
+@router.get("/trends/{issue_code}/buyers")
+async def get_affected_buyers(
+    issue_code: str,
+    days: TrendDays = TrendDays.DAYS_30,
+):
+    end = date.today() + timedelta(days=1)
+    start = end - timedelta(days=days)
+    items = await asyncio.to_thread(
+        get_v2_repository().get_affected_buyers,
+        issue_code,
+        start,
+        end,
+    )
+    return {"items": items, "date_from": start, "date_to": end}
 
 
 @router.put("/reviews/{event_id}")
