@@ -76,7 +76,7 @@
 - Consumes: `pydantic.BaseModel`, existing strict sentiment labels from `backend/ai/analysis_errors.py`.
 - Produces: `AnalysisPayload`, `EventAnalysis`, `IssueAnalysis`, `CustomerState`, `ReviewDecision`, `ISSUE_TAXONOMY`, `validate_model_payload(text: str) -> AnalysisPayload`.
 
-- [ ] **Step 1: Write failing schema tests**
+- [x] **Step 1: Write failing schema tests**
 
 ```python
 def test_analysis_payload_accepts_multiple_issues():
@@ -101,12 +101,12 @@ def test_negative_requires_negative_basis():
         AnalysisPayload.model_validate(payload)
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_schemas.py`
 Expected: collection fails because `backend.ai.v2.schemas` does not exist.
 
-- [ ] **Step 3: Implement the contracts**
+- [x] **Step 3: Implement the contracts**
 
 ```python
 SentimentLabel = Literal["Positive", "Neutral", "Negative"]
@@ -172,12 +172,12 @@ class AnalysisPayload(BaseModel):
     events: list[EventAnalysis] = Field(min_length=1)
 ```
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_schemas.py`
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/ai/v2 tests/ai/test_ai_analysis_v2_schemas.py
