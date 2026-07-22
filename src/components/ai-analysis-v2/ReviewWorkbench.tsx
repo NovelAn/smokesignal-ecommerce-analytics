@@ -90,7 +90,7 @@ export function ReviewWorkbench() {
               >
                 <strong className="block text-sm text-slate-900">{item.buyer_nick}</strong>
                 <span className="mt-1 block text-xs text-slate-600">{item.topic_summary}</span>
-                <span className="mt-2 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">{item.review_status}</span>
+                <span className="mt-2 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">{item.review_stratum ?? 'baseline'} · {item.review_status}</span>
               </button>
             ))}
           </div>

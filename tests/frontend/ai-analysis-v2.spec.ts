@@ -31,6 +31,7 @@ async function mockApis(page: Page) {
           event_id: 9,
           buyer_nick: '十八子李海旭',
           topic_summary: '客户询问商品是否为正品',
+          review_stratum: 'ambiguity',
           review_status: 'pending',
           review_note: null,
           model_payload: {

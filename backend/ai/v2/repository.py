@@ -322,19 +322,27 @@ class AIAnalysisV2Repository:
             raise ValueError("invalid review action")
         if action in {"correct", "reject"} and not note.strip():
             raise ValueError("correction and rejection require a note")
+        model_json = self._review_model_payload(event_id)
         if action == "correct":
             validated = AnalysisPayload.model_validate(gold_payload)
             if len(validated.events) != 1:
                 raise ValueError("event correction requires exactly one event")
             return self._persist_correction(
-                event_id, validated, note, reviewed_by
+                event_id, validated, note, reviewed_by, model_json
             )
         else:
             gold_json = None
         status = statuses[action]
         self.db.execute_update(
             self._sql("review_event.sql"),
-            (status, gold_json, note or None, reviewed_by, event_id),
+            (
+                event_id,
+                status,
+                model_json,
+                gold_json,
+                note or None,
+                reviewed_by,
+            ),
         )
         return {"event_id": event_id, "review_status": status}
 
@@ -344,6 +352,7 @@ class AIAnalysisV2Repository:
         payload: AnalysisPayload,
         note: str,
         reviewed_by: str,
+        model_json: str,
     ) -> dict[str, Any]:
         with self.db.get_connection() as connection:
             try:
@@ -423,11 +432,12 @@ class AIAnalysisV2Repository:
                     cursor.execute(
                         self._sql("review_event.sql"),
                         (
+                            event_id,
                             "corrected",
+                            model_json,
                             payload.model_dump_json(),
                             note,
                             reviewed_by,
-                            event_id,
                         ),
                     )
                 connection.commit()
@@ -435,6 +445,15 @@ class AIAnalysisV2Repository:
                 connection.rollback()
                 raise
         return {"event_id": event_id, "review_status": "corrected"}
+
+    def _review_model_payload(self, event_id: int) -> str:
+        rows = self.db.execute_query(
+            self._sql("get_review_model_payload.sql"), (event_id,)
+        )
+        if not rows or not rows[0].get("model_payload"):
+            raise ValueError("review event not found")
+        raw = self._decode_json(rows[0]["model_payload"])
+        return AnalysisPayload.model_validate(raw).model_dump_json()
 
     def events_for_rollup(
         self, buyer_nick: str, payload: AnalysisPayload

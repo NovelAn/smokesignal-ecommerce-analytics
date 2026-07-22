@@ -140,7 +140,9 @@ class RecordingDatabase:
         return self.rows
 
     def execute_update(self, sql, params=None):
-        self.statement_names.append(sql.splitlines()[0].removeprefix("-- name: ").strip())
+        name = sql.splitlines()[0].removeprefix("-- name: ").strip()
+        self.statement_names.append(name)
+        self.statement_params.append((name, params))
         return 1
 
 
@@ -344,18 +346,31 @@ def test_batch_candidates_return_only_buyer_names():
 
 
 def test_review_decision_is_written_without_touching_v1_cache():
-    db = RecordingDatabase()
+    db = RecordingDatabase(rows=[{"model_payload": payload().model_dump_json()}])
     repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
 
     result = repo.review_event(9, "approve", None, "")
 
     assert result == {"event_id": 9, "review_status": "approved"}
-    assert db.statement_names == ["review_event.sql"]
+    assert db.statement_names == ["get_review_model_payload.sql", "review_event.sql"]
+
+
+def test_review_snapshot_contains_only_the_selected_event():
+    selected = payload().model_dump(mode="json")
+    db = RecordingDatabase(rows=[{"model_payload": json.dumps(selected)}])
+    repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
+
+    repo.review_event(9, "approve", None, "")
+
+    assert db.last_params == (9,)
+    review_params = dict(db.statement_params)["review_event.sql"]
+    assert json.loads(review_params[2]) == selected
 
 
 def test_review_correction_updates_gold_event_and_state_in_one_transaction():
     corrected = payload().model_dump(mode="json")
     db = RecordingDatabase(
+        rows=[{"model_payload": json.dumps(corrected)}],
         fetchone_by_name={
             "get_review_event.sql": {"id": 9, "buyer_nick": "buyer", "last_run_id": 7},
             "get_buyer_analysis.sql": {

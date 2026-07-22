@@ -92,6 +92,7 @@ export interface V2ReviewItem {
   event_id: number;
   buyer_nick: string;
   topic_summary: string;
+  review_stratum: 'negative' | 'ambiguity' | 'product_after_sales' | 'operations_friction' | 'baseline';
   review_status: 'pending' | 'approved' | 'corrected' | 'rejected';
   model_payload: { events: Array<Record<string, any>> };
   gold_payload: { events: Array<Record<string, any>> } | null;

@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS ai_analysis_v2_customer_state (
 CREATE TABLE IF NOT EXISTS ai_analysis_v2_reviews (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     event_id BIGINT UNIQUE NOT NULL,
+    review_stratum ENUM('negative','ambiguity','product_after_sales','operations_friction','baseline') NOT NULL DEFAULT 'baseline',
     review_status ENUM('pending','approved','corrected','rejected') NOT NULL DEFAULT 'pending',
     model_payload JSON NOT NULL,
     gold_payload JSON NULL,

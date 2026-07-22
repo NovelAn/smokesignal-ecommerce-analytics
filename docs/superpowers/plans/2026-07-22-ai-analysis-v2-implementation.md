@@ -826,7 +826,7 @@ git commit -m "feat(ai-v2): add issue trends and review workbench"
 - Consumes: successful V2 events and reviews.
 - Produces: exactly 50 distinct buyers across five 10-case strata and acceptance metrics.
 
-- [ ] **Step 1: Write failing cohort tests**
+- [x] **Step 1: Write failing cohort tests**
 
 ```python
 def test_cohort_has_five_strata_and_50_distinct_buyers():
@@ -847,12 +847,12 @@ def test_acceptance_metrics_use_reviewed_gold_only():
     assert metrics.failed_result_count == 0
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_cohort.py`
 Expected: import failure for `select_review_cohort`.
 
-- [ ] **Step 3: Implement deterministic sampling and CLI**
+- [x] **Step 3: Implement deterministic sampling and CLI**
 
 ```python
 STRATA = ("negative", "ambiguity", "product_after_sales", "operations_friction", "baseline")
@@ -875,11 +875,11 @@ def select_review_cohort(rows: Sequence[Candidate], per_stratum: int = 10) -> li
 
 The preparation script defaults to `--dry-run`. `--write` inserts pending review rows only after the V2 schema exists. It must never alter V1 cache rows.
 
-- [ ] **Step 4: Implement acceptance metrics and report generation**
+- [x] **Step 4: Implement acceptance metrics and report generation**
 
 The evaluator must compute reviewed count, Negative precision/recall, issue-presence agreement, issue-code agreement, resolution-status agreement, failed-result count, and duplicate-event count. It exits non-zero if any design threshold fails and writes the exact numerator/denominator for each metric.
 
-- [ ] **Step 5: Verify unit tests**
+- [x] **Step 5: Verify unit tests**
 
 Run: `./.venv/bin/python -m pytest -q tests/ai/test_ai_analysis_v2_cohort.py`
 Expected: all tests pass.
