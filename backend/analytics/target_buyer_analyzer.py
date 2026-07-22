@@ -28,6 +28,7 @@ class TargetBuyerAnalyzer:
         db_name = settings.db_name_to_use if settings.db_name_to_use else 'aliyunDB'
         self.db = Database(db_name=db_name)
         self.queries = TargetBuyerQueries(self.db)
+        self.use_ai_v2_priority = settings.ai_analysis_v2_priority_enabled
 
     def get_all_buyers(
         self,
@@ -395,7 +396,8 @@ class TargetBuyerAnalyzer:
             has_chat=has_chat,
             use_default_filter=use_default_filter,
             limit=limit,
-            offset=offset
+            offset=offset,
+            use_ai_v2=self.use_ai_v2_priority,
         )
 
     def get_priority_customers_count(
@@ -413,7 +415,8 @@ class TargetBuyerAnalyzer:
             follow_priority=follow_priority,
             sentiment_label=sentiment_label,
             has_chat=has_chat,
-            use_default_filter=use_default_filter
+            use_default_filter=use_default_filter,
+            use_ai_v2=self.use_ai_v2_priority,
         )
 
     # === History (PR3a + PR3b) ===

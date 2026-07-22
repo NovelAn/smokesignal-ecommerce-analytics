@@ -895,7 +895,7 @@ Run after non-production DDL is verified and production migration is explicitly 
 
 Expected: the first command reports five strata with 10 distinct buyers each. The evaluator remains red until all 50 cases have an `approved`, `corrected`, or `rejected` review decision; after review, all section 14.2 thresholds pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/ai/v2/cohort.py backend/database/sql/ai_analysis_v2 scripts/prepare_ai_v2_review_cohort.py scripts/evaluate_ai_v2_gold.py tests/ai/test_ai_analysis_v2_cohort.py docs/testing/ai-analysis-v2-acceptance-report.md
@@ -919,7 +919,7 @@ git commit -m "test(ai-v2): add 50-case gold review gate"
 - Consumes: passing Task 9 acceptance report.
 - Produces: V2-first/V1-fallback Priority List, deployment and rollback evidence, full closed-loop verification.
 
-- [ ] **Step 1: Write failing Priority integration tests**
+- [x] **Step 1: Write failing Priority integration tests**
 
 ```python
 def test_recent_v2_negative_enters_priority_even_when_sales_priority_is_low(api_client, seeded_db):
@@ -935,12 +935,12 @@ def test_neutral_customer_issue_contributes_to_trends_but_not_negative_priority(
     assert "buyer" not in {row["buyer_nick"] for row in priority["customers"]}
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `./.venv/bin/python -m pytest -q tests/integration/test_ai_analysis_v2_priority.py`
 Expected: V2 state is ignored by existing Priority SQL.
 
-- [ ] **Step 3: Implement V2-first, V1-fallback SQL**
+- [x] **Step 3: Implement V2-first, V1-fallback SQL**
 
 The list and count SQL must remain structurally identical. Add `LEFT JOIN ai_analysis_v2_customer_state v2 ON v2.buyer_nick = tb.buyer_nick` and use:
 
@@ -955,7 +955,7 @@ v2.active_issue_count
 
 Default inclusion becomes existing sales conditions OR `v2.attention_priority IN ('urgent','high')`. Reactivation requires `v2.last_event_at > csl.updated_at`; old V1 incremental Negative logic remains fallback when no V2 state exists.
 
-- [ ] **Step 4: Add deployment and rollback commands**
+- [x] **Step 4: Add deployment and rollback commands**
 
 The deployment document must include:
 
@@ -984,7 +984,7 @@ git diff --check
 
 Expected: zero test failures, frontend build exit 0, `git diff --check` exit 0, 50 reviewed cases, and every acceptance threshold green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/database/sql/ai_analysis_v2 backend/analytics/target_buyer_analyzer.py backend/api/target_routes.py src/api/client.ts src/components/dashboard/PriorityAttentionBoard.tsx tests/integration/test_ai_analysis_v2_priority.py tests/playwright/test_ai_analysis_v2.py docs/部署运维/AI_Analysis_V2_部署与回滚.md docs/testing/ai-analysis-v2-acceptance-report.md

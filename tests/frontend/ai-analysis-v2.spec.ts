@@ -42,7 +42,12 @@ async function mockApis(page: Page) {
               sentiment_label: 'Negative', sentiment_score: 0.3,
               sentiment_basis: 'strong_negative_evaluation', peak_emotion: 'concern',
               service_friction: 'none', resolution_status: 'explained_pending_acceptance',
-              customer_accepted: true, suggested_action: '无需升级投诉', issues: [],
+              customer_accepted: true, suggested_action: '无需升级投诉', issues: [{
+                issue_category: 'trust', issue_code: 'authenticity_concern',
+                issue_detail: '客户怀疑是假货', severity: 'medium', owner: 'customer',
+                status: 'explained_pending_acceptance', is_primary: true,
+                evidence_text: '是假货吗', evidence_msg_time: '2026-07-20T10:00:00',
+              }],
             }],
           },
           dialogue: [
@@ -72,9 +77,18 @@ test('review workbench corrects a case and updates progress', async ({ page }) =
   await page.getByRole('button', { name: /十八子李海旭/ }).click();
   await page.getByRole('button', { name: '修改结果' }).click();
   await page.getByLabel('最终情感').selectOption('Neutral');
+  await page.getByLabel('情感依据').selectOption('authenticity_concern');
+  await page.getByLabel('处理结果').selectOption('resolved');
+  await page.getByLabel('问题详情 1').fill('客户询问正品保障，客服已解释清楚');
   await page.getByLabel('审核备注').fill('真伪求证，不是明确投诉');
+  const requestPromise = page.waitForRequest(request => request.url().endsWith('/ai-analysis-v2/reviews/9') && request.method() === 'PUT');
   await page.getByRole('button', { name: '确认并加入金标准' }).click();
+  const request = await requestPromise;
+  const corrected = request.postDataJSON().gold_payload.events[0];
 
+  expect(corrected.resolution_status).toBe('resolved');
+  expect(corrected.sentiment_basis).toBe('authenticity_concern');
+  expect(corrected.issues[0].issue_detail).toBe('客户询问正品保障，客服已解释清楚');
   await expect(page.getByText(/已审核\s*1\s*\/\s*50/)).toBeVisible();
 });
 

@@ -60,6 +60,17 @@ class TargetBuyerQueries:
 
         return '\n'.join(lines)
 
+    def _load_priority_sql(self, filename: str, use_ai_v2: bool) -> str:
+        if not use_ai_v2:
+            return self._load_sql(filename)
+        sql_path = self.sql_dir.parent / "ai_analysis_v2" / filename
+        lines = [
+            line
+            for line in sql_path.read_text(encoding="utf-8").split("\n")
+            if not line.strip().startswith("--")
+        ]
+        return "\n".join(lines)
+
     @staticmethod
     def _remove_default_priority_filter(sql: str) -> str:
         """移除 priority SQL 中跨多行的默认客服重评估条件。"""
@@ -465,7 +476,8 @@ class TargetBuyerQueries:
         has_chat: Optional[str] = None,
         use_default_filter: bool = True,
         limit: int = 20,
-        offset: int = 0
+        offset: int = 0,
+        use_ai_v2: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         获取优先关注客户列表(带AI画像)
@@ -484,7 +496,12 @@ class TargetBuyerQueries:
             优先关注客户列表(包含AI画像)
         """
         import re
-        sql = self._load_sql('get_priority_customers.sql')
+        sql = self._load_priority_sql('get_priority_customers.sql', use_ai_v2)
+        sentiment_expression = (
+            "COALESCE(v2.current_sentiment_label, ai.sentiment_label, tb.sentiment_label)"
+            if use_ai_v2
+            else "COALESCE(ai.sentiment_label, tb.sentiment_label)"
+        )
 
         # 构建动态WHERE子句
         conditions_to_remove = []
@@ -519,7 +536,9 @@ class TargetBuyerQueries:
 
         # 情感标签筛选
         if not sentiment_label:
-            conditions_to_remove.append('AND COALESCE(ai.sentiment_label, tb.sentiment_label) IN %(sentiment_label)s')
+            conditions_to_remove.append(
+                f'AND {sentiment_expression} IN %(sentiment_label)s'
+            )
         else:
             if isinstance(sentiment_label, (list, tuple)):
                 params['sentiment_label'] = tuple(sentiment_label)
@@ -561,7 +580,8 @@ class TargetBuyerQueries:
         follow_priority: Optional[Any] = None,
         sentiment_label: Optional[Any] = None,
         has_chat: Optional[str] = None,
-        use_default_filter: bool = True
+        use_default_filter: bool = True,
+        use_ai_v2: bool = False,
     ) -> int:
         """
         获取优先关注客户总数(用于分页)
@@ -573,7 +593,14 @@ class TargetBuyerQueries:
             客户总数
         """
         import re
-        sql = self._load_sql('get_priority_customers_count.sql')
+        sql = self._load_priority_sql(
+            'get_priority_customers_count.sql', use_ai_v2
+        )
+        sentiment_expression = (
+            "COALESCE(v2.current_sentiment_label, ai.sentiment_label, tb.sentiment_label)"
+            if use_ai_v2
+            else "COALESCE(ai.sentiment_label, tb.sentiment_label)"
+        )
 
         # 构建动态WHERE子句 (与 get_priority_customers 相同的逻辑)
         conditions_to_remove = []
@@ -604,7 +631,9 @@ class TargetBuyerQueries:
                 params['follow_priority'] = (follow_priority,)
 
         if not sentiment_label:
-            conditions_to_remove.append('AND COALESCE(ai.sentiment_label, tb.sentiment_label) IN %(sentiment_label)s')
+            conditions_to_remove.append(
+                f'AND {sentiment_expression} IN %(sentiment_label)s'
+            )
         else:
             if isinstance(sentiment_label, (list, tuple)):
                 params['sentiment_label'] = tuple(sentiment_label)

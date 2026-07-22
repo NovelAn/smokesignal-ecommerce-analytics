@@ -724,7 +724,8 @@ async def get_priority_customers(
             "customers": customers,
             "total": total,
             "limit": limit,
-            "offset": offset
+            "offset": offset,
+            "analysis_version": "v2" if analyzer.use_ai_v2_priority else "v1",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

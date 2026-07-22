@@ -280,6 +280,10 @@ function getPriorityColor(priority: string): 'red' | 'orange' | 'yellow' | 'gree
     '高': 'orange',
     '中': 'yellow',
     '低': 'gray',
+    urgent: 'red',
+    high: 'orange',
+    medium: 'yellow',
+    low: 'gray',
   };
   return colorMap[priority] || 'gray';
 }
@@ -766,7 +770,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
       icon={AlertTriangle}
       title={activeTab === 'priority' ? '需优先跟进的客户' : '流失预警'}
       subtitle={activeTab === 'priority'
-        ? `${response?.total || 0} 位客户 | 默认: 紧急/高优先级 或 负面情感`
+        ? `${response?.total || 0} 位客户 | ${response?.analysis_version === 'v2' ? 'AI V2：情感 + 具体问题优先级' : 'AI V1：紧急/高优先级 或负面情感'}`
         : (() => {
             const floor = churnWindowDays === 60 ? '1万' : churnWindowDays === 90 ? '1.5万' : '2万';
             return `segment/churn 退化、情感转负，或购买力下降 ≥ 50% 且 ${churnWindowDays} 天前 l6m ≥ ${floor}`;
@@ -923,7 +927,7 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                 <th className="px-3 py-1 font-medium text-notion-muted whitespace-nowrap">客户</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">优先级</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">情感</th>
-                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">意图</th>
+                <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">意图 / 主要问题</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">RFM</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap">画像</th>
                 <th className="px-2 py-1 font-medium text-notion-muted whitespace-nowrap text-right">L6M</th>
@@ -1020,8 +1024,8 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
                   {/* 优先级 */}
                   <td className="px-2 py-1">
                     <NotionTag
-                      text={customer.follow_priority || 'N/A'}
-                      color={getPriorityColor(customer.follow_priority || '')}
+                      text={customer.attention_priority || customer.follow_priority || 'N/A'}
+                      color={getPriorityColor(customer.attention_priority || customer.follow_priority || '')}
                       size="xs"
                     />
                   </td>
@@ -1037,8 +1041,8 @@ export const PriorityAttentionBoard: React.FC<PriorityAttentionBoardProps> = ({
 
                   {/* 意图 */}
                   <td className="px-2 py-1">
-                    <span className="text-notion-muted" title={customer.dominant_intent || ''}>
-                      {truncateText(customer.dominant_intent, 8)}
+                    <span className="text-notion-muted" title={customer.primary_issue_detail || customer.dominant_intent || ''}>
+                      {truncateText(customer.primary_issue_detail || customer.primary_issue_code || customer.dominant_intent, 12)}
                     </span>
                   </td>
 

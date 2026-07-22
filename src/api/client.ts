@@ -997,6 +997,12 @@ export interface PriorityCustomer {
   follow_priority: '紧急' | '高' | '中' | '低';
   sentiment_label: string;
   dominant_intent: string;
+  attention_priority?: 'urgent' | 'high' | 'medium' | 'low' | null;
+  primary_issue_code?: string | null;
+  primary_issue_detail?: string | null;
+  highest_severity?: 'low' | 'medium' | 'high' | 'critical' | null;
+  active_issue_count?: number | null;
+  ai_v2_recommended_action?: string | null;
   last_purchase_date: string;
   last_chat_date?: string | null;
   l6m_netsales: number;
@@ -1031,6 +1037,7 @@ export interface PriorityCustomersResponse {
   total: number;
   limit: number;
   offset: number;
+  analysis_version?: 'v1' | 'v2';
 }
 
 // ========== 关键词分析类型定义 ==========

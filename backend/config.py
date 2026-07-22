@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # AI Analysis Settings
     ai_cache_ttl_days: int = int(os.getenv("AI_CACHE_TTL_DAYS", "30"))
     ai_enable_cache: bool = os.getenv("AI_ENABLE_CACHE", "true").lower() == "true"
+    ai_analysis_v2_priority_enabled: bool = (
+        os.getenv("AI_ANALYSIS_V2_PRIORITY_ENABLED", "false").lower() == "true"
+    )
 
     # Redis Configuration
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
