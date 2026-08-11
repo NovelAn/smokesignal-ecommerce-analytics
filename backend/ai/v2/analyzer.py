@@ -34,7 +34,7 @@ class AnalysisRunResult:
 
 
 class AIAnalysisV2Analyzer:
-    PROMPT_VERSION = "ai-analysis-v2.0"
+    PROMPT_VERSION = "ai-analysis-v2.5"
 
     def __init__(
         self,

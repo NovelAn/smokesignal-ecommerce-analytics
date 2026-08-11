@@ -34,27 +34,35 @@ npm run preview
 ### Backend Development
 
 ```bash
-# Start backend server (http://localhost:8000)
-./scripts/start-backend.sh  # Linux/Mac
-scripts\start-backend.bat   # Windows
+# Canonical Linux/Mac entrypoint. It locates the main checkout's .venv and backend/.env.
+./scripts/start-backend.sh
 
-# Or directly with Python
-python -m backend.main
+# If port 8000 is occupied
+API_PORT=8001 ./scripts/start-backend.sh
 
-# Run with uvicorn
-python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+# Point the frontend proxy at the same alternate port
+VITE_API_PROXY_TARGET=http://localhost:8001 npm run dev
+
+# Windows
+scripts\start-backend.bat
 ```
+
+Do not use bare `python` or `python3`. This repository keeps FastAPI and Uvicorn in the main checkout's `.venv`, and worktrees reuse that environment through `scripts/start-backend.sh`.
 
 ### Testing
 
 ```bash
+# Resolve the shared virtualenv from either the main checkout or a worktree
+MAIN_ROOT="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+PYTHON="$MAIN_ROOT/.venv/bin/python"
+
 # Run all tests
-python tests/run_all_tests.py
+"$PYTHON" tests/run_all_tests.py
 
 # Run specific test categories
-python tests/api/test_api_endpoints.py
-python tests/database/test_db_connection.py
-python tests/integration/test_api_integration.py
+"$PYTHON" tests/api/test_api_endpoints.py
+"$PYTHON" tests/database/test_db_connection.py
+"$PYTHON" tests/integration/test_api_integration.py
 ```
 
 ### Database Operations

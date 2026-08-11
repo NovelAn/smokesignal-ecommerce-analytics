@@ -13,14 +13,23 @@ npm install
 npm run dev
 npm run build
 npm run preview
+
+# Canonical backend entrypoint. It locates the main checkout's .venv and backend/.env.
 ./scripts/start-backend.sh
-python -m backend.main
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
-python tests/run_all_tests.py
-python tests/api/test_api_endpoints.py
-python tests/database/test_db_connection.py
-python tests/integration/test_api_integration.py
+
+# If port 8000 is occupied, keep frontend and backend on the same alternate port.
+API_PORT=8001 ./scripts/start-backend.sh
+VITE_API_PROXY_TARGET=http://localhost:8001 npm run dev
+
+# Resolve the shared virtualenv correctly from either the main checkout or a worktree.
+MAIN_ROOT="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+"$MAIN_ROOT/.venv/bin/python" tests/run_all_tests.py
+"$MAIN_ROOT/.venv/bin/python" tests/api/test_api_endpoints.py
+"$MAIN_ROOT/.venv/bin/python" tests/database/test_db_connection.py
+"$MAIN_ROOT/.venv/bin/python" tests/integration/test_api_integration.py
 ```
+
+Do not use bare `python` or `python3` for this repository. They may resolve to the system interpreter or another project's virtualenv and fail to import FastAPI.
 
 ## Architecture Notes
 

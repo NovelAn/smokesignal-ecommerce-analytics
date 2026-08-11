@@ -202,6 +202,23 @@ def test_success_records_the_provider_that_produced_the_valid_payload():
     assert complete_params[:2] == ("deepseek", "deepseek-v4-flash")
 
 
+def test_continued_event_replaces_old_issues_before_inserting_new_ones():
+    continued = payload().model_copy(deep=True)
+    continued.events[0].event_action = "continue_event"
+    continued.events[0].related_event_id = 17
+    db = RecordingDatabase()
+    repo = AIAnalysisV2Repository(db=db, sql_dir=SQL_DIR)
+
+    repo.persist_success(7, "buyer", window(), continued, state())
+
+    start = db.statement_names.index("update_event.sql")
+    assert db.statement_names[start : start + 3] == [
+        "update_event.sql",
+        "delete_event_issues.sql",
+        "insert_issue.sql",
+    ]
+
+
 def test_completed_fingerprint_short_circuits_duplicate_analysis():
     db = RecordingDatabase(
         rows=[

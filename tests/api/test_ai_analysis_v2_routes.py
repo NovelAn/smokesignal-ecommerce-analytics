@@ -97,6 +97,33 @@ def test_batch_status_and_cancel_reuse_one_manager(monkeypatch):
     assert cancelled.json()["status"] == "cancelled"
 
 
+def test_batch_stops_instead_of_sweeping_remaining_buyers_on_infrastructure_error(
+    monkeypatch,
+):
+    class BatchRepository:
+        def get_batch_candidates(self, limit):
+            return ["buyer-a", "buyer-b", "buyer-c"][:limit]
+
+    class InfrastructureFailureAnalyzer:
+        def analyze_buyer(self, buyer_nick, mode):
+            raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(routes, "get_v2_repository", lambda: BatchRepository())
+    monkeypatch.setattr(
+        routes, "get_v2_analyzer", lambda: InfrastructureFailureAnalyzer()
+    )
+    manager = routes.V2BatchManager()
+    manager.tasks["task-1"] = routes.BatchState("task-1")
+
+    manager._run("task-1", 3)
+
+    task = manager.get("task-1")
+    assert task["status"] == "failed"
+    assert task["processed_buyers"] == 0
+    assert task["failed_buyers"] == 0
+    assert task["error"] == "database unavailable"
+
+
 def test_issue_trend_drills_down_to_affected_buyers(monkeypatch):
     monkeypatch.setattr(routes, "get_v2_repository", lambda: FakeRepository())
 

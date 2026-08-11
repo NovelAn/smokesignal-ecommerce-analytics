@@ -206,8 +206,14 @@ class V2BatchManager:
                 try:
                     get_v2_analyzer().analyze_buyer(buyer_nick, "incremental")
                     successful = True
-                except Exception:
+                except AIAnalysisUnavailableError:
                     successful = False
+                except Exception as error:
+                    with self._lock:
+                        task = self.tasks[task_id]
+                        task.status = "failed"
+                        task.error = str(error)
+                    return
                 with self._lock:
                     task = self.tasks[task_id]
                     task.processed_buyers += 1

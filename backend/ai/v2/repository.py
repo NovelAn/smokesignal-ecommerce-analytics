@@ -190,6 +190,7 @@ class AIAnalysisV2Repository:
                         buyer_nick,
                     ),
                 )
+                cursor.execute(self._sql("delete_event_issues.sql"), (event_id,))
             else:
                 cursor.execute(
                     self._sql("insert_event.sql"),

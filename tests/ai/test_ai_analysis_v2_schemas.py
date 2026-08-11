@@ -102,6 +102,14 @@ def test_model_response_parser_reuses_first_json_object_extraction():
     assert result.events[0].issues[0].issue_code == "color_appearance_mismatch"
 
 
+def test_model_response_parser_accepts_one_strict_event_without_outer_wrapper():
+    event = valid_payload()["events"][0]
+
+    result = validate_model_payload(json.dumps(event, ensure_ascii=False))
+
+    assert result.events[0].topic_summary == event["topic_summary"]
+
+
 def test_customer_state_and_review_decision_contracts():
     state = CustomerState.model_validate(
         {

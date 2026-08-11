@@ -40,7 +40,7 @@ export function ReviewWorkbench() {
     () => items.find(item => item.event_id === selectedId) ?? null,
     [items, selectedId],
   );
-  const reviewed = items.filter(item => item.review_status !== 'pending').length;
+  const reviewed = items.filter(item => ['approved', 'corrected'].includes(item.review_status)).length;
   const event = selected?.gold_payload?.events[0] ?? selected?.model_payload.events[0];
 
   const updateStatus = (eventId: number, status: V2ReviewItem['review_status'], reviewNote: string, goldPayload?: V2ReviewItem['gold_payload']) => {

@@ -98,6 +98,21 @@ def test_corrected_gold_changes_negative_precision():
     assert not metrics.passed
 
 
+def test_rejected_case_stays_incomplete_until_it_has_gold():
+    rows = review_rows()
+    rows[0] = {
+        **rows[0],
+        "review_status": "rejected",
+        "gold_payload": None,
+    }
+
+    metrics = calculate_acceptance_metrics(rows)
+
+    assert metrics.reviewed_count == 49
+    assert metrics.evaluable_count == 49
+    assert not metrics.passed
+
+
 def test_report_contains_exact_metric_fractions():
     report = render_acceptance_report(calculate_acceptance_metrics(review_rows()))
 

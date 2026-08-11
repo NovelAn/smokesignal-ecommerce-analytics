@@ -155,4 +155,7 @@ class ReviewDecision(StrictModel):
 
 def validate_model_payload(text: str) -> AnalysisPayload:
     """Extract and validate the first JSON object returned by a model."""
-    return AnalysisPayload.model_validate(parse_first_json_object(text))
+    payload = parse_first_json_object(text)
+    if "events" not in payload and "event_action" in payload:
+        payload = {"events": [payload]}
+    return AnalysisPayload.model_validate(payload)

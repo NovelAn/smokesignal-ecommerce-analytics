@@ -12,6 +12,10 @@
 
 set -euo pipefail
 
+# Preserve explicit shell overrides before backend/.env is loaded.
+REQUESTED_API_HOST="${API_HOST-}"
+REQUESTED_API_PORT="${API_PORT-}"
+
 # 1. 定位当前 worktree 根（脚本所在 scripts/ 的上一级）
 WORKTREE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -44,8 +48,9 @@ else
 fi
 
 # 5. 启动
-HOST="${API_HOST:-0.0.0.0}"
-PORT="${API_PORT:-8000}"
+HOST="${REQUESTED_API_HOST:-${API_HOST:-0.0.0.0}}"
+PORT="${REQUESTED_API_PORT:-${API_PORT:-8000}}"
+export API_HOST="$HOST" API_PORT="$PORT"
 echo "🚀 SmokeSignal Backend"
 echo "   code : $WORKTREE_ROOT"
 echo "   venv : $PYTHON ($("$PYTHON" --version 2>&1))"

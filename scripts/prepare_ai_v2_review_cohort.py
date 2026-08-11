@@ -3,8 +3,11 @@
 
 import argparse
 import json
+import sys
 from collections import Counter
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.ai.v2.cohort import Candidate, STRATA, select_review_cohort
 from backend.ai.v2.schemas import AnalysisPayload

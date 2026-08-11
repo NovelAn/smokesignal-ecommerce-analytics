@@ -55,7 +55,7 @@ A Notion-style CRM dashboard for luxury e-commerce customer service analytics. B
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+ (for frontend)
+- Node.js 20+ (for frontend)
 - Python 3.9+ (for backend)
 - MySQL 8.0+ database (with partitioning support)
 
@@ -74,8 +74,8 @@ A Notion-style CRM dashboard for luxury e-commerce customer service analytics. B
 
 3. **Configure environment**
    ```bash
-   # Create .env file with your API keys
-   cat > .env << EOF
+   # Create backend/.env in the main checkout with your API keys
+   cat > backend/.env << EOF
    # Database
    DB_CONFIG_FILE=~/database_config.json
    DB_NAME_TO_USE=aliyunDB
@@ -97,16 +97,25 @@ A Notion-style CRM dashboard for luxury e-commerce customer service analytics. B
 
 4. **Run development servers**
 
+   Backend (runs on http://localhost:8000):
+   ```bash
+   ./scripts/start-backend.sh
+   ```
+
+   If port 8000 is occupied, choose another port explicitly:
+   ```bash
+   API_PORT=8001 ./scripts/start-backend.sh
+   ```
+
    Frontend (runs on http://localhost:3000):
    ```bash
    npm run dev
+
+   # Match an alternate backend port when needed
+   VITE_API_PROXY_TARGET=http://localhost:8001 npm run dev
    ```
 
-   Backend (runs on http://localhost:8000):
-   ```bash
-   ./scripts/start-backend.sh  # Linux/Mac
-   scripts\start-backend.bat   # Windows
-   ```
+   Do not use bare `python` or `python3`; the startup script selects the repository virtualenv and loads `backend/.env` for both the main checkout and worktrees.
 
 ## Project Structure
 

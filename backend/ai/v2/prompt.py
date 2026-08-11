@@ -31,7 +31,7 @@ def build_analysis_prompt(
     schema = json.dumps(
         AnalysisPayload.model_json_schema(), ensure_ascii=False, indent=2
     )
-    open_event_json = json.dumps(list(open_events), ensure_ascii=False)
+    open_event_json = json.dumps(list(open_events), ensure_ascii=False, default=str)
 
     return f"""你是电商客服事件与问题分析专家。仅返回符合 JSON Schema 的 JSON 对象。
 
@@ -45,7 +45,11 @@ def build_analysis_prompt(
 【情感边界】
 - 情感只判断买家的表达；客服消息只提供语境、解释和处理结果。
 - 真伪求证、正常退换货、衣服太薄、发错货、实物与图片不符、解释不清和来回沟通，默认 Neutral，但仍要提取真实 issue。
-- 只有明确投诉或升级行动、辱骂威胁、对商家/商品/服务的明确强负面定性才是 Negative。
+- “我怀疑是假货”、反复坚持颜色/实物不符、要求换货，仍属于待核实的商品问题；申请商品鉴定是核实行动，不是投诉升级，默认 Neutral。
+- 情感极性与问题严重度分开判断；买家针对未解决的服务问题明确说“服了”“无语”“太失望”等可判 explicit_complaint / Negative，但 issue severity 仍可为 low 或 medium。
+- “谢谢”“好的”“辛苦了”等礼貌性感谢单独出现时仍判 Neutral；只有明确表达满意、认可或实质性赞扬时才判 Positive。
+- “找平台催促退款”“已申请平台催促”等流程性催办不是投诉，缺少指责、威胁或明确负面评价时仍判 Neutral，但要保留 refund_delay issue。
+- 只有明确向平台/监管投诉或公开曝光、辱骂威胁、明确断言商家欺诈或售假等强负面定性才是 Negative。
 - “是假货吗”是求证，不是“你们就是卖假货”。多个轻度不满不能累加升级为 Negative。
 - Negative 只能使用 explicit_complaint、abuse_or_threat、strong_negative_evaluation；真伪求证使用 authenticity_concern。
 

@@ -4,12 +4,10 @@
 import requests
 import json
 import sys
-import io
+import os
 from typing import Dict, Any
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-
-API_BASE_URL = "http://localhost:8000/api"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api")
 
 def test_api(name: str, url: str) -> bool:
     """测试一个 API 端点"""

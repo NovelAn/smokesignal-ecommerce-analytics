@@ -109,7 +109,7 @@ def calculate_acceptance_metrics(
     reviewed = [
         row
         for row in rows
-        if row.get("review_status") in {"approved", "corrected", "rejected"}
+        if row.get("review_status") in {"approved", "corrected"}
     ]
     evaluable: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for row in reviewed:
